@@ -290,6 +290,8 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field"><label>Note spacing (zoom): <span id="sZoomV"></span></label><input type="range" id="sZoom" min="0.6" max="2" step="0.1"></div>
     <div class="field inline"><label>Accept the right note in any octave</label><input type="checkbox" id="sOct"></div>
     <div class="field inline"><label>Show note names instead of fret numbers</label><input type="checkbox" id="sNames"></div>
+    <div class="field inline"><label>Show fretboard below the highway</label><input type="checkbox" id="sFretboard"></div>
+    <div class="small" style="margin-top:-6px">Turn off to hide it and give the highway the extra room.</div>
     <div class="field"><label>Guitar sound (used by Listen)</label>
       <div class="row" style="margin:0"><select id="sSound" style="flex:1"></select><button id="sPreview">▶ Test</button></div>
       <span class="small" id="sSoundStatus"></span>
@@ -1127,7 +1129,7 @@ function buildSong(def){
 
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
-const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3},store.get('settings',{}));
+const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true},store.get('settings',{}));
 function saveSettings(){store.set('settings',settings);}
 function gate(){return 0.04*Math.pow(0.65,settings.sens-1);}
 let bests=store.get('best',{});
@@ -1698,7 +1700,7 @@ function rr(x,y,w,h,r){cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r)
 function draw(now){
   const W=CW,H=CH,S=G.song,ev=S.events;cx.clearRect(0,0,W,H);
   syncFocus();const k=settings.big||1;const F=px=>Math.round(px*k)+'px';
-  const fbH=Math.max(64,Math.min(120,H*0.26));const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?72:44)*k),laneBot=H-fbH-18;const laneH=Math.max(12,(laneBot-laneTop)/6);
+  const fbH=settings.fretboard?Math.max(64,Math.min(120,H*0.26)):0;const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?72:44)*k),laneBot=H-(settings.fretboard?fbH+18:14);const laneH=Math.max(12,(laneBot-laneTop)/6);
   const hitX=Math.max(54,Math.min(W*0.2,140));const ppb=Math.max(70,Math.min(170,W/7))*settings.zoom*Math.sqrt(k);
   const Y=s=>laneTop+(5-s+0.5)*laneH;
   // beats
@@ -1777,7 +1779,7 @@ function draw(now){
   // count-in
   if(G.playing&&G.clock<0){cx.fillStyle='rgba(255,255,255,.9)';cx.font='bold 56px -apple-system,sans-serif';cx.fillText(String(Math.ceil(-G.clock)),W/2,laneTop+laneH*3);}
   if(!G.playing&&!G.finished&&G.clock<0){cx.fillStyle='rgba(255,255,255,.55)';cx.font='15px -apple-system,sans-serif';cx.fillText(G.mode==='wait'?'Wait mode: the track pauses until you play each note':'Press Play, then play the notes as they reach the green line',W/2,laneTop+laneH*3);}
-  drawFretboard(laneBot+14,fbH,W);
+  if(settings.fretboard)drawFretboard(laneBot+14,fbH,W);
 }
 function drawFretboard(y0,h,W){
   const ev=G.song.events;const i=firstPending();const tgt=i>=0?ev[i]:null;
@@ -1833,7 +1835,7 @@ function tunerUpdate(){
 
 /* ---- settings ---- */
 let settingsOpen=false;
-function syncSettingsUI(){$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+function syncSettingsUI(){$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();};
@@ -1859,6 +1861,7 @@ $('#sBig').onchange=e=>{settings.big=+e.target.value;saveSettings();};
 $('#sZoom').oninput=e=>{settings.zoom=+e.target.value;saveSettings();syncSettingsUI();};
 $('#sOct').onchange=e=>{settings.anyOctave=e.target.checked;saveSettings();};
 $('#sNames').onchange=e=>{settings.names=e.target.checked;saveSettings();};
+$('#sFretboard').onchange=e=>{settings.fretboard=e.target.checked;saveSettings();};
 $('#sMetro').onchange=e=>{settings.metronome=e.target.checked;saveSettings();};
 function meterUpdate(){const v=analyser?Math.min(1,det.rms/(gate()*4)):0;const el=$('#sMeter');el.style.width=(v*100)+'%';el.style.background=det.rms>gate()?'#5ce1a6':'#555';}
 
@@ -2372,7 +2375,7 @@ requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.26';
+const APP_VERSION='1.27';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
