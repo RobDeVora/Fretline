@@ -49,6 +49,7 @@ header h1 span{color:var(--accent)}
 .addbtn{width:100%;padding:14px;margin-bottom:10px;border-style:dashed;background:transparent;color:var(--accent);font-weight:600}
 /* player */
 #player .top{display:flex;align-items:center;gap:6px;padding:6px 10px;flex-wrap:wrap}
+#player.focus .top{display:none}
 #player .title{flex:1;min-width:90px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .seg button{border:0;border-radius:0;padding:6px 10px;background:var(--panel2)}
@@ -285,6 +286,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field"><label>Mic sensitivity: <span id="sSensV"></span></label><input type="range" id="sSens" min="1" max="10" step="1">
       <div class="meter"><i id="sMeter"></i></div><span class="small">Play a note. The bar should turn green while you play and stay low when you're quiet.</span></div>
     <div class="field"><label>Latency compensation: <span id="sLatV"></span> ms</label><input type="range" id="sLat" min="0" max="300" step="10"><span class="small">Raise this if you play on time but notes count as late.</span></div>
+    <div class="field"><label>Highway size</label><select id="sBig"><option value="1">Normal</option><option value="1.3">Large</option><option value="1.6">Extra large</option></select><div class="small">Makes notes, fret numbers, chord names and strum arrows bigger.</div></div>
     <div class="field"><label>Note spacing (zoom): <span id="sZoomV"></span></label><input type="range" id="sZoom" min="0.6" max="2" step="0.1"></div>
     <div class="field inline"><label>Accept the right note in any octave</label><input type="checkbox" id="sOct"></div>
     <div class="field inline"><label>Show note names instead of fret numbers</label><input type="checkbox" id="sNames"></div>
@@ -1125,7 +1127,7 @@ function buildSong(def){
 
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
-const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1},store.get('settings',{}));
+const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3},store.get('settings',{}));
 function saveSettings(){store.set('settings',settings);}
 function gate(){return 0.04*Math.pow(0.65,settings.sens-1);}
 let bests=store.get('best',{});
@@ -1514,7 +1516,10 @@ function updateButtons(){
   $('#btnListen').classList.toggle('on',G.listen);
   document.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.mode===G.mode));
   $('#spVal').textContent=Math.round(G.speed*100)+'%';
+  syncFocus();
 }
+// while a track plays or listens, hide the controls at the top so the highway gets the whole screen
+function syncFocus(){const on=!!(G.playing&&curScreen==='player');const pl=$('#player');if(pl.classList.contains('focus')!==on){pl.classList.toggle('focus',on);requestAnimationFrame(resizeCanvas);}}
 let wakeLock=null;
 async function keepAwake(on){try{if(on&&navigator.wakeLock&&!wakeLock){wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>wakeLock=null);}else if(!on&&wakeLock){await wakeLock.release();wakeLock=null;}}catch(e){}}
 $('#btnPlay').onclick=async()=>{
@@ -1691,8 +1696,9 @@ const SCOL=['#ff6b81','#ffa94d','#ffd43b','#69db7c','#4dabf7','#b197fc'];
 function rr(x,y,w,h,r){cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r);cx.arcTo(x+w,y+h,x,y+h,r);cx.arcTo(x,y+h,x,y,r);cx.arcTo(x,y,x+w,y,r);cx.closePath();}
 function draw(now){
   const W=CW,H=CH,S=G.song,ev=S.events;cx.clearRect(0,0,W,H);
-  const fbH=Math.max(64,Math.min(120,H*0.26));const hasSegs=G.segs&&G.segs.length;const laneTop=hasSegs?64:44,laneBot=H-fbH-18;const laneH=Math.max(12,(laneBot-laneTop)/6);
-  const hitX=Math.max(54,Math.min(W*0.2,140));const ppb=Math.max(70,Math.min(170,W/7))*settings.zoom;
+  syncFocus();const k=settings.big||1;const F=px=>Math.round(px*k)+'px';
+  const fbH=Math.max(64,Math.min(120,H*0.26));const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?72:44)*k),laneBot=H-fbH-18;const laneH=Math.max(12,(laneBot-laneTop)/6);
+  const hitX=Math.max(54,Math.min(W*0.2,140));const ppb=Math.max(70,Math.min(170,W/7))*settings.zoom*Math.sqrt(k);
   const Y=s=>laneTop+(5-s+0.5)*laneH;
   // beats
   const b0=Math.floor(G.clock-hitX/ppb)-1,b1=Math.ceil(G.clock+(W-hitX)/ppb)+1;
@@ -1704,7 +1710,7 @@ function draw(now){
   cx.fillStyle=`rgba(92,225,166,${pulse})`;cx.fillRect(hitX-2,laneTop-4,4,laneH*6+8);
   cx.fillStyle='rgba(255,255,255,.035)';cx.fillRect(hitX-laneH*0.55,laneTop,laneH*1.1,laneH*6);
   // events
-  const r=Math.max(7,Math.min(laneH*0.44,19));
+  const r=Math.max(7,Math.min(laneH*0.44,19*k));
   cx.textAlign='center';cx.textBaseline='middle';
   let lastLabel=null;
   for(let i=0;i<ev.length;i++){
@@ -1713,13 +1719,13 @@ function draw(now){
       const top=laneTop+6,bot=laneTop+laneH*6-6;
       const col=st===1?'#5ce1a6':st===2?'#4a4f5a':e.strum==='U'?'#ffa94d':e.strum==='x'?'#ff6b81':'#4dabf7';
       if(w>24){cx.fillStyle=col+'18';cx.fillRect(x,top,w-8,bot-top);}
-      cx.strokeStyle=col;cx.fillStyle=col;cx.lineWidth=6;cx.lineCap='round';
-      if(e.strum==='x'){const m=(top+bot)/2,s=Math.min(18,laneH);cx.beginPath();cx.moveTo(x-s,m-s);cx.lineTo(x+s,m+s);cx.moveTo(x+s,m-s);cx.lineTo(x-s,m+s);cx.stroke();}
-      else{const down=e.strum==='D';const y0=down?top:bot,y1=down?bot:top;const hd=Math.min(22,laneH*0.9);
+      cx.strokeStyle=col;cx.fillStyle=col;cx.lineWidth=6*k;cx.lineCap='round';
+      if(e.strum==='x'){const m=(top+bot)/2,s=Math.min(18*k,laneH);cx.beginPath();cx.moveTo(x-s,m-s);cx.lineTo(x+s,m+s);cx.moveTo(x+s,m-s);cx.lineTo(x-s,m+s);cx.stroke();}
+      else{const down=e.strum==='D';const y0=down?top:bot,y1=down?bot:top;const hd=Math.min(22*k,laneH*0.9);
         cx.beginPath();cx.moveTo(x,y0);cx.lineTo(x,y1+(down?-hd:hd));cx.stroke();
         cx.beginPath();cx.moveTo(x-hd*0.75,y1+(down?-hd:hd));cx.lineTo(x+hd*0.75,y1+(down?-hd:hd));cx.lineTo(x,y1);cx.closePath();cx.fill();
-        cx.beginPath();cx.arc(x,(top+bot)/2,Math.min(15,laneH*0.6),0,7);cx.fillStyle=st===2?'#2a2e37':'#0f1115';cx.fill();cx.lineWidth=2;cx.stroke();
-        cx.fillStyle=col;cx.font='bold 14px -apple-system,sans-serif';cx.fillText(down?'D':'U',x,(top+bot)/2+1);}
+        cx.beginPath();cx.arc(x,(top+bot)/2,Math.min(15*k,laneH*0.6),0,7);cx.fillStyle=st===2?'#2a2e37':'#0f1115';cx.fill();cx.lineWidth=2;cx.stroke();
+        cx.fillStyle=col;cx.font='bold '+F(14)+' -apple-system,sans-serif';cx.fillText(down?'D':'U',x,(top+bot)/2+1);}
       cx.lineCap='butt';
       continue;
     }
@@ -1728,7 +1734,7 @@ function draw(now){
       rr(x0,laneTop+2,ww,laneH*6-4,10);
       cx.fillStyle=st===1?'rgba(92,225,166,.28)':st===2?'rgba(120,120,130,.18)':'rgba(179,136,255,.18)';cx.fill();
       cx.lineWidth=2;cx.strokeStyle=st===1?'#5ce1a6':st===2?'#666':'#b388ff';cx.stroke();
-      if(e.shape){cx.font='bold 12px -apple-system,sans-serif';for(let s=0;s<6;s++){const f=e.shape[s];cx.fillStyle=f<0?'#666':SCOL[s];cx.fillText(f<0?'×':String(settings.names&&f>=0?pcName(OPEN[s]+f):f),x0+12,Y(s));}}
+      if(e.shape){cx.font='bold '+F(12)+' -apple-system,sans-serif';for(let s=0;s<6;s++){const f=e.shape[s];cx.fillStyle=f<0?'#666':SCOL[s];cx.fillText(f<0?'×':String(settings.names&&f>=0?pcName(OPEN[s]+f):f),x0+12*k,Y(s));}}
       continue;
     }
     for(const n of e.notes){
@@ -1743,30 +1749,30 @@ function draw(now){
   }
   // chord row: names scroll in, pin at the left while active, get pushed off by the next
   if(hasSegs){
-    const segs=G.segs;const rowY=laneTop-20;const pinX=hitX+6;
+    const segs=G.segs;const rowY=laneTop-24*k;const pinX=hitX+6;
     cx.textAlign='left';cx.textBaseline='middle';
     for(let k=0;k<segs.length;k++){
       const sg=segs[k];const x=hitX+(sg.t-G.clock)*ppb;if(x>W+10)break;
       const xe=hitX+(sg.end-G.clock)*ppb;if(xe<0)continue;
       const active=G.clock>=sg.t-1e-6&&G.clock<sg.end;
-      cx.font=(active?'bold 19px':'bold 16px')+' -apple-system,sans-serif';
+      cx.font='bold '+(active?F(24):F(19))+' -apple-system,sans-serif';
       const tw=cx.measureText(sg.name).width;
       let dx=Math.max(x+4,pinX);
       const nx=k+1<segs.length?hitX+(segs[k+1].t-G.clock)*ppb:Infinity;
       dx=Math.min(dx,nx-tw-10);
       if(dx+tw<0)continue;
       // start tick
-      if(x>=pinX-4){cx.fillStyle='rgba(179,136,255,.55)';cx.fillRect(x,rowY-11,2,laneTop-rowY+11);}
-      if(active){cx.fillStyle='rgba(179,136,255,.18)';rr(dx-6,rowY-14,tw+12,28,8);cx.fill();}
+      if(x>=pinX-4){cx.fillStyle='rgba(179,136,255,.55)';cx.fillRect(x,rowY-11*k,2,laneTop-rowY+11*k);}
+      if(active){cx.fillStyle='rgba(179,136,255,.18)';rr(dx-7,rowY-17*k,tw+14,34*k,8);cx.fill();}
       cx.fillStyle=active?'#ffffff':'#c9b3ff';cx.fillText(sg.name,dx,rowY+1);
     }
     cx.textAlign='center';
   }
   // string labels
-  cx.font='bold 12px -apple-system,sans-serif';
-  for(let s=0;s<6;s++){cx.fillStyle='rgba(15,17,21,.85)';cx.fillRect(0,Y(s)-9,18,18);cx.fillStyle=SCOL[s];cx.fillText(STRING_LABELS[s],9,Y(s)+1);}
+  cx.font='bold '+F(12)+' -apple-system,sans-serif';const lb=18*k;
+  for(let s=0;s<6;s++){cx.fillStyle='rgba(15,17,21,.85)';cx.fillRect(0,Y(s)-lb/2,lb,lb);cx.fillStyle=SCOL[s];cx.fillText(STRING_LABELS[s],lb/2,Y(s)+1);}
   // pops
-  for(const p of G.pops){const a=(now-p.t)/700;if(a>1)continue;cx.globalAlpha=1-a;cx.fillStyle=p.color;cx.font='bold 16px -apple-system,sans-serif';cx.fillText(p.text,hitX,laneTop-14-a*14);cx.globalAlpha=1;}
+  for(const p of G.pops){const a=(now-p.t)/700;if(a>1)continue;cx.globalAlpha=1-a;cx.fillStyle=p.color;cx.font='bold '+F(16)+' -apple-system,sans-serif';cx.fillText(p.text,hitX,laneTop-14-a*14);cx.globalAlpha=1;}
   // count-in
   if(G.playing&&G.clock<0){cx.fillStyle='rgba(255,255,255,.9)';cx.font='bold 56px -apple-system,sans-serif';cx.fillText(String(Math.ceil(-G.clock)),W/2,laneTop+laneH*3);}
   if(!G.playing&&!G.finished&&G.clock<0){cx.fillStyle='rgba(255,255,255,.55)';cx.font='15px -apple-system,sans-serif';cx.fillText(G.mode==='wait'?'Wait mode: the track pauses until you play each note':'Press Play, then play the notes as they reach the green line',W/2,laneTop+laneH*3);}
@@ -1826,7 +1832,7 @@ function tunerUpdate(){
 
 /* ---- settings ---- */
 let settingsOpen=false;
-function syncSettingsUI(){$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+function syncSettingsUI(){$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();};
@@ -1848,6 +1854,7 @@ $('#sPreview').onclick=async()=>{await ensureAudio();if(settings.sound!=='basic'
 $('#sClose').onclick=()=>{settingsOpen=false;$('#settings').classList.remove('show');};
 $('#sSens').oninput=e=>{settings.sens=+e.target.value;saveSettings();syncSettingsUI();};
 $('#sLat').oninput=e=>{settings.latency=+e.target.value;saveSettings();syncSettingsUI();};
+$('#sBig').onchange=e=>{settings.big=+e.target.value;saveSettings();};
 $('#sZoom').oninput=e=>{settings.zoom=+e.target.value;saveSettings();syncSettingsUI();};
 $('#sOct').onchange=e=>{settings.anyOctave=e.target.checked;saveSettings();};
 $('#sNames').onchange=e=>{settings.names=e.target.checked;saveSettings();};
@@ -2364,7 +2371,7 @@ requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.24';
+const APP_VERSION='1.25';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
