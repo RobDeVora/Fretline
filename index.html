@@ -1022,18 +1022,24 @@ function chordChart(ev,bpb,bpm){
   return {events,capo,half};
 }
 function normPattern(s){if(!s)return '';const t=String(s).toUpperCase().replace(/\s+/g,'').replace(/[·._]/g,'-').replace(/[✕X]/g,'x').replace(/[^DUx-]/gi,'');return /[DUx]/.test(t)&&t.length>=2&&t.length<=16?t:'';}
-// turn chord events into strum events following an eighth-note pattern, restarted at each chord change
+// turn chord events into strum events: the pattern runs on the bar's eighth-note grid (it does not restart at
+// every chord change), each chord change lands on the nearest eighth and always gets a strum, and strums never
+// come closer than an eighth apart
 function strumify(events,pat){
-  pat=normPattern(pat);if(!pat)return events;const out=[];
-  for(const e of events){
-    if(!e.chord){out.push(e);continue;}
-    const end=e.t+e.d;let any=false;
-    for(let k=0;;k++){const t=e.t+k*0.5;if(t>end-0.2)break;const ch=pat[k%pat.length];if(ch==='-')continue;
-      let n=k+1;while(pat[n%pat.length]==='-'&&e.t+n*0.5<end)n++;const d=Math.max(0.25,Math.min(e.t+n*0.5,end)-t);
-      out.push(strumEvent(e.chord,t,d,ch==='x'?'x':ch));any=true;}
-    if(!any)out.push(strumEvent(e.chord,e.t,e.d,'D'));
-  }
-  return out.sort((a,b)=>a.t-b.t);
+  pat=normPattern(pat);if(!pat)return events;const L=pat.length;const out=[];const other=[];
+  const chs=events.filter(e=>{if(e.chord)return true;other.push(e);return false;});
+  const slots=new Map();// eighth index -> {chord, dir}
+  chs.forEach((e,ci)=>{
+    const a=Math.round(e.t*2);const nx=chs[ci+1];const bEnd=Math.round((e.t+e.d)*2);
+    const b=Math.max(a+1,nx?Math.min(bEnd,Math.round(nx.t*2)):bEnd);
+    for(let k=a;k<b;k++){const c=pat[((k%L)+L)%L];
+      if(c==='-'&&k!==a)continue;
+      const dir=c==='-'?(k%2?'U':'D'):c;slots.set(k,{name:e.chord,dir,end:b});}
+  });
+  const ks=[...slots.keys()].sort((x,y)=>x-y);
+  ks.forEach((k,i)=>{const v=slots.get(k);const n=i+1<ks.length?Math.min(ks[i+1],v.end):v.end;
+    out.push(strumEvent(v.name,k/2,Math.max(0.25,(n-k)/2),v.dir));});
+  return out.concat(other).sort((a,b)=>a.t-b.t);
 }
 // read a pattern from repeated chord hits (eighth-note grid); null if the part only holds chords
 function detectPattern(events,bpb){
@@ -1807,16 +1813,20 @@ function drawFretboard(y0,h,W){
   }
 }
 let hudT=0;
+// keep the hint clear of the score bar: beside it when there's room, otherwise on the line below it
+function placeHint(){const h=$('#hint'),hud=$('.hud');if(!h||!hud)return;const hw=hud.offsetWidth;
+  if(CW-hw-26>=170){h.style.top='7px';h.style.right=(hw+16)+'px';}else{h.style.top=(hud.offsetTop+hud.offsetHeight+4)+'px';h.style.right='10px';}}
 function hudUpdate(now){
   if(now-hudT<80)return;hudT=now;
   const total=G.song.events.length;
   $('#hScore').textContent=G.hits+'/'+total;$('#hStreak').textContent=G.streak;
   {const left=Math.max(0,Math.ceil((G.song.length-Math.max(0,G.clock))/bps()));$('#hLeft').textContent=Math.floor(left/60)+':'+String(left%60).padStart(2,'0');}
   $('#hYou').textContent=analyser&&det.stableMidi!=null?midiToName(det.stableMidi):'–';
-  let hint='';if(G.notice&&now<G.noticeUntil){$('#hint').textContent=G.notice;return;}
+  let hint='';if(G.notice&&now<G.noticeUntil){$('#hint').textContent=G.notice;placeHint();return;}
   if(G.waiting){const i=firstPending();const e=G.song.events[i];if(e)hint=e.strum?(e.strum==='U'?'Strum up':e.strum==='x'?'Muted strum':'Strum down')+' · '+e.label:e.chord?'Strum '+e.chord:'Play '+e.notes.map(n=>midiToName(n.midi+(G.capo||0))+' (string '+(6-n.s)+', fret '+n.f+')').join(' or ');}
   else if(CW<CH&&curScreen==='player')hint='Tip: turn your phone sideways for a wider view';
   $('#hint').textContent=hint;
+  placeHint();
 }
 
 /* ---- tuner ---- */
@@ -2377,7 +2387,7 @@ requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.28';
+const APP_VERSION='1.29';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
