@@ -253,6 +253,12 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field"><label>Note spacing (zoom): <span id="sZoomV"></span></label><input type="range" id="sZoom" min="0.6" max="2" step="0.1"></div>
     <div class="field inline"><label>Accept the right note in any octave</label><input type="checkbox" id="sOct"></div>
     <div class="field inline"><label>Show note names instead of fret numbers</label><input type="checkbox" id="sNames"></div>
+    <div class="field"><label>Guitar sound (used by Listen)</label>
+      <div class="row" style="margin:0"><select id="sSound" style="flex:1"></select><button id="sPreview">▶ Test</button></div>
+      <span class="small" id="sSoundStatus"></span></div>
+    <div class="field"><label>Hit &amp; miss sounds</label>
+      <select id="sFx"><option value="off">Off</option><option value="miss">Sour sound on wrong or missed notes</option><option value="all">Also play the right note when you hit it (use headphones)</option></select>
+      <span class="small">Uses the guitar sound above. Without headphones the phone's mic can hear the app, so “play the right note” works best with headphones.</span></div>
     <div class="field inline"><label>Metronome click while playing</label><input type="checkbox" id="sMetro"></div>
     <div class="row" style="justify-content:space-between"><span class="small" id="appVer"></span><button class="primary" id="sClose">Done</button></div>
   </div>
@@ -978,7 +984,7 @@ function buildSong(def){
 
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
-const settings=Object.assign({sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1},store.get('settings',{}));
+const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1},store.get('settings',{}));
 function saveSettings(){store.set('settings',settings);}
 function gate(){return 0.04*Math.pow(0.65,settings.sens-1);}
 let bests=store.get('best',{});
@@ -1058,12 +1064,86 @@ function ksBuffer(midi){
   for(let i=0;i<len;i++){const nx=(p+1)%N;const v=ring[p];d[i]=v*(i<len-2000?1:(len-i)/2000);ring[p]=decay*0.5*(v+ring[nx]);p=nx;}
   ksCache[midi]=buf;return buf;
 }
-function pluck(midi,when,vol){const src=actx.createBufferSource();src.buffer=ksBuffer(midi);const g=actx.createGain();g.gain.value=vol;src.connect(g);g.connect(actx.destination);src.start(actx.currentTime+(when||0));}
+/* ---- sampled guitars (General MIDI soundfonts by Benjamin Gleitz, from FluidR3 / MusyngKite / FatBoy) ---- */
+const SOUNDS=[
+ ['basic','Basic (built-in, works offline)'],
+ ['FluidR3_GM/acoustic_guitar_steel','Steel-string acoustic'],
+ ['FatBoy/acoustic_guitar_steel','Steel-string acoustic (bright)'],
+ ['MusyngKite/acoustic_guitar_steel','Steel-string acoustic (hi-fi, bigger download)'],
+ ['FluidR3_GM/acoustic_guitar_nylon','Nylon-string classical'],
+ ['MusyngKite/acoustic_guitar_nylon','Nylon-string classical (hi-fi, bigger download)'],
+ ['FluidR3_GM/electric_guitar_clean','Clean electric'],
+ ['FatBoy/electric_guitar_clean','Clean electric (alternate)'],
+ ['FluidR3_GM/electric_guitar_jazz','Jazz electric'],
+ ['FluidR3_GM/electric_guitar_muted','Palm-muted electric'],
+ ['FluidR3_GM/overdriven_guitar','Overdriven electric'],
+ ['FluidR3_GM/distortion_guitar','Distortion electric']
+];
+const sampler={id:'basic',buffers:{},loading:null};
+const FLAT_NAMES=['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+function b64ToBuf(s){const bin=atob(s);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u.buffer;}
+function decodeAB(ab){return new Promise((res,rej)=>{try{const p=actx.decodeAudioData(ab,res,rej);if(p&&p.then)p.then(res,rej);}catch(e){rej(e);}});}
+async function loadSound(id,status){
+  status=status||(()=>{});
+  if(id==='basic'){sampler.id='basic';sampler.buffers={};status('');return true;}
+  if(sampler.id===id&&Object.keys(sampler.buffers).length)return true;
+  if(sampler.loading&&sampler.loading.id===id)return sampler.loading.p;
+  const p=(async()=>{
+    await ensureAudio();
+    const [font,inst]=id.split('/');
+    status('Downloading sound…');
+    window.MIDI=window.MIDI||{};MIDI.Soundfont=MIDI.Soundfont||{};delete MIDI.Soundfont[inst];
+    const file=font+'/'+inst+'-mp3.js';
+    try{await loadScript(['https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/'+file,'https://gleitz.github.io/midi-js-soundfonts/'+file]);}
+    catch(e){throw new Error('Could not download this sound. Check your internet connection.');}
+    const sf=MIDI.Soundfont[inst];if(!sf)throw new Error('This sound could not be read.');
+    status('Preparing notes…');
+    const bufs={};const jobs=[];
+    for(let m=36;m<=92;m++){
+      const oct=Math.floor(m/12)-1;const key=[FLAT_NAMES[m%12]+oct,NOTE_NAMES[m%12]+oct].find(k=>sf[k]);if(!key)continue;
+      const url=sf[key];const comma=url.indexOf(',');if(comma<0)continue;
+      jobs.push(decodeAB(b64ToBuf(url.slice(comma+1))).then(b=>{bufs[m]=b;}).catch(()=>{}));
+    }
+    await Promise.all(jobs);
+    if(!Object.keys(bufs).length)throw new Error('This sound could not be decoded on this device.');
+    sampler.id=id;sampler.buffers=bufs;delete MIDI.Soundfont[inst];status('');return true;
+  })();
+  sampler.loading={id,p};
+  try{return await p;}finally{if(sampler.loading&&sampler.loading.p===p)sampler.loading=null;}
+}
+function pluck(midi,when,vol,dur,cents,lp){
+  const det$=cents?Math.pow(2,cents/1200):1;const out=()=>{if(!lp)return actx.destination;const f=actx.createBiquadFilter();f.type='lowpass';f.frequency.value=lp;f.connect(actx.destination);return f;};
+  if(sampler.id!=='basic'){
+    let m=midi,rate=1;let b=sampler.buffers[m];
+    if(!b){for(let d=1;d<=3&&!b;d++){if(sampler.buffers[m-d]){b=sampler.buffers[m-d];rate=Math.pow(2,d/12);}else if(sampler.buffers[m+d]){b=sampler.buffers[m+d];rate=Math.pow(2,-d/12);}}}
+    if(b){const src=actx.createBufferSource();src.buffer=b;src.playbackRate.value=rate*det$;const g=actx.createGain();const t=actx.currentTime+(when||0);
+      const len=Math.max(0.25,Math.min(dur||2,b.duration));g.gain.setValueAtTime(vol*2.2,t);g.gain.setValueAtTime(vol*2.2,t+len);g.gain.linearRampToValueAtTime(0.0001,t+len+0.25);
+      src.connect(g);g.connect(out());src.start(t);src.stop(t+len+0.3);return;}
+  }
+  const src=actx.createBufferSource();src.buffer=ksBuffer(midi);src.playbackRate.value=det$;const g=actx.createGain();const t=actx.currentTime+(when||0);g.gain.setValueAtTime(vol,t);
+  if(dur&&dur<1.5){g.gain.setValueAtTime(vol,t+dur);g.gain.linearRampToValueAtTime(0.0001,t+dur+0.15);}
+  src.connect(g);g.connect(out());src.start(t);if(dur&&dur<1.5)src.stop(t+dur+0.2);}
+/* ---- hit / miss feedback sounds ---- */
+function fxHit(e,now){
+  if(settings.fx!=='all'||!actx)return;
+  const cp=G.capo||0;const sec=Math.min(1.5,e.d*60/(G.song.bpm*G.speed));
+  const ns=e.strum?(e.strum==='x'?[]:(e.snotes||[])):e.notes;const many=ns.length>=3;
+  ns.slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s).forEach((n,i)=>pluck(n.midi+cp,many?i*0.012:0,many?0.14:0.28,sec));
+  muteUntil=Math.max(muteUntil,now+60);G.lastHitAt=Math.max(G.lastHitAt,now+150);G.ignoreOnsetUntil=now+150;
+}
+function fxMiss(e,now){
+  if(settings.fx==='off'||!actx)return;
+  const cp=G.capo||0;const ns=e.strum?(e.snotes||[]):e.notes;
+  if(ns.length>=3){ns.forEach((n,i)=>pluck(n.midi+cp+(i%2?1:0),i*0.01,0.1,0.18,-35,700));}
+  else ns.slice(0,1).forEach(n=>{pluck(n.midi+cp,0,0.26,0.32,-45,1100);pluck(n.midi+cp+1,0.025,0.2,0.3,-25,1100);});
+  muteUntil=Math.max(muteUntil,now+380);
+}
 function playEvent(e){
   if(!actx)return;
-  if(e.strum){if(e.strum==='x'){click(false,performance.now());return;}const ns=(e.snotes||[]).slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.012,e.strum==='U'?0.16:0.22));return;}
-  if(e.chord||e.notes.length>=3){const ns=e.notes.slice().sort((a,b)=>a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.018,0.22));}
-  else e.notes.forEach(n=>pluck(n.midi+(G.capo||0),0,0.4));
+  const sec=G.song?e.d*60/(G.song.bpm*G.speed)+0.15:1.5;
+  if(e.strum){if(e.strum==='x'){if(sampler.id!=='basic'){(e.snotes||[]).forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.008,0.12,0.06));}else click(false,performance.now());return;}const ns=(e.snotes||[]).slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.012,e.strum==='U'?0.16:0.22,sec));return;}
+  if(e.chord||e.notes.length>=3){const ns=e.notes.slice().sort((a,b)=>a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.018,0.22,sec));}
+  else e.notes.forEach(n=>pluck(n.midi+(G.capo||0),0,0.4,sec));
 }
 function click(accent,now){
   if(!actx)return;const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=accent?1600:1100;
@@ -1174,7 +1254,7 @@ function resetRun(){
   if(!G.song)return;
   G.state=new Uint8Array(G.song.events.length);
   G.clock=-G.song.bpb;G.hits=0;G.misses=0;G.streak=0;G.best=0;G.scan=0;G.playedIdx=0;G.lastClickBeat=Math.floor(G.clock)-1;
-  G.playing=false;G.listen=false;G.finished=false;G.pops=[];G.lastHitKey=null;G.lastHitAt=-1;G.cf=0;G.cfIdx=-1;G.usedOnset=performance.now();
+  G.playing=false;G.listen=false;G.finished=false;G.pops=[];G.lastHitKey=null;G.lastHitAt=-1;G.cf=0;G.cfIdx=-1;G.usedOnset=performance.now();G.wrongOnset=performance.now();G.wrongAt=0;G.ignoreOnsetUntil=0;
   $('#results').classList.remove('show');updateButtons();
 }
 function updateButtons(){
@@ -1190,11 +1270,13 @@ $('#btnPlay').onclick=async()=>{
   if(G.playing&&!G.listen){G.playing=false;keepAwake(false);updateButtons();return;}
   if(G.listen){resetRun();}
   const ok=await enableMic();if(!ok)return;
+  if(settings.fx!=='off'&&settings.sound!=='basic'&&sampler.id!==settings.sound){showHint('Loading guitar sound…');await applySound(settings.sound,true);showHint('');}
   if(G.finished)resetRun();
   G.playing=true;keepAwake(true);updateButtons();
 };
 $('#btnListen').onclick=async()=>{
   await ensureAudio();
+  if(settings.sound!=='basic'&&sampler.id!==settings.sound){showHint('Loading guitar sound…');await applySound(settings.sound,true);showHint('');}
   if(G.listen&&G.playing){resetRun();return;}
   resetRun();G.listen=true;G.playing=true;updateButtons();
 };
@@ -1220,11 +1302,12 @@ function chordSegments(S){
 }
 function syncCapo(){const s=$('#capoSel');if(!s.options.length)s.innerHTML='<option value="0">No capo</option>'+[1,2,3,4,5,6,7,8,9].map(n=>`<option value="${n}">Capo ${n}</option>`).join('');s.value=String(G.capo||0);s.classList.toggle('on',!!G.capo);}
 $('#capoSel').onchange=e=>{G.capo=+e.target.value;const cs=store.get('capo',{});if(G.def){cs[G.def.id]=G.capo;store.set('capo',cs);}syncCapo();};
+function showHint(t){const el=$('#hint');if(el)el.textContent=t;}
 function isChordEv(e){return !!e.chord||e.notes.length>=3;}
 function evKey(e){return e.chord?'c:'+e.chord:'n:'+e.notes.map(n=>n.midi).join(',');}
 function firstPending(){for(let i=G.scan;i<G.song.events.length;i++)if(!G.state[i])return i;return -1;}
 function matchEvent(e,i,now){
-  if(e.strum){if(det.onsetAt>G.usedOnset&&now-det.onsetAt<200){G.usedOnset=det.onsetAt;return true;}return false;}
+  if(e.strum){if(det.onsetAt>G.usedOnset&&det.onsetAt>(G.ignoreOnsetUntil||0)&&now-det.onsetAt<200){G.usedOnset=det.onsetAt;return true;}return false;}
   const key=evKey(e);
   if(key===G.lastHitKey&&!(det.onsetAt>G.lastHitAt))return false;
   if(G.cfIdx!==i){G.cfIdx=i;G.cf=0;}
@@ -1256,8 +1339,13 @@ function update(dt,now){
     if(st[i]){if(i===G.scan)G.scan++;continue;}
     const e=ev[i];const ch=isChordEv(e);const wb=(e.strum?0.13:ch?0.3:0.2)*b,wa=(e.strum?0.18:ch?0.6:0.3)*b;
     if(e.t-wb>eff)break;
-    if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){st[i]=2;G.misses++;G.streak=0;addPop('Miss','#ff5d73');continue;}
+    if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){st[i]=2;G.misses++;G.streak=0;addPop('Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
+    if(settings.fx!=='off'&&!ch&&!e.strum&&det.stableMidi!=null&&det.onsetAt>(G.wrongOnset||0)&&det.onsetAt>G.lastHitAt&&now-det.onsetAt>70&&now>muteUntil){
+      const m=det.stableMidi,cp=G.capo||0;
+      if(!e.notes.some(n=>n.midi+cp===m||(settings.anyOctave&&(((n.midi+cp-m)%12)+12)%12===0))){G.wrongOnset=det.onsetAt;G.wrongAt=now;fxMiss(e,now);addPop('Wrong note','#ff5d73');break;}
+    }
     if(matchEvent(e,i,now)){
+      fxHit(e,now);
       st[i]=1;G.hits++;G.streak++;G.best=Math.max(G.best,G.streak);G.lastHitAt=now;G.lastHitKey=evKey(e);
       const early=e.t-eff;addPop(G.streak>=10&&G.streak%10===0?G.streak+' streak!':Math.abs(early)<0.12*b?'Perfect':'Good','#5ce1a6');
     }
@@ -1428,8 +1516,18 @@ function tunerUpdate(){
 
 /* ---- settings ---- */
 let settingsOpen=false;
-function syncSettingsUI(){$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sMetro').checked=settings.metronome;}
+function syncSettingsUI(){$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();};
+$('#sSound').innerHTML=SOUNDS.map(([v,n])=>`<option value="${v}">${esc(n)}</option>`).join('');
+function soundStatus(t){$('#sSoundStatus').textContent=t;}
+async function applySound(id,quiet){
+  try{await loadSound(id,soundStatus);settings.sound=id;saveSettings();soundStatus(id==='basic'?'':'Ready. This sound is saved for offline use after the first download.');return true;}
+  catch(err){const keep=settings.sound!=='basic'&&sampler.id===settings.sound;soundStatus(err.message+(keep?' Keeping your previous sound.':' Using the basic sound for now.'));if(!keep)sampler.id='basic';if(!quiet)$('#sSound').value=settings.sound==='basic'?'basic':settings.sound;return false;}
+}
+$('#sSound').onchange=async e=>{const id=e.target.value;if(await applySound(id))previewSound();};
+function previewSound(){if(!actx)return;const shape=[3,2,0,0,0,3];shape.forEach((f,s)=>pluck(OPEN[s]+f,s*0.03,0.22,1.8));[67,71,74,79].forEach((m,i)=>pluck(m,2+i*0.3,0.4,0.6));}
+$('#sFx').onchange=e=>{settings.fx=e.target.value;saveSettings();};
+$('#sPreview').onclick=async()=>{await ensureAudio();if(settings.sound!=='basic'&&sampler.id!==settings.sound)await applySound(settings.sound);previewSound();};
 $('#sClose').onclick=()=>{settingsOpen=false;$('#settings').classList.remove('show');};
 $('#sSens').oninput=e=>{settings.sens=+e.target.value;saveSettings();syncSettingsUI();};
 $('#sLat').oninput=e=>{settings.latency=+e.target.value;saveSettings();syncSettingsUI();};
@@ -1750,7 +1848,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.7';
+const APP_VERSION='1.8';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
