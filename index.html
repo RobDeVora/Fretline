@@ -255,7 +255,8 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field inline"><label>Show note names instead of fret numbers</label><input type="checkbox" id="sNames"></div>
     <div class="field"><label>Guitar sound (used by Listen)</label>
       <div class="row" style="margin:0"><select id="sSound" style="flex:1"></select><button id="sPreview">▶ Test</button></div>
-      <span class="small" id="sSoundStatus"></span></div>
+      <span class="small" id="sSoundStatus"></span>
+      <span class="small" id="sDiag" style="color:var(--warn)"></span></div>
     <div class="field"><label>Hit &amp; miss sounds</label>
       <select id="sFx"><option value="off">Off</option><option value="miss">Sour sound on wrong or missed notes</option><option value="all">Also play the right note when you hit it (use headphones)</option></select>
       <span class="small">Uses the guitar sound above. Without headphones the phone's mic can hear the app, so “play the right note” works best with headphones.</span></div>
@@ -1130,7 +1131,7 @@ async function loadSound(id,status){
   sampler.loading={id,p};
   try{return await p;}finally{if(sampler.loading&&sampler.loading.p===p)sampler.loading=null;}
 }
-let master=null;const voices={};
+let master=null;const voices={};const diag={sample:0,basic:0,missing:new Set(),where:'',sound:''};
 function masterOut(){if(!master){const c=actx.createDynamicsCompressor();c.threshold.value=-12;c.knee.value=8;c.ratio.value=8;c.attack.value=0.003;c.release.value=0.2;const g=actx.createGain();g.gain.value=0.9;c.connect(g);g.connect(actx.destination);master=c;}return master;}
 function stopVoices(){if(!actx)return;const t=actx.currentTime;for(const k in voices){const v=voices[k];try{v.g.gain.cancelScheduledValues(t);v.g.gain.setValueAtTime(v.g.gain.value,t);v.g.gain.linearRampToValueAtTime(0.0001,t+0.08);v.src.stop(t+0.1);}catch(e){}delete voices[k];}}
 // s = string index: a new note on a string cuts off the note already ringing there, like a real guitar
@@ -1144,6 +1145,7 @@ function pluck(midi,when,vol,dur,cents,lp,s){
     if(!b){for(let d=1;d<=3&&!b;d++){if(sampler.buffers[midi-d]){b=sampler.buffers[midi-d];rate=Math.pow(2,d/12);}else if(sampler.buffers[midi+d]){b=sampler.buffers[midi+d];rate=Math.pow(2,-d/12);}}}
     if(b)gainMul=2.2;
   }
+  if(b)diag.sample++;else{diag.basic++;if(sampler.id!=='basic')diag.missing.add(midi);}
   if(!b)b=ksBuffer(midi);
   const src=actx.createBufferSource();src.buffer=b;src.playbackRate.value=rate*det$;const g=actx.createGain();const v=vol*gainMul;
   const full=b.duration/(rate*det$);
@@ -1309,7 +1311,9 @@ $('#btnListen').onclick=async()=>{
   await ensureAudio();
   if(settings.sound!=='basic'&&sampler.id!==settings.sound)await loadForPlayer();
   if(G.listen&&G.playing){resetRun();return;}
-  resetRun();G.listen=true;G.playing=true;updateButtons();
+  resetRun();diag.sample=0;diag.basic=0;diag.missing.clear();diag.where=(G.def&&G.def.title||'')+' ['+(G.def&&G.def.cat)+']';diag.sound=sampler.id+' / setting '+settings.sound;
+  if(settings.sound!=='basic')showHint('🎸 '+((SOUNDS.find(s=>s[0]===sampler.id)||[,'Basic sound'])[1]),2500);
+  G.listen=true;G.playing=true;updateButtons();
 };
 $('#btnRestart').onclick=()=>{const was=G.playing&&!G.listen;resetRun();if(was){G.playing=true;updateButtons();}};
 $('#btnBack').onclick=()=>{resetRun();keepAwake(false);show('home');renderList();};
@@ -1547,7 +1551,8 @@ function tunerUpdate(){
 
 /* ---- settings ---- */
 let settingsOpen=false;
-function syncSettingsUI(){$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');}
+function syncSettingsUI(){$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+  $('#sDiag').textContent=diag.where?('Sound check: '+diag.where+': '+diag.sample+' notes with guitar samples, '+diag.basic+' with basic synth'+(diag.missing.size?' (missing: '+[...diag.missing].slice(0,8).join(',')+')':'')+' · engine '+diag.sound):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();};
 $('#sSound').innerHTML=SOUNDS.map(([v,n])=>`<option value="${v}">${esc(n)}</option>`).join('');
 function soundStatus(t){$('#sSoundStatus').textContent=t;}
@@ -1884,7 +1889,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.10';
+const APP_VERSION='1.11';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
