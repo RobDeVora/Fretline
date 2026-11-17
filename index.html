@@ -221,7 +221,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     </div>
     <div class="grid3">
       <div class="field"><label>Difficulty</label><select id="genDiff"><option value="1">Easy</option><option value="2">Medium</option><option value="3">Hard</option></select></div>
-      <div class="field"><label>Length</label><select id="genBars"><option value="4">4 bars</option><option value="8" selected>8 bars</option><option value="16">16 bars</option></select></div>
+      <div class="field"><label>Length</label><select id="genBars"></select></div>
       <div class="field"><label>Tempo</label><input id="genBpm" type="number" inputmode="numeric" value="80" min="30" max="220"></div>
     </div>
     <div class="field"><label>Seed (same seed + settings = same track)</label>
@@ -883,13 +883,13 @@ function genMix(opt){
   const r=rng(opt.seed*3+1);
   let scaleKey=opt.scale;if(scaleKey==='random'){const ks=['major','minor','pentMinor','pentMajor','blues'];scaleKey=ks[Math.floor(r()*ks.length)];}
   const styles=opt.styles.slice();for(let i=styles.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[styles[i],styles[j]]=[styles[j],styles[i]];}
-  const secLen=opt.bars>=8?4:2;const nSec=Math.max(styles.length,Math.ceil(opt.bars/secLen));
+  const secLen=opt.bars>=16?4:2;const nSec=Math.max(2,Math.floor(opt.bars/secLen));const rem=opt.bars-nSec*secLen;
   const loop=genProgression(r,opt.key,!!MINORISH[scaleKey],4);
   const ev=[];const order=[];
   for(let i=0;i<nSec;i++){
-    const st=styles[i%styles.length];order.push(st);
-    const prog=[];for(let b=0;b<secLen;b++)prog.push(loop[(i*secLen+b)%loop.length]);
-    const tr=genTrack({style:st,key:opt.key,scale:scaleKey,diff:opt.diff,bars:secLen,seed:opt.seed*31+i*7+1,prog});
+    const st=styles[i%styles.length];order.push(st);const sl=secLen+(i===nSec-1?Math.max(0,rem):0);
+    const prog=[];for(let b=0;b<sl;b++)prog.push(loop[(i*secLen+b)%loop.length]);
+    const tr=genTrack({style:st,key:opt.key,scale:scaleKey,diff:opt.diff,bars:sl,seed:opt.seed*31+i*7+1,prog});
     for(const e of tr.events)ev.push({...e,t:e.t+i*secLen*4});
   }
   const NM={melody:'Melody',riff:'Riff',chords:'Chords',arp:'Arpeggio',strum:'Strum'};
@@ -1111,6 +1111,7 @@ function renderList(){
     h+=`<div class="item" data-strum="random"><div class="ic" style="background:${CAT_COLOR.strum}">?</div><div class="tx"><div class="t">Random pattern</div><div class="s">Any pattern, any progression</div></div><div class="best">Play ›</div></div>`;
     for(const sp of STRUM_PATTERNS){const b=bests['st-'+sp.id];h+=`<div class="item" data-strum="${sp.id}"><div class="ic" style="background:${CAT_COLOR.strum}">${sp.bpb===3?'¾':'♪'}</div><div class="tx"><div class="t">${esc(sp.name)}</div><div class="s" style="font-family:ui-monospace,Menlo,monospace">${patText(sp.pat)} · ${LVL[sp.lvl]}</div></div><div class="best">${b!=null?'Best '+b+'%':''}</div></div>`;}
   }else if(curCat==='gen'){
+    h+=`<div class="row" style="margin:0 0 10px"><label style="flex:1">Track length</label><select id="quickLen">${LEN_OPTS.map(([v,n])=>`<option value="${v}"${v===(genOpt.quickLen||'b8')?' selected':''}>${n}</option>`).join('')}</select></div>`;
     h+=`<div class="note-txt">Fresh practice tracks, composed on the spot. Pick a style or tap Customize for key, scale and difficulty.</div>`;
     const quick=[['mix','Mix','Everything at once: sections of melody, riff, chords, arpeggio and strumming'],['melody','Melody','Single-note lines over a chord progression'],['riff','Riff','Low-string riffs that repeat and vary'],['chords','Chords','Random chord progressions'],['arp','Arpeggio','Fingerpicking-style broken chords'],['strum','Strumming','A strum pattern over a random progression']];
     for(const [st,t,s] of quick)h+=`<div class="item" data-gen="${st}"><div class="ic" style="background:${CAT_COLOR.gen}">${t[0]}</div><div class="tx"><div class="t">Random ${t.toLowerCase()}</div><div class="s">${s}</div></div><div class="best">Play ›</div></div>`;
@@ -1139,6 +1140,7 @@ function renderList(){
   L.querySelectorAll('.item[data-gen]').forEach(el=>el.onclick=()=>{quickGen(el.dataset.gen);});
   L.querySelectorAll('.item[data-lesson]').forEach(el=>el.onclick=()=>openLesson(COURSE_FLAT.find(l=>l.id===el.dataset.lesson)));
   L.querySelectorAll('.item[data-strum]').forEach(el=>el.onclick=()=>{const id=el.dataset.strum;const sp=id==='random'?STRUM_PATTERNS[Math.floor(Math.random()*STRUM_PATTERNS.length)]:STRUM_PATTERNS.find(x=>x.id===id);openSong(strumDef(sp));});
+  const ql=$('#quickLen');if(ql)ql.onchange=()=>{genOpt.quickLen=ql.value;store.set('gen',genOpt);};
   const cc=$('#cContinue');if(cc)cc.onclick=()=>{const nx=firstOpenLesson();if(nx)openLesson(nx);};
   const cr=$('#cRandom');if(cr)cr.onclick=()=>openLesson(randomLesson());
   L.querySelectorAll('.del').forEach(b=>b.onclick=ev=>{
@@ -1592,20 +1594,25 @@ $('#impSave').onclick=()=>{
 /* ---- generator ---- */
 const genOpt=Object.assign({styles:['melody'],key:'random',scale:'major',diff:1,bars:8,bpm:80,seed:0},store.get('gen',{}));
 if(!Array.isArray(genOpt.styles))genOpt.styles=[genOpt.style||'melody'];delete genOpt.style;
+const LEN_OPTS=[['b4','4 bars'],['b8','8 bars'],['b16','16 bars'],['s30','30 seconds'],['s60','1 minute'],['s90','1:30'],['s120','2 minutes'],['s180','3 minutes'],['s300','5 minutes']];
+if(!genOpt.len)genOpt.len='b'+(genOpt.bars||8);
+function barsFor(len,bpm){if(!len)return 8;const n=parseInt(len.slice(1),10);return len[0]==='b'?n:Math.max(2,Math.round(n*(bpm||80)/240));}
+function fmtDur(sec){sec=Math.round(sec);return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');}
 const KEY_OPTS=[['random','Random'],[4,'E'],[9,'A'],[7,'G'],[0,'C'],[2,'D'],[5,'F'],[11,'B'],[1,'C#'],[3,'D#'],[6,'F#'],[8,'G#'],[10,'A#']];
+$('#genBars').innerHTML=LEN_OPTS.map(([v,n])=>`<option value="${v}">${n}</option>`).join('');
 $('#genKey').innerHTML=KEY_OPTS.map(([v,n])=>`<option value="${v}">${n}</option>`).join('');
 function newSeed(){return Math.floor(Math.random()*999999)+1;}
 function syncGenUI(){
   document.querySelectorAll('#genStyle button').forEach(b=>b.classList.toggle('on',genOpt.styles.includes(b.dataset.v)));
-  $('#genKey').value=String(genOpt.key);$('#genScale').value=genOpt.scale;$('#genDiff').value=String(genOpt.diff);$('#genBars').value=String(genOpt.bars);$('#genBpm').value=genOpt.bpm;$('#genSeed').value=genOpt.seed||'';
+  $('#genKey').value=String(genOpt.key);$('#genScale').value=genOpt.scale;$('#genDiff').value=String(genOpt.diff);$('#genBars').value=genOpt.len;$('#genBpm').value=genOpt.bpm;$('#genSeed').value=genOpt.seed||'';
   const D={melody:'A single-note melody over a chord progression, with a repeating phrase so it sounds like a real tune.',riff:'A one-bar riff on the low strings that moves with the chords and varies every fourth bar.',chords:'A chord progression to play, built from chords that belong to the key.',arp:'Chord tones picked one at a time, like fingerpicking.',strum:'A strum pattern (down, up and muted strums) over a chord progression.'};
   const NM={melody:'melody',riff:'riff',chords:'chords',arp:'arpeggio',strum:'strumming'};
   const st=genOpt.styles;
-  $('#genDesc').textContent=st.length===1?D[st[0]]:'A mixed track: sections of '+st.map(s=>NM[s]).join(', ').replace(/, ([^,]*)$/,' and $1')+' take turns over the same chord progression, a few bars each. Short lengths are extended so every style gets a section.';
+  $('#genDesc').textContent=st.length===1?D[st[0]]:'A mixed track: sections of '+st.map(s=>NM[s]).join(', ').replace(/, ([^,]*)$/,' and $1')+' take turns over the same chord progression, a few bars each. Very short tracks may not have room for every style.';
 }
 document.querySelectorAll('#genStyle button').forEach(b=>b.onclick=()=>{const v=b.dataset.v;const s=genOpt.styles;if(s.includes(v)){if(s.length>1)s.splice(s.indexOf(v),1);}else s.push(v);syncGenUI();});
 function readGenUI(){
-  const k=$('#genKey').value;genOpt.key=k==='random'?'random':+k;genOpt.scale=$('#genScale').value;genOpt.diff=+$('#genDiff').value;genOpt.bars=+$('#genBars').value;genOpt.bpm=Math.max(30,Math.min(220,+$('#genBpm').value||80));
+  const k=$('#genKey').value;genOpt.key=k==='random'?'random':+k;genOpt.scale=$('#genScale').value;genOpt.diff=+$('#genDiff').value;genOpt.len=$('#genBars').value;genOpt.bpm=Math.max(30,Math.min(220,+$('#genBpm').value||80));
   genOpt.seed=parseInt($('#genSeed').value,10)||newSeed();store.set('gen',genOpt);
 }
 $('#genDice').onclick=()=>{genOpt.seed=newSeed();$('#genSeed').value=genOpt.seed;};
@@ -1615,10 +1622,12 @@ function makeGen(opt){
   const r=rng(opt.seed*7+13);
   let key=opt.key;
   const styles=opt.styles&&opt.styles.length?opt.styles:['melody'];
+  if(opt.len)opt={...opt,bars:barsFor(opt.len,opt.bpm)};
   const chordy=styles.some(s=>s==='chords'||s==='arp'||s==='strum');
   if(key==='random'){const easyKeys=chordy||opt.diff===1?[4,9,7,0,2]:[4,9,7,0,2,5,11];key=easyKeys[Math.floor(r()*easyKeys.length)];}
   const tr=styles.length>1?genMix({styles,key,scale:opt.scale,diff:opt.diff,bars:opt.bars,seed:opt.seed}):genTrack({style:styles[0],key,scale:opt.scale,diff:opt.diff,bars:opt.bars,seed:opt.seed});
-  return {id:'gen',cat:'gen',title:tr.title+' #'+opt.seed,bpm:opt.bpm,bpb:4,events:tr.events,gen:{...opt,styles},desc:tr.desc};
+  const dur=songLength(tr.events)*60/opt.bpm;
+  return {id:'gen',cat:'gen',title:tr.title+' · '+fmtDur(dur)+' #'+opt.seed,bpm:opt.bpm,bpb:4,events:tr.events,gen:{...opt,styles},desc:tr.desc};
 }
 function playGen(opt){const d=makeGen(opt);G.lastGen=d;openSong(d);}
 $('#genGo').onclick=()=>{readGenUI();playGen({...genOpt});};
@@ -1630,7 +1639,7 @@ $('#genSaveBtn').onclick=()=>{
 };
 function quickGen(style){
   const styles=style==='mix'?['melody','riff','chords','arp','strum']:[style];
-  const base={styles,key:'random',scale:style==='riff'?(Math.random()<.5?'pentMinor':'blues'):'random',diff:genOpt.diff||1,bars:style==='mix'?20:8,bpm:style==='riff'?90:80,seed:newSeed()};
+  const base={styles,key:'random',scale:style==='riff'?(Math.random()<.5?'pentMinor':'blues'):'random',diff:genOpt.diff||1,len:genOpt.quickLen||'b8',bars:8,bpm:style==='riff'?90:80,seed:newSeed()};
   if(base.scale==='random'&&(style==='chords'||style==='arp'||style==='strum'||style==='mix'))base.scale=Math.random()<.65?'major':'minor';
   if(base.scale==='random'&&style==='melody'){const pool=['major','minor','pentMajor','pentMinor'];base.scale=pool[Math.floor(Math.random()*pool.length)];}
   G.quick=base;playGen(base);
@@ -1741,7 +1750,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.6';
+const APP_VERSION='1.7';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
