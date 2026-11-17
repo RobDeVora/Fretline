@@ -965,6 +965,14 @@ function simplifyEvents(events,capo,lvl,forceCapo){
 }
 // "Time aligned" files (Chordify) follow the recording, so chord changes land between beats and drift.
 // If most changes are off the beat, measure the real beat length and round each chord's length to whole (or half) beats.
+// A fast tempo where chords almost never last less than 2 bars, and nearly always an even number of beats,
+// means the file counted the song at double speed
+function isDoubleTime(segs,bpm){
+  if(!bpm||bpm<110||segs.length<6)return false;
+  const L=segs.slice(0,-1).map(x=>x.d).sort((a,b)=>a-b);const med=L[Math.floor(L.length/2)];
+  const even=L.filter(d=>Math.abs(d/2-Math.round(d/2))<0.01).length;
+  return med>=8&&even>=L.length*0.85;
+}
 function gridSegs(segs){
   if(segs.length<3)return segs;
   const t0=segs[0].t;const off=segs.filter(x=>{const f=Math.abs((x.t-t0)-Math.round(x.t-t0));return f>0.08;}).length;
@@ -975,7 +983,7 @@ function gridSegs(segs){
   let t=0;for(const x of segs){x.t=t;x.d=q(x.d);t+=x.d;}
   segs.beat=beat;return segs;
 }
-function chordChart(ev,bpb){
+function chordChart(ev,bpb,bpm){
   let starts=ev.filter(e=>e.notes.length>=2).map(e=>e.t);
   const L=songLength(ev);
   if(starts.length<2){starts=[];for(let a=0;a<L;a+=bpb)starts.push(a);}
@@ -983,9 +991,10 @@ function chordChart(ev,bpb){
   for(let i=0;i<starts.length;i++){const a=starts[i],b=i+1<starts.length?starts[i+1]:Math.max(a+1,L);const c=estChord(ev,a,b,null);if(!c)continue;
     const last=segs[segs.length-1];if(last&&last.name===c.name&&Math.abs(last.t+last.d-a)<0.01){last.d=b-last.t;continue;}segs.push({t:a,d:b-a,name:c.name});}
   gridSegs(segs);
+  const half=isDoubleTime(segs,bpm);if(half)for(const x of segs){x.t/=2;x.d/=2;}
   const names=segs.map(s=>s.name);const capo=bestCapo(names);
   const events=segs.map(s=>chordEvent(transposeName(s.name,-capo),s.t,Math.max(0.5,s.d)));
-  return {events,capo};
+  return {events,capo,half};
 }
 function normPattern(s){if(!s)return '';const t=String(s).toUpperCase().replace(/\s+/g,'').replace(/[·._]/g,'-').replace(/[✕X]/g,'x').replace(/[^DUx-]/gi,'');return /[DUx]/.test(t)&&t.length>=2&&t.length<=16?t:'';}
 // turn chord events into strum events following an eighth-note pattern, restarted at each chord change
@@ -1784,11 +1793,14 @@ function openImport(){impCustom='';G.impStrumTouched=false;$('#impStrum').innerH
 $('#impBack').onclick=$('#impCancel').onclick=()=>{show('home');renderList();};
 function fileEvents(){
   const part=impFile.parts[+$('#impPart').value]||impFile.parts[0];
-  if(part.chords)return {kind:'file',events:chordEventsFromSymbols(part.chords,impFile.bpb)};
+  if(part.chords){setImpHalf(false);return {kind:'file',events:chordEventsFromSymbols(part.chords,impFile.bpb)};}
   const mode=$('#impNotes').value;
-  if(mode==='chords'){const raw=eventsFromNotes(part.notes,{bpb:impFile.bpb});const cc=chordChart(raw,impFile.bpb);return {kind:'file',events:cc.events,capo:cc.capo,strumAuto:detectPattern(raw,impFile.bpb)};}
+  if(mode==='chords'){const raw=eventsFromNotes(part.notes,{bpb:impFile.bpb});const cc=chordChart(raw,impFile.bpb,impFile.bpm);setImpHalf(cc.half);return {kind:'file',events:cc.events,capo:cc.capo,half:cc.half,strumAuto:cc.half?null:detectPattern(raw,impFile.bpb)};}
+  setImpHalf(false);
   return {kind:'file',events:eventsFromNotes(part.notes,{bpb:impFile.bpb,topOnly:mode==='top',labels:part.harm})};
 }
+// chord files counted at double speed (Chordify: 143 for a 72 BPM song) are shown at half the tempo
+function setImpHalf(h){if(!impFile||!!impFile.halved===!!h)return;impFile.halved=!!h;$('#impBpm').value=h?Math.round(impFile.bpm/2):impFile.bpm;}
 function analyzeImport(){
   if(impFile){const r=fileEvents();if(!r.events.length)return {err:'That part has no playable notes. Try another part.'};return r;}
   const text=$('#impText').value;const type=$('#impType').value;const cb=Math.max(1,+$('#impCb').value||4);
@@ -1805,7 +1817,7 @@ function refreshPreview(){
   if(r.err){p.textContent=(impFile||$('#impText').value.trim())?r.err:'';p.className='preview err';return;}
   p.className='preview ok';
   const evs=r.events;const isCh=evs[0]&&evs[0].chord;
-  if(isCh)p.textContent=(r.capo?'Capo '+r.capo+' · ':'')+'Found '+evs.length+' chords: '+evs.slice(0,12).map(e=>e.chord).join(' ')+(evs.length>12?' …':'');
+  if(isCh)p.textContent=(r.capo?'Capo '+r.capo+' · ':'')+'Found '+evs.length+' chords: '+evs.slice(0,12).map(e=>e.chord).join(' ')+(evs.length>12?' …':'')+(r.half?' · The file counts this song at double speed, so the tempo is halved to '+$('#impBpm').value+' BPM':'');
   if(!isCh)p.textContent='Found '+evs.length+' notes/chords, starting '+evs.slice(0,6).map(e=>e.notes.map(n=>(6-n.s)+'/'+n.f).join('+')).join(' ')+(impFile?' · '+impFile.bpm+' BPM':'');
   if(!impFile){const cp=capoFromText($('#impText').value);if(cp)p.textContent+=' · Capo '+cp+' detected';}
   syncImpStrum(r,isCh);
@@ -2114,7 +2126,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.18';
+const APP_VERSION='1.19';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
