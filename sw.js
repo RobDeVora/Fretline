@@ -1,6 +1,6 @@
 // Fretline service worker: always tries the network first so updates you
 // upload to GitHub show up on the next launch; falls back to the saved copy offline.
-const CACHE = 'fretline-v16';
+const CACHE = 'fretline-v17';
 const SHARE = 'fretline-share'; // holds a song shared from another app until the page picks it up
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', e => {
@@ -32,6 +32,7 @@ self.addEventListener('fetch', e => {
   const sameOrigin = url.origin === self.location.origin;
   const isLib = /cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|unpkg\.com/.test(url.hostname);
   if (!sameOrigin && !isLib) return;
+  if (url.searchParams.has('check')) return; // "Check for updates" always asks GitHub directly
   e.respondWith(
     fetch(req, sameOrigin ? { cache: 'no-cache' } : {}).then(res => {
       if (res && (res.ok || res.type === 'opaque')) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }

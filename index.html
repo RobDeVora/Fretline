@@ -59,10 +59,11 @@ header h1 span{color:var(--accent)}
 .speed span{min-width:44px;text-align:center;font-variant-numeric:tabular-nums;font-size:14px}
 .stage{flex:1;position:relative;min-height:150px}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block}
-.hud{position:absolute;top:4px;right:6px;background:rgba(15,17,21,.85);border-radius:10px;padding:2px 6px;z-index:2;display:flex;gap:12px;font-size:13px;color:var(--muted);pointer-events:none;text-align:right}
+.hud{position:absolute;top:4px;right:6px;background:rgba(15,17,21,.85);background:color-mix(in srgb,var(--bg) 85%,transparent);border-radius:10px;padding:2px 6px;z-index:2;display:flex;gap:12px;font-size:13px;color:var(--muted);pointer-events:none;text-align:right}
 .hud b{color:var(--text);font-size:15px;font-variant-numeric:tabular-nums}
 .hud .you b{color:var(--accent2)}
-.hint{position:absolute;left:10px;top:7px;right:250px;font-size:13px;color:var(--warn);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hint{position:absolute;left:10px;top:7px;right:250px;font-size:13px;color:var(--warn);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;z-index:2;background:color-mix(in srgb,var(--bg) 85%,transparent);border-radius:8px;padding:1px 6px;width:max-content;max-width:calc(100% - 20px)}
+.hint:empty{display:none}
 #player .bottom{display:flex;align-items:center;justify-content:center;gap:10px;padding:6px 10px 8px}
 #player .bottom button{min-width:52px;padding:10px 14px}
 #btnPlay{min-width:110px!important}
@@ -76,6 +77,14 @@ header h1 span{color:var(--accent)}
 .row{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
 .row.end{justify-content:flex-end}
 .field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.colors summary{cursor:pointer;font-weight:600;padding:8px 0;color:var(--text)}
+.colors[open] summary{margin-bottom:6px}
+.swrow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.sw{width:30px;height:30px;border-radius:50%;padding:0;border:2px solid var(--line)}
+.sw.on{border:3px solid var(--text)}
+.swrow input[type=color]{width:40px;height:32px;padding:2px;border-radius:8px}
+.swrow label{display:flex;flex-direction:column;align-items:center;font-size:11px;gap:2px}
+#cPrev{width:100%;height:130px;display:block;border-radius:10px;border:1px solid var(--line);margin:4px 0 8px}
 .field.inline{flex-direction:row;align-items:center;justify-content:space-between}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
@@ -301,8 +310,20 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
       <select id="sFx"><option value="off">Off</option><option value="miss">Sour sound on wrong or missed notes</option><option value="all">Also play the right note when you hit it (use headphones)</option></select>
       <span class="small">Uses the guitar sound above. Without headphones the phone's mic can hear the app, so “play the right note” works best with headphones.</span></div>
     <div class="field inline"><label>Metronome click while playing</label><input type="checkbox" id="sMetro"></div>
+    <details class="field colors" id="sColors"><summary>🎨 Colors &amp; theme</summary>
+      <canvas id="cPrev"></canvas>
+      <div class="field"><label>App theme</label><select id="cTheme"></select></div>
+      <div class="field"><label>Note colours</label><select id="cNotes"></select>
+        <div class="swrow" id="cCustom" style="display:none;margin-top:4px"></div></div>
+      <div class="field"><label>Hit line colour</label><div class="swrow" id="cZone"></div></div>
+      <div class="field"><label>Highway background</label><select id="cHw"></select></div>
+      <div class="field"><label>Fretboard</label><select id="cFb"></select></div>
+      <button id="cReset" style="margin-bottom:6px">Reset colours</button>
+    </details>
     <div class="field" id="sAndroid" style="display:none"><a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2);font-weight:600">📱 Get the Android app</a><div class="small">Adds “Open with Fretline” for song files and downloads from links. Your saved songs stay in this browser; the app starts fresh.</div></div>
-    <div class="row" style="justify-content:space-between"><span class="small" id="appVer"></span><button class="primary" id="sClose">Done</button></div>
+    <div class="field"><div class="row" style="margin:0;align-items:center;gap:8px"><span class="small" id="appVer" style="flex:1"></span><button id="sUpd">Check for updates</button></div>
+      <span class="small" id="sUpdMsg"></span></div>
+    <div class="row end"><button class="primary" id="sClose">Done</button></div>
   </div>
 </div>
 <div class="overlay" id="msg" style="position:fixed">
@@ -1704,6 +1725,45 @@ const cv=$('#cv'),cx=cv.getContext('2d');let CW=300,CH=150;
 function resizeCanvas(){const r=cv.getBoundingClientRect();if(!r.width)return;const dpr=Math.min(3,window.devicePixelRatio||1);cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr);cx.setTransform(dpr,0,0,dpr,0,0);CW=r.width;CH=r.height;}
 window.addEventListener('resize',()=>{if(curScreen==='player')resizeCanvas();});
 const SCOL=['#ff6b81','#ffa94d','#ffd43b','#69db7c','#4dabf7','#b197fc'];
+/* ---- colours & themes (Settings › Colors & theme) ---- */
+const THEMES={
+  dark:{name:'Dark',bg:'#0f1115',panel:'#181b22',panel2:'#222632',text:'#eef1f6',muted:'#8b93a3',line:'#2a2f3a',accent:'#5ce1a6',accent2:'#4cc9f0'},
+  midnight:{name:'Midnight blue',bg:'#0a0f1e',panel:'#121a2e',panel2:'#1b2540',text:'#e8edfb',muted:'#8792b3',line:'#25304d',accent:'#6ea8ff',accent2:'#a594ff'},
+  black:{name:'Pure black (saves battery on OLED screens)',bg:'#000000',panel:'#0c0c0e',panel2:'#18181c',text:'#f2f2f2',muted:'#8a8a92',line:'#24242a',accent:'#5ce1a6',accent2:'#4cc9f0'},
+  warm:{name:'Warm amber',bg:'#15110d',panel:'#201a14',panel2:'#2c241b',text:'#f6eee4',muted:'#a69584',line:'#3b3025',accent:'#ffb347',accent2:'#ff8a65'},
+  forest:{name:'Forest',bg:'#0c1410',panel:'#141f19',panel2:'#1c2b23',text:'#e9f3ee',muted:'#88a296',line:'#27382f',accent:'#7bd88f',accent2:'#5ec4b6'},
+  plum:{name:'Plum',bg:'#120d16',panel:'#1c1522',panel2:'#271d30',text:'#f3ecf7',muted:'#9e8fab',line:'#352840',accent:'#ff7eb6',accent2:'#b48cff'}};
+// string colours, low E first
+const NOTE_PALETTES={
+  rainbow:{name:'Rainbow',c:['#ff6b81','#ffa94d','#ffd43b','#69db7c','#4dabf7','#b197fc']},
+  game:{name:'Game style (red, yellow, blue, orange, green, purple)',c:['#ff4d4d','#ffd60a','#3fa7ff','#ff9f43','#2ee66b','#b26bff']},
+  vivid:{name:'Vivid',c:['#ff3b3b','#ff9f1a','#ffe600','#2ee66b','#2d9cff','#c86bff']},
+  pastel:{name:'Pastel',c:['#f4a3b4','#f9c89b','#f6e7a1','#a8e6b8','#a3cdf5','#cdb8f7']},
+  cb:{name:'Colour-blind friendly',c:['#d55e00','#e69f00','#f0e442','#009e73','#56b4e9','#cc79a7']},
+  mono:{name:'All one colour (white)',c:['#e9edf5','#e9edf5','#e9edf5','#e9edf5','#e9edf5','#e9edf5']},
+  custom:{name:'Custom…',c:null}};
+const ZONE_SWATCHES=['#5ce1a6','#4cc9f0','#ffffff','#ffd43b','#ff8c42','#ff6bd6'];
+const HIGHWAYS={plain:'Plain',stripes:'Lane stripes',tinted:'Lanes tinted by string colour',lighter:'Lighter background'};
+const FRETBOARDS={
+  dark:{name:'Dark',wood:'#161920',wire:'#3b404c',nut:'#dddddd',inlay:'#2d323d',str:'#8a8f9a'},
+  rosewood:{name:'Rosewood',wood:'#3b2219',wire:'#b8b1a5',nut:'#efe6d2',inlay:'#e6dac2',str:'#d8d3c9'},
+  maple:{name:'Maple',wood:'#d8b57a',wire:'#8a867f',nut:'#f7f1e1',inlay:'#2b2b2b',str:'#4f4f4f'},
+  ebony:{name:'Ebony',wood:'#0b0a09',wire:'#9c9c9c',nut:'#f2eee4',inlay:'#e9e9e9',str:'#cfcfcf'}};
+const DEF_COLORS={theme:'dark',notes:'rainbow',custom:NOTE_PALETTES.rainbow.c.slice(),zone:'#5ce1a6',highway:'plain',fretboard:'dark'};
+const COL={bg:'#0f1115',zone:'#5ce1a6',highway:'plain',fb:FRETBOARDS.dark};
+function colorPrefs(){return Object.assign({},DEF_COLORS,settings.colors||{});}
+function hexA(h,a){h=String(h||'#ffffff').replace('#','');if(h.length===3)h=h.split('').map(c=>c+c).join('');const n=parseInt(h.slice(0,6),16)||0;return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;}
+function lum(h){h=String(h).replace('#','');const n=parseInt(h.slice(0,6),16)||0;const f=v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);};return 0.2126*f(n>>16&255)+0.7152*f(n>>8&255)+0.0722*f(n&255);}
+function ink(h){return lum(h)>0.3?'#0b0d12':'#ffffff';} // readable text on a coloured note
+function applyColors(){
+  const c=colorPrefs();const t=THEMES[c.theme]||THEMES.dark;const root=document.documentElement.style;
+  for(const k of ['bg','panel','panel2','text','muted','line','accent','accent2'])root.setProperty('--'+k,t[k]);
+  const meta=document.querySelector('meta[name="theme-color"]');if(meta)meta.setAttribute('content',t.bg);
+  const pal=c.notes==='custom'&&Array.isArray(c.custom)&&c.custom.length===6?c.custom:(NOTE_PALETTES[c.notes]||NOTE_PALETTES.rainbow).c;
+  SCOL.splice(0,6,...pal);
+  COL.bg=t.bg;COL.zone=c.zone||DEF_COLORS.zone;COL.highway=HIGHWAYS[c.highway]?c.highway:'plain';COL.fb=FRETBOARDS[c.fretboard]||FRETBOARDS.dark;
+}
+applyColors();
 function rr(x,y,w,h,r){cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r);cx.arcTo(x+w,y+h,x,y+h,r);cx.arcTo(x,y+h,x,y,r);cx.arcTo(x,y,x+w,y,r);cx.closePath();}
 function draw(now){
   const W=CW,H=CH,S=G.song,ev=S.events;cx.clearRect(0,0,W,H);
@@ -1711,17 +1771,35 @@ function draw(now){
   const fbH=settings.fretboard?Math.max(64,Math.min(120,H*0.26)):0;const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?72:44)*k),laneBot=H-(settings.fretboard?fbH+18:14);const laneH=Math.max(12,(laneBot-laneTop)/6);
   const hitX=Math.max(54,Math.min(W*0.2,140));const ppb=Math.max(70,Math.min(170,W/7))*settings.zoom*Math.sqrt(k);
   const Y=s=>laneTop+(5-s+0.5)*laneH;
+  // highway background
+  if(COL.highway==='lighter'){cx.fillStyle='rgba(255,255,255,.05)';cx.fillRect(0,laneTop,W,laneH*6);}
+  else if(COL.highway==='stripes'){cx.fillStyle='rgba(255,255,255,.035)';for(let s=0;s<6;s+=2)cx.fillRect(0,Y(s)-laneH/2,W,laneH);}
+  else if(COL.highway==='tinted'){for(let s=0;s<6;s++){cx.fillStyle=hexA(SCOL[s],0.07);cx.fillRect(0,Y(s)-laneH/2,W,laneH);}}
   // beats
   const b0=Math.floor(G.clock-hitX/ppb)-1,b1=Math.ceil(G.clock+(W-hitX)/ppb)+1;
   for(let b=Math.max(0,b0);b<=b1;b++){const x=hitX+(b-G.clock)*ppb;cx.fillStyle=b%S.bpb===0?'rgba(255,255,255,.16)':'rgba(255,255,255,.05)';cx.fillRect(x,laneTop,1,laneH*6);}
   // strings
   for(let s=0;s<6;s++){cx.fillStyle=SCOL[s]+'66';cx.fillRect(0,Y(s)-(s<3?1:0.5),W,s<3?2:1);}
-  // hit zone
-  const pulse=G.waiting?0.25+0.15*Math.sin(now/120):0.12;
-  cx.fillStyle=`rgba(92,225,166,${pulse})`;cx.fillRect(hitX-2,laneTop-4,4,laneH*6+8);
-  cx.fillStyle='rgba(255,255,255,.035)';cx.fillRect(hitX-laneH*0.55,laneTop,laneH*1.1,laneH*6);
   // events
   const r=Math.max(7,Math.min(laneH*0.44,19*k));
+  // hit zone: a soft timing band, a glowing strike line with notches at both ends, and a target ring on every
+  // string. The rings for the next note light up as it gets close, so it's clear exactly when to strike.
+  {const zc=COL.zone;const ni=firstPending();const ne=ni>=0?ev[ni]:null;const dist=ne?ne.t-G.clock:9;
+    const a=ne&&dist<0.75&&dist>-0.4?1-Math.max(0,dist)/0.75:0;// 0 far away → 1 at the line
+    const tgt=new Set();if(ne&&a>0){if(ne.shape)ne.shape.forEach((f,s)=>{if(f>=0)tgt.add(s);});for(const n of ne.notes)tgt.add(n.s);}
+    const bw=Math.max(6,Math.min(laneH*0.7,0.15*bps()*ppb));
+    cx.fillStyle=hexA(zc,0.09+0.09*a);cx.fillRect(hitX-bw,laneTop,bw*2,laneH*6);
+    cx.fillStyle=hexA(zc,0.35);cx.fillRect(hitX-bw,laneTop,1,laneH*6);cx.fillRect(hitX+bw-1,laneTop,1,laneH*6);
+    const wait=G.waiting?0.5+0.5*Math.sin(now/120):1;
+    cx.save();cx.shadowColor=zc;cx.shadowBlur=(8+14*a)*wait;cx.fillStyle=hexA(zc,0.75+0.25*a);
+    const lw=Math.max(3,3*k);cx.fillRect(hitX-lw/2,laneTop-6,lw,laneH*6+12);
+    const nt=8*k;cx.beginPath();cx.moveTo(hitX-nt,laneTop-6-nt);cx.lineTo(hitX+nt,laneTop-6-nt);cx.lineTo(hitX,laneTop-4);cx.closePath();cx.fill();
+    const yb=laneTop+laneH*6;cx.beginPath();cx.moveTo(hitX-nt,yb+6+nt);cx.lineTo(hitX+nt,yb+6+nt);cx.lineTo(hitX,yb+4);cx.closePath();cx.fill();
+    cx.restore();
+    for(let s=0;s<6;s++){const on=tgt.has(s);cx.beginPath();cx.arc(hitX,Y(s),r+2,0,Math.PI*2);
+      cx.fillStyle=on?hexA(SCOL[s],0.12+0.3*a):COL.bg;cx.fill();
+      cx.lineWidth=on?2+2*a:2;cx.strokeStyle=on?SCOL[s]:hexA(zc,0.55);cx.stroke();}
+  }
   cx.textAlign='center';cx.textBaseline='middle';
   let lastLabel=null;
   for(let i=0;i<ev.length;i++){
@@ -1735,7 +1813,7 @@ function draw(now){
       else{const down=e.strum==='D';const y0=down?top:bot,y1=down?bot:top;const hd=Math.min(22*k,laneH*0.9);
         cx.beginPath();cx.moveTo(x,y0);cx.lineTo(x,y1+(down?-hd:hd));cx.stroke();
         cx.beginPath();cx.moveTo(x-hd*0.75,y1+(down?-hd:hd));cx.lineTo(x+hd*0.75,y1+(down?-hd:hd));cx.lineTo(x,y1);cx.closePath();cx.fill();
-        cx.beginPath();cx.arc(x,(top+bot)/2,Math.min(15*k,laneH*0.6),0,7);cx.fillStyle=st===2?'#2a2e37':'#0f1115';cx.fill();cx.lineWidth=2;cx.stroke();
+        cx.beginPath();cx.arc(x,(top+bot)/2,Math.min(15*k,laneH*0.6),0,7);cx.fillStyle=st===2?'#2a2e37':COL.bg;cx.fill();cx.lineWidth=2;cx.stroke();
         cx.fillStyle=col;cx.font='bold '+F(14)+' -apple-system,sans-serif';cx.fillText(down?'D':'U',x,(top+bot)/2+1);}
       cx.lineCap='butt';
       continue;
@@ -1754,7 +1832,7 @@ function draw(now){
       cx.beginPath();cx.arc(x,y,r,0,Math.PI*2);
       cx.fillStyle=st===1?'#5ce1a6':st===2?'#4a4f5a':SCOL[n.s];cx.fill();
       if(st===1){cx.lineWidth=3;cx.strokeStyle='rgba(92,225,166,.5)';cx.beginPath();cx.arc(x,y,r+4,0,Math.PI*2);cx.stroke();}
-      cx.fillStyle=st===2?'#999':'#0b0d12';cx.font=`bold ${Math.round(r*1.0)}px -apple-system,sans-serif`;
+      cx.fillStyle=st===2?'#999':st===1?'#0b0d12':ink(SCOL[n.s]);cx.font=`bold ${Math.round(r*1.0)}px -apple-system,sans-serif`;
       cx.fillText(settings.names?pcName(n.midi):String(n.f),x,y+1);
     }
   }
@@ -1781,26 +1859,26 @@ function draw(now){
   }
   // string labels
   cx.font='bold '+F(12)+' -apple-system,sans-serif';const lb=18*k;
-  for(let s=0;s<6;s++){cx.fillStyle='rgba(15,17,21,.85)';cx.fillRect(0,Y(s)-lb/2,lb,lb);cx.fillStyle=SCOL[s];cx.fillText(STRING_LABELS[s],lb/2,Y(s)+1);}
+  for(let s=0;s<6;s++){cx.fillStyle=hexA(COL.bg,0.85);cx.fillRect(0,Y(s)-lb/2,lb,lb);cx.fillStyle=SCOL[s];cx.fillText(STRING_LABELS[s],lb/2,Y(s)+1);}
   // pops
   for(const p of G.pops){const a=(now-p.t)/700;if(a>1)continue;cx.globalAlpha=1-a;cx.fillStyle=p.color;cx.font='bold '+F(16)+' -apple-system,sans-serif';cx.fillText(p.text,hitX,laneTop-14-a*14);cx.globalAlpha=1;}
   // count-in
   if(G.playing&&G.clock<0){cx.fillStyle='rgba(255,255,255,.9)';cx.font='bold 56px -apple-system,sans-serif';cx.fillText(String(Math.ceil(-G.clock)),W/2,laneTop+laneH*3);}
-  if(!G.playing&&!G.finished&&G.clock<0){cx.fillStyle='rgba(255,255,255,.55)';cx.font='15px -apple-system,sans-serif';cx.fillText(G.mode==='wait'?'Wait mode: the track pauses until you play each note':'Press Play, then play the notes as they reach the green line',W/2,laneTop+laneH*3);}
+  if(!G.playing&&!G.finished&&G.clock<0){cx.fillStyle='rgba(255,255,255,.55)';cx.font='15px -apple-system,sans-serif';cx.fillText(G.mode==='wait'?'Wait mode: the track pauses until you play each note':'Press Play, then play the notes as they reach the glowing line',W/2,laneTop+laneH*3);}
   if(settings.fretboard)drawFretboard(laneBot+14,fbH,W);
 }
 function drawFretboard(y0,h,W){
   const ev=G.song.events;const i=firstPending();const tgt=i>=0?ev[i]:null;
   const cp=(G.capo||0);let maxF=12;if(tgt)for(const n of tgt.notes)maxF=Math.max(maxF,n.f+cp+1);if(tgt&&tgt.shape)for(const f of tgt.shape)maxF=Math.max(maxF,f+cp+1);maxF=Math.min(maxF,24);
   const x0=34,x1=W-10,fw=(x1-x0)/(maxF+0.5);const sh=h/6;const Ys=s=>y0+(5-s+0.5)*sh;
-  cx.fillStyle='#161920';rr(x0-6,y0,x1-x0+12,h,8);cx.fill();
+  const FB=COL.fb;cx.fillStyle=FB.wood;rr(x0-6,y0,x1-x0+12,h,8);cx.fill();
   const fx=f=>x0+fw*0.5+f*fw; // fret wire position for fret f (f=0 is nut)
-  cx.fillStyle='#ddd';cx.fillRect(fx(0)-2,y0+2,4,h-4);
-  for(let f=1;f<=maxF;f++){cx.fillStyle='#3b404c';cx.fillRect(fx(f)-1,y0+3,2,h-6);}
-  cx.fillStyle='#2d323d';
+  cx.fillStyle=FB.nut;cx.fillRect(fx(0)-2,y0+2,4,h-4);
+  for(let f=1;f<=maxF;f++){cx.fillStyle=FB.wire;cx.fillRect(fx(f)-1,y0+3,2,h-6);}
+  cx.fillStyle=FB.inlay;
   for(const f of [3,5,7,9,15,17,19,21])if(f<=maxF){cx.beginPath();cx.arc(fx(f)-fw/2,y0+h/2,4,0,7);cx.fill();}
   if(12<=maxF){cx.beginPath();cx.arc(fx(12)-fw/2,y0+h*0.3,4,0,7);cx.arc(fx(12)-fw/2,y0+h*0.7,4,0,7);cx.fill();}
-  for(let s=0;s<6;s++){cx.fillStyle='#8a8f9a';cx.fillRect(x0-4,Ys(s)-(s<3?0.9:0.5),x1-x0+8,s<3?1.8:1);}
+  for(let s=0;s<6;s++){cx.fillStyle=FB.str;cx.fillRect(x0-4,Ys(s)-(s<3?0.9:0.5),x1-x0+8,s<3?1.8:1);}
   cx.font='bold 11px -apple-system,sans-serif';cx.fillStyle='#666';
   for(const f of [3,5,7,9,12,15])if(f<=maxF)cx.fillText(String(f),fx(f)-fw/2,y0-7);
   const pos0=f=>f===0?fx(0)-fw*0.38:fx(f)-fw/2;const pos=f=>pos0(f+cp);
@@ -1809,14 +1887,15 @@ function drawFretboard(y0,h,W){
   if(det.stableMidi!=null&&G.playing&&!G.listen){for(let s=0;s<6;s++){const f=det.stableMidi-OPEN[s];if(f>=cp&&f<=maxF){cx.strokeStyle='rgba(77,171,247,.9)';cx.lineWidth=2;cx.beginPath();cx.arc(pos0(f),Ys(s),Math.min(sh*0.42,10),0,7);cx.stroke();}}}
   if(tgt){
     const rad=Math.min(sh*0.46,11);
-    if((tgt.chord||tgt.strum)&&tgt.shape){tgt.shape.forEach((f,s)=>{if(f<0){cx.fillStyle='#ff6b81';cx.fillText('×',x0-18,Ys(s)+1);return;}cx.fillStyle=SCOL[s];cx.beginPath();cx.arc(pos(f),Ys(s),rad,0,7);cx.fill();cx.fillStyle='#0b0d12';cx.fillText(f===0?'o':String(f),pos(f),Ys(s)+1);});}
-    else for(const n of tgt.notes){cx.fillStyle=SCOL[n.s];cx.beginPath();cx.arc(pos(n.f),Ys(n.s),rad,0,7);cx.fill();cx.fillStyle='#0b0d12';cx.fillText(String(n.f),pos(n.f),Ys(n.s)+1);}
+    if((tgt.chord||tgt.strum)&&tgt.shape){tgt.shape.forEach((f,s)=>{if(f<0){cx.fillStyle='#ff6b81';cx.fillText('×',x0-18,Ys(s)+1);return;}cx.fillStyle=SCOL[s];cx.beginPath();cx.arc(pos(f),Ys(s),rad,0,7);cx.fill();cx.fillStyle=ink(SCOL[s]);cx.fillText(f===0?'o':String(f),pos(f),Ys(s)+1);});}
+    else for(const n of tgt.notes){cx.fillStyle=SCOL[n.s];cx.beginPath();cx.arc(pos(n.f),Ys(n.s),rad,0,7);cx.fill();cx.fillStyle=ink(SCOL[n.s]);cx.fillText(String(n.f),pos(n.f),Ys(n.s)+1);}
   }
 }
 let hudT=0;
 // keep the hint clear of the score bar: beside it when there's room, otherwise on the line below it
 function placeHint(){const h=$('#hint'),hud=$('.hud');if(!h||!hud)return;const hw=hud.offsetWidth;
-  if(CW-hw-26>=170){h.style.top='7px';h.style.right=(hw+16)+'px';}else{h.style.top=(hud.offsetTop+hud.offsetHeight+4)+'px';h.style.right='10px';}}
+  h.style.right='auto';
+  if(CW-hw-26>=170){h.style.top='7px';h.style.maxWidth=(CW-hw-38)+'px';}else{h.style.top=(hud.offsetTop+hud.offsetHeight+4)+'px';h.style.maxWidth=(CW-32)+'px';}}
 function hudUpdate(now){
   if(now-hudT<80)return;hudT=now;
   const total=G.song.events.length;
@@ -1876,6 +1955,69 @@ $('#sOct').onchange=e=>{settings.anyOctave=e.target.checked;saveSettings();};
 $('#sNames').onchange=e=>{settings.names=e.target.checked;saveSettings();};
 $('#sFretboard').onchange=e=>{settings.fretboard=e.target.checked;saveSettings();};
 $('#sMetro').onchange=e=>{settings.metronome=e.target.checked;saveSettings();};
+/* ---- colours & theme settings ---- */
+function saveColors(c){settings.colors=c;saveSettings();applyColors();syncColorsUI();}
+function setColor(k,v){const c=colorPrefs();c[k]=v;saveColors(c);}
+function syncColorsUI(){
+  const c=colorPrefs();const opt=(o,cur)=>Object.entries(o).map(([k,v])=>`<option value="${k}"${k===cur?' selected':''}>${typeof v==='string'?v:v.name}</option>`).join('');
+  $('#cTheme').innerHTML=opt(THEMES,c.theme);$('#cNotes').innerHTML=opt(NOTE_PALETTES,c.notes);$('#cHw').innerHTML=opt(HIGHWAYS,c.highway);$('#cFb').innerHTML=opt(FRETBOARDS,c.fretboard);
+  const cu=$('#cCustom');cu.style.display=c.notes==='custom'?'':'none';
+  if(c.notes==='custom')cu.innerHTML=[5,4,3,2,1,0].map(s=>`<label>${STRING_LABELS[s]}<input type="color" data-s="${s}" value="${c.custom[s]}"></label>`).join('');
+  cu.querySelectorAll('input').forEach(el=>el.oninput=e=>{const cc=colorPrefs();cc.custom=cc.custom.slice();cc.custom[+e.target.dataset.s]=e.target.value;settings.colors=cc;saveSettings();applyColors();drawPreview();});
+  const z=$('#cZone');const custom=!ZONE_SWATCHES.includes(c.zone);
+  z.innerHTML=ZONE_SWATCHES.map(h=>`<button class="sw${h===c.zone?' on':''}" data-z="${h}" style="background:${h}" aria-label="${h}"></button>`).join('')+`<input type="color" id="cZoneC" value="${c.zone}" title="Pick any colour"${custom?' style="outline:3px solid var(--text)"':''}>`;
+  z.querySelectorAll('.sw').forEach(b=>b.onclick=()=>setColor('zone',b.dataset.z));
+  $('#cZoneC').onchange=e=>setColor('zone',e.target.value);
+  drawPreview();
+}
+$('#cTheme').onchange=e=>setColor('theme',e.target.value);
+$('#cNotes').onchange=e=>{const c=colorPrefs();const v=e.target.value;
+  // custom starts from whatever palette was showing, unless you've already made your own
+  if(v==='custom'&&JSON.stringify(c.custom)===JSON.stringify(DEF_COLORS.custom))c.custom=SCOL.slice();c.notes=v;saveColors(c);};
+$('#cHw').onchange=e=>setColor('highway',e.target.value);
+$('#cFb').onchange=e=>setColor('fretboard',e.target.value);
+$('#cReset').onclick=()=>saveColors(JSON.parse(JSON.stringify(DEF_COLORS)));
+$('#sColors').addEventListener('toggle',()=>{if($('#sColors').open)syncColorsUI();});
+// a small still of the highway so colour changes can be judged without starting a song
+function drawPreview(){
+  const c=$('#cPrev');if(!c||!$('#sColors').open)return;const r0=c.getBoundingClientRect();if(!r0.width)return;
+  const dpr=Math.min(3,window.devicePixelRatio||1);c.width=Math.round(r0.width*dpr);c.height=Math.round(r0.height*dpr);
+  const g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);const W=r0.width,H=r0.height;
+  g.fillStyle=COL.bg;g.fillRect(0,0,W,H);
+  const top=8,fbH=34,lh=(H-top-fbH-14)/6,Y=s=>top+(5-s+0.5)*lh,hx=Math.min(70,W*0.18);
+  if(COL.highway==='lighter'){g.fillStyle='rgba(255,255,255,.05)';g.fillRect(0,top,W,lh*6);}
+  else if(COL.highway==='stripes'){g.fillStyle='rgba(255,255,255,.035)';for(let s=0;s<6;s+=2)g.fillRect(0,Y(s)-lh/2,W,lh);}
+  else if(COL.highway==='tinted')for(let s=0;s<6;s++){g.fillStyle=hexA(SCOL[s],0.07);g.fillRect(0,Y(s)-lh/2,W,lh);}
+  for(let s=0;s<6;s++){g.fillStyle=SCOL[s]+'66';g.fillRect(0,Y(s)-0.5,W,s<3?2:1);}
+  const rad=Math.max(5,lh*0.42);
+  g.fillStyle=hexA(COL.zone,0.14);g.fillRect(hx-9,top,18,lh*6);
+  g.save();g.shadowColor=COL.zone;g.shadowBlur=14;g.fillStyle=COL.zone;g.fillRect(hx-1.5,top-4,3,lh*6+8);g.restore();
+  for(let s=0;s<6;s++){const on=s===3;g.beginPath();g.arc(hx,Y(s),rad+2,0,7);g.fillStyle=on?hexA(SCOL[s],0.3):COL.bg;g.fill();g.lineWidth=on?3:2;g.strokeStyle=on?SCOL[s]:hexA(COL.zone,0.55);g.stroke();}
+  g.textAlign='center';g.textBaseline='middle';g.font='bold '+Math.round(rad)+'px -apple-system,sans-serif';
+  [[3,2,hx+16],[1,3,hx+95],[4,1,hx+150],[0,3,hx+205],[5,0,hx+250],[2,2,hx+300]].forEach(([s,f,x])=>{if(x>W-rad)return;g.beginPath();g.arc(x,Y(s),rad,0,7);g.fillStyle=SCOL[s];g.fill();g.fillStyle=ink(SCOL[s]);g.fillText(String(f),x,Y(s)+1);});
+  const FB=COL.fb,y0=H-fbH-4,x0=26,x1=W-8,fw=(x1-x0)/6.5,sh=fbH/6;
+  g.fillStyle=FB.wood;g.fillRect(x0-6,y0,x1-x0+12,fbH);g.fillStyle=FB.nut;g.fillRect(x0+fw*0.5-2,y0+2,4,fbH-4);
+  for(let f=1;f<=6;f++){g.fillStyle=FB.wire;g.fillRect(x0+fw*0.5+f*fw-1,y0+2,2,fbH-4);}
+  g.fillStyle=FB.inlay;for(const f of [3,5]){g.beginPath();g.arc(x0+fw*f,y0+fbH/2,3,0,7);g.fill();}
+  for(let s=0;s<6;s++){g.fillStyle=FB.str;g.fillRect(x0-4,y0+(5-s+0.5)*sh-0.5,x1-x0+8,1);}
+  [[3,2],[4,3],[1,2]].forEach(([s,f])=>{const x=x0+fw*f,y=y0+(5-s+0.5)*sh;g.beginPath();g.arc(x,y,Math.min(sh*0.5,7),0,7);g.fillStyle=SCOL[s];g.fill();});
+}
+window.addEventListener('resize',drawPreview);
+/* ---- check for updates ---- */
+function verNum(v){return String(v).split('.').map(Number);}
+function newerVer(a,b){const x=verNum(a),y=verNum(b);for(let i=0;i<Math.max(x.length,y.length);i++){const d=(x[i]||0)-(y[i]||0);if(d)return d>0;}return false;}
+$('#sUpd').onclick=async()=>{
+  const btn=$('#sUpd'),msg=$('#sUpdMsg');
+  if(btn.dataset.ready){msg.textContent='Updating…';try{const reg=navigator.serviceWorker&&await navigator.serviceWorker.getRegistration();if(reg)await reg.update();}catch(e){}location.reload();return;}
+  btn.disabled=true;msg.textContent='Checking GitHub…';
+  try{
+    const r=await fetch('index.html?check='+Date.now(),{cache:'no-store'});if(!r.ok)throw new Error();
+    const m=(await r.text()).match(/const APP_VERSION='([\d.]+)'/);if(!m)throw new Error();
+    if(newerVer(m[1],APP_VERSION)){msg.textContent='Version '+m[1]+' is ready.';btn.textContent='Update now';btn.classList.add('primary');btn.dataset.ready='1';}
+    else msg.textContent='You have the latest version.';
+  }catch(e){msg.textContent='Couldn’t reach GitHub. Check your internet connection and try again.';}
+  btn.disabled=false;
+};
 function meterUpdate(){const v=analyser?Math.min(1,det.rms/(gate()*4)):0;const el=$('#sMeter');el.style.width=(v*100)+'%';el.style.background=det.rms>gate()?'#5ce1a6':'#555';}
 
 /* ---- import ---- */
@@ -2388,7 +2530,7 @@ requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.30';
+const APP_VERSION='1.31';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
