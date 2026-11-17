@@ -856,6 +856,9 @@ function inferChords(events,bpb){
   for(let a=0;a<L;a+=bpb){
     for(const [s,t,c] of solve(a,bpb)){if(!c)continue;any=true;for(const e of events)if(e.t>=s-1e-6&&e.t<t-1e-6)e.label=c.name;}
   }
+  // a strummed chord (3+ different notes at once) is named from its own notes, so bar lines that don't match the beat can't blur it
+  for(const e of events){const pcs=new Set(e.notes.map(n=>((n.midi%12)+12)%12));if(pcs.size<3)continue;
+    const c=estChord([{...e,t:0,d:1}],0,1,null);if(c){e.label=c.name;any=true;}}
   return any;
 }
 
@@ -2127,7 +2130,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.20';
+const APP_VERSION='1.21';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
