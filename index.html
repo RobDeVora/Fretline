@@ -1155,7 +1155,8 @@ async function enableMic(){
     const secure=window.isSecureContext;
     showMsg('Microphone unavailable',
       (!secure?'<p>This page must be opened from a secure <b>https://</b> address for the microphone to work.</p>':'')+
-      '<p>Fretline needs the microphone to hear your guitar. Check that:</p><ul><li>you allowed microphone access when asked (iPhone: Settings › Safari › Microphone; Android: tap the lock icon by the address bar › Permissions)</li><li>you opened the app in Safari or Chrome itself, not a preview inside another app</li></ul><p>You can still use <b>Listen</b> to hear any track.</p>');
+      (window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()?'<p>Fretline needs the microphone to hear your guitar. If you tapped “Don’t allow”, open your phone’s <b>Settings › Apps › Fretline › Permissions › Microphone</b> and choose <b>Allow only while using the app</b>, then come back and press Play.</p><p>You can still use <b>Listen</b> to hear any track.</p>':
+      '<p>Fretline needs the microphone to hear your guitar. Check that:</p><ul><li>you allowed microphone access when asked (iPhone: Settings › Safari › Microphone; Android: tap the lock icon by the address bar › Permissions)</li><li>you opened the app in Safari or Chrome itself, not a preview inside another app</li></ul><p>You can still use <b>Listen</b> to hear any track.</p>'));
     return false;
   }
 }
@@ -2371,7 +2372,7 @@ requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.25';
+const APP_VERSION='1.26';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
