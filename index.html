@@ -1066,19 +1066,27 @@ function ksBuffer(midi){
   ksCache[midi]=buf;return buf;
 }
 /* ---- sampled guitars (General MIDI soundfonts by Benjamin Gleitz, from FluidR3 / MusyngKite / FatBoy) ---- */
+const REC={
+ 'rec/acoustic':{pkg:'tonejs-instrument-guitar-acoustic-mp3@1.1.2',files:'A2 A3 A4 As2 As3 As4 B2 B3 B4 C3 C4 C5 Cs3 Cs4 Cs5 D2 D3 D4 D5 Ds2 Ds3 Ds4 E2 E3 E4 F2 F3 F4 Fs2 Fs3 Fs4 G2 G3 G4 Gs2 Gs3 Gs4'},
+ 'rec/nylon':{pkg:'tonejs-instrument-guitar-nylon-mp3@1.1.1',files:'A2 A3 A4 A5 As5 B1 B2 B3 B4 Cs3 Cs4 Cs5 D2 D3 D5 Ds4 E2 E3 E4 E5 Fs2 Fs3 Fs4 Fs5 G3 G5 Gs2 Gs4 Gs5'},
+ 'rec/electric':{pkg:'tonejs-instrument-guitar-electric-mp3@1.1.1',files:'A2 A3 A4 A5 C3 C4 C5 C6 Cs2 Ds3 Ds4 Ds5 E2 Fs2 Fs3 Fs4 Fs5'}
+};
 const SOUNDS=[
  ['basic','Basic (built-in, works offline)'],
- ['FluidR3_GM/acoustic_guitar_steel','Steel-string acoustic'],
- ['FatBoy/acoustic_guitar_steel','Steel-string acoustic (bright)'],
- ['MusyngKite/acoustic_guitar_steel','Steel-string acoustic (hi-fi, bigger download)'],
- ['FluidR3_GM/acoustic_guitar_nylon','Nylon-string classical'],
- ['MusyngKite/acoustic_guitar_nylon','Nylon-string classical (hi-fi, bigger download)'],
- ['FluidR3_GM/electric_guitar_clean','Clean electric'],
- ['FatBoy/electric_guitar_clean','Clean electric (alternate)'],
- ['FluidR3_GM/electric_guitar_jazz','Jazz electric'],
- ['FluidR3_GM/electric_guitar_muted','Palm-muted electric'],
- ['FluidR3_GM/overdriven_guitar','Overdriven electric'],
- ['FluidR3_GM/distortion_guitar','Distortion electric']
+ ['rec/acoustic','★ Acoustic guitar (real recording)'],
+ ['rec/nylon','★ Nylon-string classical (real recording)'],
+ ['rec/electric','★ Clean electric (real recording)'],
+ ['FluidR3_GM/acoustic_guitar_steel','Steel-string acoustic (General MIDI)'],
+ ['FatBoy/acoustic_guitar_steel','Steel-string acoustic, bright (General MIDI)'],
+ ['MusyngKite/acoustic_guitar_steel','Steel-string acoustic, hi-fi (General MIDI)'],
+ ['FluidR3_GM/acoustic_guitar_nylon','Nylon-string classical (General MIDI)'],
+ ['MusyngKite/acoustic_guitar_nylon','Nylon-string classical, hi-fi (General MIDI)'],
+ ['FluidR3_GM/electric_guitar_clean','Clean electric (General MIDI)'],
+ ['FatBoy/electric_guitar_clean','Clean electric, alternate (General MIDI)'],
+ ['FluidR3_GM/electric_guitar_jazz','Jazz electric (General MIDI)'],
+ ['FluidR3_GM/electric_guitar_muted','Palm-muted electric (General MIDI)'],
+ ['FluidR3_GM/overdriven_guitar','Overdriven electric (General MIDI)'],
+ ['FluidR3_GM/distortion_guitar','Distortion electric (General MIDI)']
 ];
 const sampler={id:'basic',buffers:{},loading:null};
 const FLAT_NAMES=['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
@@ -1105,6 +1113,25 @@ async function fetchSoundText(file,status){
   }
   throw new Error('Could not download this sound ('+lastErr+'). Check your internet connection.');
 }
+function normFor(bufs){const n={};for(const k in bufs){const d=bufs[k].getChannelData(0);let pk=0;for(let i=0;i<d.length;i+=4){const a=Math.abs(d[i]);if(a>pk)pk=a;}n[k]=pk>0.01?Math.min(4,0.7/pk):1;}return n;}
+async function fetchCached(key,urls){
+  let cache=null;try{cache=await caches.open('fretline-sounds');const hit=await cache.match(key);if(hit)return await hit.arrayBuffer();}catch(e){cache=null;}
+  let last='';
+  for(const u of urls){try{const r=await fetch(u,{mode:'cors'});if(!r.ok){last='error '+r.status;continue;}const ab=await r.arrayBuffer();try{if(cache)await cache.put(key,new Response(ab.slice(0)));}catch(e){}return ab;}catch(e){last=e.message||'network error';}}
+  throw new Error(last||'network error');
+}
+async function loadRecorded(id,status){
+  const R=REC[id];const files=R.files.split(' ');const bufs={};let done=0,err='';
+  status('Downloading sound… 0/'+files.length);
+  await Promise.all(files.map(async f=>{
+    const m=/^([A-G])(s?)(\d)$/.exec(f);const midi=(parseInt(m[3],10)+1)*12+PC[m[1]]+(m[2]?1:0);
+    try{const ab=await fetchCached('fretline-sound/'+id+'/'+f,['https://cdn.jsdelivr.net/npm/'+R.pkg+'/'+f+'.mp3','https://unpkg.com/'+R.pkg+'/'+f+'.mp3']);
+      bufs[midi]=await decodeAB(ab);}catch(e){err=e.message||'error';}
+    done++;status('Downloading sound… '+done+'/'+files.length);
+  }));
+  if(Object.keys(bufs).length<files.length*0.6)throw new Error('Could not download this sound ('+(err||'unknown error')+'). Check your internet connection.');
+  sampler.id=id;sampler.buffers=bufs;sampler.norm=normFor(bufs);status('');return true;
+}
 async function loadSound(id,status){
   status=status||(()=>{});
   if(id==='basic'){sampler.id='basic';sampler.buffers={};status('');return true;}
@@ -1112,6 +1139,7 @@ async function loadSound(id,status){
   if(sampler.loading&&sampler.loading.id===id)return sampler.loading.p;
   const p=(async()=>{
     await ensureAudio();
+    if(REC[id])return loadRecorded(id,status);
     const [font,inst]=id.split('/');
     const file=font+'/'+inst+'-mp3.js';
     const txt=await fetchSoundText(file,status);
@@ -1126,7 +1154,7 @@ async function loadSound(id,status){
     }
     await Promise.all(jobs);
     if(!Object.keys(bufs).length)throw new Error('This sound could not be decoded on this device.');
-    sampler.id=id;sampler.buffers=bufs;status('');return true;
+    sampler.id=id;sampler.buffers=bufs;sampler.norm=normFor(bufs);status('');return true;
   })();
   sampler.loading={id,p};
   try{return await p;}finally{if(sampler.loading&&sampler.loading.p===p)sampler.loading=null;}
@@ -1142,8 +1170,9 @@ function pluck(midi,when,vol,dur,cents,lp,s){
   let b=null,rate=1,gainMul=1;
   if(sampler.id!=='basic'){
     b=sampler.buffers[midi];
-    if(!b){for(let d=1;d<=3&&!b;d++){if(sampler.buffers[midi-d]){b=sampler.buffers[midi-d];rate=Math.pow(2,d/12);}else if(sampler.buffers[midi+d]){b=sampler.buffers[midi+d];rate=Math.pow(2,-d/12);}}}
-    if(b)gainMul=2.2;
+    let key=midi;
+    if(!b){for(let d=1;d<=12&&!b;d++){if(sampler.buffers[midi-d]){key=midi-d;b=sampler.buffers[key];rate=Math.pow(2,d/12);}else if(sampler.buffers[midi+d]){key=midi+d;b=sampler.buffers[key];rate=Math.pow(2,-d/12);}}}
+    if(b)gainMul=(sampler.norm&&sampler.norm[key])||2.2;
   }
   if(b)diag.sample++;else{diag.basic++;if(sampler.id!=='basic')diag.missing.add(midi);}
   if(!b)b=ksBuffer(midi);
@@ -1889,7 +1918,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.11';
+const APP_VERSION='1.12';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
