@@ -1,0 +1,13 @@
+{
+  "name": "fretline-android",
+  "private": true,
+  "description": "Android app wrapper for Fretline (Capacitor). The app loads the live site from GitHub Pages, so web updates arrive without reinstalling.",
+  "scripts": {
+    "sync": "node copy-web.js && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.6.10",
+    "@capacitor/cli": "7.6.10",
+    "@capacitor/core": "7.6.10"
+  }
+}

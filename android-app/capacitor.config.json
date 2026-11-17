@@ -1,0 +1,16 @@
+{
+  "appId": "com.robdevora.fretline",
+  "appName": "Fretline",
+  "webDir": "www",
+  "server": {
+    "url": "https://robdevora.github.io/Fretline/",
+    "androidScheme": "https",
+    "allowNavigation": ["robdevora.github.io"]
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": true }
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

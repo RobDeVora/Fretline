@@ -206,6 +206,9 @@ header h1 span{color:var(--accent)}
       <div class="field" style="margin-top:8px"><label>Part to play</label><select id="impPart"></select></div>
       <div class="field" id="impNotesField"><label>Notes</label><select id="impNotes"><option value="all">All notes (chords and harmonies)</option><option value="top">Top note only (the melody)</option><option value="chords">Guitar chords (strummed, with capo suggestion)</option></select></div>
     </div>
+    <div class="field"><label>…or download from a link</label>
+      <div style="display:flex;gap:6px"><input id="impUrl" type="url" inputmode="url" placeholder="https://…/song.mid" style="flex:1"><button type="button" id="impUrlGo">Download</button></div>
+      <span class="small" id="impUrlNote">A direct link to a MIDI, MusicXML, Guitar Pro, ChordPro or text file.</span></div>
     <div class="field" id="impTextField"><label>…or paste a tab or chord sheet</label>
       <textarea id="impText" spellcheck="false" placeholder="e|-----0---3---|
 B|---1---1---1-|
@@ -293,6 +296,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
       <select id="sFx"><option value="off">Off</option><option value="miss">Sour sound on wrong or missed notes</option><option value="all">Also play the right note when you hit it (use headphones)</option></select>
       <span class="small">Uses the guitar sound above. Without headphones the phone's mic can hear the app, so “play the right note” works best with headphones.</span></div>
     <div class="field inline"><label>Metronome click while playing</label><input type="checkbox" id="sMetro"></div>
+    <div class="field" id="sAndroid" style="display:none"><a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2);font-weight:600">📱 Get the Android app</a><div class="small">Adds “Open with Fretline” for song files and downloads from links. Your saved songs stay in this browser; the app starts fresh.</div></div>
     <div class="row" style="justify-content:space-between"><span class="small" id="appVer"></span><button class="primary" id="sClose">Done</button></div>
   </div>
 </div>
@@ -1854,7 +1858,7 @@ function meterUpdate(){const v=analyser?Math.min(1,det.rms/(gate()*4)):0;const e
 let impFile=null; // {name,fmt,bpm,bpb,parts,title}
 function setFileMode(on){$('#impFileBox').style.display=on?'':'none';$('#impTextField').style.display=on?'none':'';$('#impType').closest('.grid2').style.display=on?'none':'';}
 function impStrumValue(){return $('#impStrumField').style.display==='none'?'':$('#impStrum').value;}
-function openImport(){impCustom='';G.impStrumTouched=false;$('#impStrum').innerHTML='';impFile=null;setFileMode(false);$('#impFile').value='';$('#impTitle').value='';$('#impText').value='';$('#impPreview').textContent='';$('#impPreview').className='preview';show('import');}
+function openImport(){impCustom='';$('#impUrl').value='';$('#impUrlNote').textContent='A direct link to a MIDI, MusicXML, Guitar Pro, ChordPro or text file.';G.impStrumTouched=false;$('#impStrum').innerHTML='';impFile=null;setFileMode(false);$('#impFile').value='';$('#impTitle').value='';$('#impText').value='';$('#impPreview').textContent='';$('#impPreview').className='preview';show('import');}
 $('#impBack').onclick=$('#impCancel').onclick=()=>{show('home');renderList();};
 function fileEvents(){
   const part=impFile.parts[+$('#impPart').value]||impFile.parts[0];
@@ -2359,7 +2363,8 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.23';
+const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
+const APP_VERSION='1.24';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
@@ -2375,17 +2380,41 @@ async function receiveShare(){
   try{
     const c=await caches.open('fretline-share');const dr=await c.match('./shared-data');const fr=await c.match('./shared-file');
     const d=dr?await dr.json():{};await c.delete('./shared-data');await c.delete('./shared-file');
-    openImport();
-    const isUrl=t=>/^\s*https?:\/\/\S+\s*$/.test(t||'');
-    if(d.title&&!isUrl(d.title))$('#impTitle').value=d.title.replace(/\s*[|\-–—]\s*(Ultimate[- ]Guitar|Songsterr|Chordify).*$/i,'').trim();
-    if(fr){const name=decodeURIComponent(fr.headers.get('X-File-Name')||'shared.txt');await loadImportFile(new File([await fr.blob()],name));return;}
-    const text=(d.text||'').trim();
-    if(text&&!isUrl(text)){$('#impText').value=text;refreshPreview();return;}
-    const p=$('#impPreview');p.className='preview err';
-    p.textContent='Fretline received a link'+((d.url||text)?' ('+(d.url||text).trim()+')':'')+', but it can\'t read other websites directly. Open the page, select and copy the chords, then share the copied text to Fretline or paste it below.';
+    const file=fr?new File([await fr.blob()],decodeURIComponent(fr.headers.get('X-File-Name')||'shared.txt')):null;
+    await applyShared(d,file);
   }catch(err){}
 }
+async function applyShared(d,file){
+  openImport();
+  const isUrl=t=>/^\s*https?:\/\/\S+\s*$/.test(t||'');
+  if(d.title&&!isUrl(d.title))$('#impTitle').value=d.title.replace(/\s*[|\-–—]\s*(Ultimate[- ]Guitar|Songsterr|Chordify).*$/i,'').trim();
+  if(file){await loadImportFile(file);return;}
+  const text=(d.text||'').trim();
+  if(text&&!isUrl(text)){$('#impText').value=text;refreshPreview();return;}
+  const link=(d.url||text||'').trim();
+  if(/\.(mid|midi|kar|musicxml|mxl|xml|gp\d?|gpx|cho|chordpro|crd|txt|pdf)(\?|#|$)/i.test(link)){$('#impUrl').value=link;$('#impUrlGo').onclick();return;}
+  const p=$('#impPreview');p.className='preview err';
+  p.textContent='Fretline received a link'+(link?' ('+link+')':'')+', but it isn\'t a song file it can download. Open the page, select and copy the chords, then share the copied text to Fretline or paste it below.';
+}
 receiveShare();
+/* ---- download a song file from a link (works fully in the Android app; in a browser only if the site allows it) ---- */
+$('#impUrlGo').onclick=async()=>{
+  const url=$('#impUrl').value.trim();const note=$('#impUrlNote');if(!/^https?:\/\//i.test(url)){note.textContent='Paste a full link starting with https://';return;}
+  note.textContent='Downloading…';
+  try{const r=await fetch(url);if(!r.ok)throw new Error('HTTP '+r.status);const buf=await r.arrayBuffer();
+    let name=decodeURIComponent((url.split(/[?#]/)[0].split('/').pop())||'song');if(!/\.[a-z0-9]{2,8}$/i.test(name)){const ct=r.headers.get('content-type')||'';name+=/midi/.test(ct)?'.mid':/pdf/.test(ct)?'.pdf':/xml/.test(ct)?'.musicxml':'.txt';}
+    note.textContent='Downloaded '+name+'.';await loadImportFile(new File([buf],name));}
+  catch(e){note.textContent=IS_APP?'Download failed. Check the link points straight at a file, and that you are online.':'Your browser blocked this download (most sites don\'t allow it). Download the file yourself and load it above, or use the Fretline Android app, which can download from any link.';}
+};
+/* ---- Android app: songs opened with, or shared to, Fretline ---- */
+(function(){const P=IS_APP&&window.Capacitor.Plugins&&window.Capacitor.Plugins.Incoming;if(!P)return;
+  const handle=async it=>{if(!it)return;try{
+    if(it.error){showMsg('Could not open the file','<p>'+esc(it.error)+'</p>');return;}
+    let file=null;if(it.data){const bin=atob(it.data);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);file=new File([u],it.name||'song');}
+    await applyShared({title:it.title||'',text:it.text||'',url:''},file);}catch(e){}};
+  P.getPending().then(r=>handle(r&&r.item)).catch(()=>{});P.addListener('incoming',handle);
+})();
+if(!IS_APP&&/android/i.test(navigator.userAgent))$('#sAndroid').style.display='';
 /* ---- "Open with Fretline" for song files (where the browser supports file handling) ---- */
 if('launchQueue' in window)launchQueue.setConsumer(async lp=>{if(!lp.files||!lp.files.length)return;try{const f=await lp.files[0].getFile();openImport();await loadImportFile(f);}catch(e){}});
 </script>
