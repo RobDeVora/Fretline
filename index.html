@@ -759,8 +759,59 @@ function chordEventsFromSymbols(harm,bpb){
 }
 function chordProMeta(text){const m=/\{\s*(?:title|t)\s*:\s*([^}]*)\}/i.exec(text);return {title:m?m[1].trim():''};}
 
+
+/* ---- chord estimation from notes ---- */
+const EST_Q=[['',[0,4,7],0],['m',[0,3,7],0],['7',[0,4,7,10],.05],['m7',[0,3,7,10],.05],['maj7',[0,4,7,11],.06],['dim',[0,3,6],.06],['sus4',[0,5,7],.08],['5',[0,7],.1]];
+function estKey(events){
+  const w=new Float32Array(12);for(const e of events)for(const n of e.notes)w[((n.midi%12)+12)%12]+=Math.min(e.d,2);
+  const last=events[events.length-1];const lastPc=((Math.min(...last.notes.map(n=>n.midi))%12)+12)%12;
+  let best=null;
+  for(let k=0;k<12;k++)for(const minor of [false,true]){
+    const sc=(minor?[0,2,3,5,7,8,10]:[0,2,4,5,7,9,11]);let s=0;for(const i of sc)s+=w[(k+i)%12];
+    s+=0.5*w[k]+0.3*w[(k+7)%12]+0.2*w[(k+(minor?3:4))%12]+(lastPc===k?0.08*s:0);
+    if(!best||s>best.s)best={s,k,minor};}
+  const degs=best.minor?[[0,'m',.12],[3,'',.06],[5,'m',.08],[7,'',.08],[7,'m',.04],[8,'',.06],[10,'',.06]]:[[0,'',.12],[5,'',.1],[7,'',.1],[9,'m',.06],[2,'m',.04],[4,'m',.02]];
+  return degs.map(([o,q,pr])=>({name:NOTE_NAMES[(best.k+o)%12]+q,pcs:(q==='m'?[0,3,7]:[0,4,7]).map(i=>(best.k+o+i)%12),pr}));
+}
+function estChord(events,a,b,cands){
+  const w=new Float32Array(12),bass=new Float32Array(12);let tot=0;let poly=false,first=null;
+  for(const e of events){if(e.t<a-1e-6||e.t>=b-1e-6)continue;const d=Math.max(0.1,Math.min(e.d,b-e.t));
+    let lo=null;const seen=new Set();if(first==null)first=((Math.min(...e.notes.map(n=>n.midi))%12)+12)%12;
+    for(const n of e.notes){const pc=((n.midi%12)+12)%12;if(!seen.has(pc)){seen.add(pc);w[pc]+=d;tot+=d;}if(lo==null||n.midi<lo)lo=n.midi;}
+    if(seen.size>=2)poly=true;if(lo!=null)bass[((lo%12)+12)%12]+=d;}
+  let distinct=0;for(let i=0;i<12;i++)if(w[i]>0)distinct++;
+  if(tot<=0)return null;
+  if(!poly&&cands){let bm=null;
+    for(const c of cands){let inS=0;for(const pc of c.pcs)inS+=w[pc];const sc=inS-0.7*(tot-inS)+c.pr*tot+(c.pcs.includes(first)?0.15*tot:0);if(!bm||sc>bm.sc)bm={sc,name:c.name,frac:inS/tot};}
+    return bm&&bm.frac>=0.5?bm:null;}
+  if(distinct<2)return null;
+  let best=null;
+  for(let r=0;r<12;r++)for(const [q,iv,pen] of EST_Q){
+    let inS=0,miss=0;for(const i of iv){const x=w[(r+i)%12];if(x>0)inS+=x;else miss++;}
+    const out=tot-inS;
+    const sc=inS-0.7*out-miss*0.18*tot-pen*tot+0.25*w[r]+0.2*bass[r];
+    if(!best||sc>best.sc)best={sc,name:NOTE_NAMES[r]+q,frac:inS/tot,poly:true};
+  }
+  return best&&best.frac>=0.6?best:null;
+}
+function inferChords(events,bpb){
+  if(!events.length||events.some(e=>e.chord||e.label))return false;
+  const L=songLength(events);let any=false;const cands=estKey(events);
+  const solve=(a,len)=>{
+    const whole=estChord(events,a,a+len,cands);
+    const has=(s,t)=>events.some(e=>e.t>=s-1e-6&&e.t<t-1e-6);
+    if(len>=2&&whole&&whole.poly){if(!has(a+len/2,a+len))return solve(a,len/2);if(!has(a,a+len/2))return solve(a+len/2,len/2);}
+    if(len>=2){const h1=estChord(events,a,a+len/2,cands),h2=estChord(events,a+len/2,a+len,cands);
+      if(h1&&h2&&h1.poly&&h2.poly&&h1.name!==h2.name&&(!whole||(h1.frac>whole.frac+0.08&&h2.frac>whole.frac+0.08)))return [...solve(a,len/2),...solve(a+len/2,len/2)];}
+    return [[a,a+len,whole]];
+  };
+  for(let a=0;a<L;a+=bpb){
+    for(const [s,t,c] of solve(a,bpb)){if(!c)continue;any=true;for(const e of events)if(e.t>=s-1e-6&&e.t<t-1e-6)e.label=c.name;}
+  }
+  return any;
+}
 function labelByBar(ev,prog,bars){for(const e of ev){if(e.chord)continue;const b=Math.min(bars-1,Math.floor(e.t/4+1e-9));e.label=prog[b].name;}return ev;}
-if(typeof module!=='undefined')module.exports={parseMidi,eventsFromNotes,assignStrings,chordProMeta,parseMelody,parseFretSeq,parseChordSeq,parseChordSheet,parseTab,genTrack,chordShape,chordPCs,midiToName,fingerFor,songLength,SCALES};
+if(typeof module!=='undefined')module.exports={inferChords,parseMidi,eventsFromNotes,assignStrings,chordProMeta,parseMelody,parseFretSeq,parseChordSeq,parseChordSheet,parseTab,genTrack,chordShape,chordPCs,midiToName,fingerFor,songLength,SCALES};
 </script>
 
 <script>
@@ -834,6 +885,7 @@ function buildSong(def){
     if(def.kind==='tab')events=parseTab(def.src).events;
     else events=parseChordSheet(def.src,def.cb||4);
   }
+  inferChords(events,def.bpb||4);
   const song={id:def.id,title:def.title,cat:def.cat,bpm:def.bpm||90,bpb:def.bpb||4,events,length:songLength(events),gen:def.gen||null};
   if(def.cat!=='gen')def._built=song;
   return song;
@@ -1046,7 +1098,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&G.playing)
 function chordSegments(S){
   const segs=[];
   for(const e of S.events){const n=e.chord||e.label;if(!n)continue;const last=segs[segs.length-1];
-    if(last&&last.name===n&&Math.abs(last.end-e.t)<1e-6&&!e.chord){last.end=e.t+e.d;continue;}
+    if(last&&last.name===n&&!e.chord){last.end=e.t+e.d;continue;}
     if(last&&last.name===n&&e.chord&&Math.abs(last.end-e.t)<1e-6){segs.push({t:e.t,end:e.t+e.d,name:n});continue;}
     segs.push({t:e.t,end:e.t+e.d,name:n});}
   for(let i=0;i<segs.length-1;i++)segs[i].end=Math.max(segs[i].end,segs[i+1].t);
@@ -1463,7 +1515,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.4';
+const APP_VERSION='1.5';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
