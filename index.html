@@ -258,7 +258,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
   <div class="form">
     <div class="field"><label>Styles (tap several to mix them)</label>
       <div class="seg" id="genStyle" style="display:flex">
-        <button data-v="melody" class="on" style="flex:1">Melody</button><button data-v="riff" style="flex:1">Riff</button><button data-v="chords" style="flex:1">Chords</button><button data-v="arp" style="flex:1">Arp</button><button data-v="strum" style="flex:1">Strum</button>
+        <button data-v="melody" class="on" style="flex:1">Melody</button><button data-v="riff" style="flex:1">Riff</button><button data-v="chords" style="flex:1">Chords</button><button data-v="arp" style="flex:1">Arp</button><button data-v="strum" style="flex:1">Strum</button><button data-v="solo" style="flex:1">Solo</button>
       </div></div>
     <div class="grid2">
       <div class="field"><label>Key</label><select id="genKey"></select></div>
@@ -359,6 +359,8 @@ function fingerFor(midi,pos){
 }
 function noteObj(midi,pos){const p=fingerFor(midi,pos);if(!p)return null;return {s:p.s,f:p.f,midi};}
 function uniq(a){return [...new Set(a)];}
+// for hammer-ons, pull-offs and slides, remember the note they come from on the same string
+function linkTech(ev){const last={};for(const e of ev){for(const n of e.notes){if(n.tech&&last[n.s])n.from=last[n.s];}for(const n of e.notes)last[n.s]={t:e.t,f:n.f,midi:n.midi};}return ev;}
 function finishEvents(ev){
   for(const e of ev){ if(!e.pcs) e.pcs=uniq(e.notes.map(n=>((n.midi%12)+12)%12)); }
   return ev;
@@ -496,12 +498,17 @@ function parseTab(text){
         const ch=row[c];
         if(ch<'0'||ch>'9')continue;
         if(c>0&&row[c-1]>='0'&&row[c-1]<='9')continue;
-        if(c>0&&/[br]/i.test(row[c-1]))continue; // bend/release target
+        if(c>0&&/[br]/i.test(row[c-1]))continue; // bend/release target (the bend is stored on the note before it)
         let num=ch;
         if(c+1<row.length&&row[c+1]>='0'&&row[c+1]<='9'){const two=parseInt(ch+row[c+1],10);if(two<=24)num=ch+row[c+1];}
         const f=parseInt(num,10);
+        const note={s,f,midi:OPEN[s]+f};
+        const pv=c>0?row[c-1]:'';if(pv==='h'||pv==='H')note.tech='h';else if(pv==='p'||pv==='P')note.tech='p';else if(pv==='/'||pv==='\\'||pv==='s'||pv==='S')note.tech='s';
+        const nx=row[c+num.length];
+        if(nx==='b'||nx==='B'){const tm=/^\d{1,2}/.exec(row.slice(c+num.length+1));note.bend=tm?Math.max(1,Math.min(4,parseInt(tm[0],10)-f)):2;}
+        if(nx==='~'||(note.bend&&/~/.test(row.slice(c+num.length,c+num.length+5))))note.vib=true;
         if(!map.has(c))map.set(c,[]);
-        const arr=map.get(c);if(!arr.some(n=>n.s===s))arr.push({s,f,midi:OPEN[s]+f});
+        const arr=map.get(c);if(!arr.some(n=>n.s===s))arr.push(note);
       }
     }
     const keys=[...map.keys()].sort((a,b)=>a-b);
@@ -567,9 +574,12 @@ function genTrack(opt){
   if(scaleKey==='random'){const ks=Object.keys(SCALES);scaleKey=ks[Math.floor(r()*ks.length)];}
   const scale=SCALES[scaleKey];const minor=!!MINORISH[scaleKey];
   const keyPc=opt.key;const diff=opt.diff;const bars=opt.bars;
-  const prog=opt.prog||genProgression(r,keyPc,minor,bars);
+  const prog=opt.prog||(opt.style==='solo'&&scaleKey==='blues'?bluesProg(keyPc,bars,diff>=2):genProgression(r,keyPc,minor,bars));
   const keyName=NOTE_NAMES[keyPc]+' '+SCALE_NAMES[scaleKey];
   let ev=[];let pos=null;
+  if(opt.style==='solo'){const box=scaleShape(keyPc,MINORISH[scaleKey]?'pentMinor':'pentMajor',0,2);const fr=box.fret>=12?box.fret-12:box.fret===0&&diff>=2?12:box.fret;
+    return {events:labelByBar(genSolo({keyPc,scaleKey,diff,bars,prog,r}),prog,bars),title:'Solo in '+keyName,key:keyName,
+      desc:(MINORISH[scaleKey]?'Minor':'Major')+' pentatonic, shape 1 at fret '+fr+(diff>=2?', climbing into shape 2':'')+' · '+prog.map(p=>p.name).join(' ')};}
   if(opt.style==='strum'){
     const pool=STRUM_PATTERNS.filter(p=>!p.bpb&&p.lvl<=diff);const top=pool.filter(p=>p.lvl===diff);
     const pk=(top.length&&r()<0.7)?top:pool;const pt=pk[Math.floor(r()*pk.length)];
@@ -974,7 +984,7 @@ function genMix(opt){
     const tr=genTrack({style:st,key:opt.key,scale:scaleKey,diff:opt.diff,bars:sl,seed:opt.seed*31+i*7+1,prog});
     for(const e of tr.events)ev.push({...e,t:e.t+i*secLen*4});
   }
-  const NM={melody:'Melody',riff:'Riff',chords:'Chords',arp:'Arpeggio',strum:'Strum'};
+  const NM={melody:'Melody',riff:'Riff',chords:'Chords',arp:'Arpeggio',strum:'Strum',solo:'Solo'};
   return {events:ev,title:'Mix in '+NOTE_NAMES[opt.key]+' '+SCALE_NAMES[scaleKey],desc:order.map(s=>NM[s]).join(' → ')};
 }
 const OPEN_SHAPES=new Set(['C','D','E','G','A','Am','Dm','Em','A7','B7','C7','D7','E7','G7','Am7','Dm7','Em7','Bm7','Cmaj7','Fmaj7','Gmaj7','Amaj7','Dmaj7','Emaj7','Asus2','Asus4','Dsus2','Dsus4','Esus4','Cadd9','E5','A5','D5','G5']);
@@ -1343,7 +1353,7 @@ let master=null;const voices={};const diag={sample:0,basic:0,missing:new Set(),w
 function masterOut(){if(!master){const c=actx.createDynamicsCompressor();c.threshold.value=-12;c.knee.value=8;c.ratio.value=8;c.attack.value=0.003;c.release.value=0.2;const g=actx.createGain();g.gain.value=0.9;c.connect(g);g.connect(actx.destination);master=c;}return master;}
 function stopVoices(){if(!actx)return;const t=actx.currentTime;for(const k in voices){const v=voices[k];try{v.g.gain.cancelScheduledValues(t);v.g.gain.setValueAtTime(v.g.gain.value,t);v.g.gain.linearRampToValueAtTime(0.0001,t+0.08);v.src.stop(t+0.1);}catch(e){}delete voices[k];}}
 // s = string index: a new note on a string cuts off the note already ringing there, like a real guitar
-function pluck(midi,when,vol,dur,cents,lp,s){
+function pluck(midi,when,vol,dur,cents,lp,s,fx){
   const det$=cents?Math.pow(2,cents/1200):1;const dest=masterOut();
   const out=()=>{if(!lp)return dest;const f=actx.createBiquadFilter();f.type='lowpass';f.frequency.value=lp;f.connect(dest);return f;};
   const t=actx.currentTime+(when||0);const ring=s!=null;
@@ -1363,6 +1373,10 @@ function pluck(midi,when,vol,dur,cents,lp,s){
   const hold=Math.max(ring?0.3:0.12,Math.min(dur||2,full,4.5));
   g.gain.setValueAtTime(v,t);g.gain.setValueAtTime(v,t+hold);g.gain.setTargetAtTime(0.0001,t+hold,0.06);
   const end=Math.min(full,hold+0.4);
+  if(fx){const r0=rate*det$,pr=src.playbackRate;
+    if(fx.from!=null){pr.setValueAtTime(r0*Math.pow(2,(fx.from-midi)/12),t);pr.linearRampToValueAtTime(r0,t+Math.min(0.12,hold*0.5));}
+    if(fx.bend){const up=Math.min(0.22,hold*0.4);pr.setValueAtTime(r0,t+0.04);pr.linearRampToValueAtTime(r0*Math.pow(2,fx.bend/12),t+0.04+up);}
+    if(fx.vib&&hold>0.35){const o=actx.createOscillator(),og=actx.createGain();o.frequency.value=5.5;og.gain.setValueAtTime(0,t);og.gain.linearRampToValueAtTime(fx.bend?30:22,t+0.3);o.connect(og);og.connect(src.detune);o.start(t+0.1);o.stop(t+hold+0.4);}}
   src.connect(g);g.connect(out());src.start(t);src.stop(t+end+0.05);
   if(ring){dampString(s,t);const me={src,g,v};voices[s]=me;src.onended=()=>{if(voices[s]===me)delete voices[s];};}
 }
@@ -1542,7 +1556,8 @@ function playEvent(e){
   const sec=G.song?e.d*60/(G.song.bpm*G.speed)+0.15:1.5;
   if(e.strum){if(e.strum==='x'){stopVoices();if(sampler.id!=='basic'){(e.snotes||[]).forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.008,0.12,0.06));}else click(false,performance.now());return;}if(e.shape)e.shape.forEach((f,s)=>{if(f<0)dampString(s,actx.currentTime);});const ns=(e.snotes||[]).slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.012,e.strum==='U'?0.16:0.22,sec,0,0,n.s));return;}
   if(e.chord||e.notes.length>=3){if(e.shape)e.shape.forEach((f,s)=>{if(f<0)dampString(s,actx.currentTime);});const ns=e.notes.slice().sort((a,b)=>a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.018,0.22,sec,0,0,n.s));}
-  else e.notes.forEach(n=>pluck(n.midi+(G.capo||0),0,0.4,sec,0,0,n.s));
+  else e.notes.forEach(n=>{const cp=G.capo||0;const leg=n.tech==='h'||n.tech==='p';
+    pluck(n.midi+cp,0,leg?0.28:0.4,sec,0,0,n.s,(n.tech||n.bend||n.vib)?{from:n.tech==='s'&&n.from?n.from.midi+cp:null,bend:n.bend||0,vib:!!n.vib}:null);});
 }
 function click(accent,now){
   if(!actx)return;const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=accent?1600:1100;
@@ -1594,7 +1609,7 @@ function renderList(){
   }else if(curCat==='gen'){
     h+=`<div class="row" style="margin:0 0 10px"><label style="flex:1">Track length</label><select id="quickLen">${LEN_OPTS.map(([v,n])=>`<option value="${v}"${v===(genOpt.quickLen||'b8')?' selected':''}>${n}</option>`).join('')}</select></div>`;
     h+=`<div class="note-txt">Fresh practice tracks, composed on the spot. Pick a style or tap Customize for key, scale and difficulty.</div>`;
-    const quick=[['mix','Mix','Everything at once: sections of melody, riff, chords, arpeggio and strumming'],['melody','Melody','Single-note lines over a chord progression'],['riff','Riff','Low-string riffs that repeat and vary'],['chords','Chords','Random chord progressions'],['arp','Arpeggio','Fingerpicking-style broken chords'],['strum','Strumming','A strum pattern over a random progression']];
+    const quick=[['mix','Mix','Everything at once: sections of melody, riff, chords, arpeggio and strumming'],['melody','Melody','Single-note lines over a chord progression'],['riff','Riff','Low-string riffs that repeat and vary'],['chords','Chords','Random chord progressions'],['arp','Arpeggio','Fingerpicking-style broken chords'],['strum','Strumming','A strum pattern over a random progression'],['solo','Solo','A written pentatonic solo with bends, slides and hammer-ons']];
     for(const [st,t,s] of quick)h+=`<div class="item" data-gen="${st}"><div class="ic" style="background:${CAT_COLOR.gen}">${t[0]}</div><div class="tx"><div class="t">Random ${t.toLowerCase()}</div><div class="s">${s}</div></div><div class="best">Play ›</div></div>`;
     h+=`<button class="addbtn" id="btnCustomGen">Customize a generated track…</button>`;
   }else if(curCat==='mine'){
@@ -1798,7 +1813,7 @@ function applyStrum(choice){
   if(sc.lvl){const r=simplifyEvents(src,G.capo,sc.lvl,sc.capo);src=r.events;G.capo=r.capo;
     showHint('Simplified to '+r.after+' easy chords'+(r.capo?', capo '+r.capo:'')+(r.exact?'':' (some close substitutes)'),5000);}
   G.song=(pat||sc.lvl)?{...G.base,events:pat?strumify(src,pat):src}:G.base;
-  G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);syncCapo();setupBand();
+  linkTech(G.song.events);G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);syncCapo();setupBand();
 }
 $('#simpSel').onchange=e=>{const ss=store.get('simp',{});if(e.target.value)ss[G.def.id]={lvl:e.target.value};else delete ss[G.def.id];store.set('simp',ss);resetRun();setupStrum();syncCapo();updateButtons();};
 $('#strumSel').onchange=e=>{
@@ -1849,9 +1864,14 @@ function matchEvent(e,i,now){
     return G.cf>=3;
   }
   const m=det.stableMidi;if(m==null)return false;
-  if(settings.backing&&G.band&&G.band.events.length&&!(det.onsetAt>G.lastHitAt&&now-det.onsetAt<700))return false;
-  const cp=(G.capo||0);return e.notes.some(n=>n.midi+cp===m||(settings.anyOctave&&(((n.midi+cp-m)%12)+12)%12===0));
+  const legato=e.notes.some(n=>n.tech==='h'||n.tech==='p'||n.tech==='s');
+  if(!legato&&settings.backing&&G.band&&G.band.events.length&&!(det.onsetAt>G.lastHitAt&&now-det.onsetAt<700))return false;
+  const cp=(G.capo||0);return e.notes.some(n=>noteOk(n,m,cp));
 }
+// the right pitch (any octave if allowed); a bent note counts anywhere from the fretted pitch up to its target
+function techWords(n){return n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
+function noteOk(n,m,cp){const a=n.midi+cp;if(m===a||(settings.anyOctave&&(((a-m)%12)+12)%12===0))return true;
+  if(n.bend){for(let k=1;k<=n.bend;k++){if(m===a+k||(settings.anyOctave&&(((a+k-m)%12)+12)%12===0))return true;}}return false;}
 function addPop(text,color){G.pops.push({text,color,t:performance.now()});if(G.pops.length>6)G.pops.shift();}
 function update(dt,now){
   if(!G.playing)return;
@@ -1875,7 +1895,7 @@ function update(dt,now){
     if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){st[i]=2;G.misses++;G.streak=0;addPop('Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
     if(settings.fx!=='off'&&!ch&&!e.strum&&det.stableMidi!=null&&det.onsetAt>(G.wrongOnset||0)&&det.onsetAt>G.lastHitAt&&now-det.onsetAt>70&&now>muteUntil){
       const m=det.stableMidi,cp=G.capo||0;
-      if(!e.notes.some(n=>n.midi+cp===m||(settings.anyOctave&&(((n.midi+cp-m)%12)+12)%12===0))){G.wrongOnset=det.onsetAt;G.wrongAt=now;fxMiss(e,now);addPop('Wrong note','#ff5d73');break;}
+      if(!e.notes.some(n=>noteOk(n,m,cp))){G.wrongOnset=det.onsetAt;G.wrongAt=now;fxMiss(e,now);addPop('Wrong note','#ff5d73');break;}
     }
     if(matchEvent(e,i,now)){
       fxHit(e,now);
@@ -1956,7 +1976,7 @@ function draw(now){
   syncFocus();const k=settings.big||1;const F=px=>Math.round(px*k)+'px';
   const fbH=settings.fretboard?Math.max(64,Math.min(120,H*0.26)):0;const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?72:44)*k),laneBot=H-(settings.fretboard?fbH+18:14);const laneH=Math.max(12,(laneBot-laneTop)/6);
   const hitX=Math.max(54,Math.min(W*0.2,140));const ppb=Math.max(70,Math.min(170,W/7))*settings.zoom*Math.sqrt(k);
-  const Y=s=>laneTop+(5-s+0.5)*laneH;
+  const Y=s=>laneTop+(5-s+0.5)*laneH;hitX0=hitX;ppb0=ppb;
   // highway background
   if(COL.highway==='lighter'){cx.fillStyle='rgba(255,255,255,.05)';cx.fillRect(0,laneTop,W,laneH*6);}
   else if(COL.highway==='stripes'){cx.fillStyle='rgba(255,255,255,.035)';for(let s=0;s<6;s+=2)cx.fillRect(0,Y(s)-laneH/2,W,laneH);}
@@ -2044,6 +2064,7 @@ function draw(now){
       if(st===1){cx.lineWidth=3;cx.strokeStyle='rgba(92,225,166,.5)';cx.beginPath();cx.arc(x,y,r+4,0,Math.PI*2);cx.stroke();}
       cx.fillStyle=st===2?'#999':st===1?'#0b0d12':ink(SCOL[n.s]);cx.font=`bold ${Math.round(r*1.0)}px -apple-system,sans-serif`;
       cx.fillText(settings.names?pcName(n.midi):String(n.f),x,y+1);
+      if(n.tech||n.bend||n.vib)drawTech(n,x,y,r,w,st,k,F);
     }
   }
   // chord row: names scroll in, pin at the left while active, get pushed off by the next
@@ -2077,6 +2098,22 @@ function draw(now){
   if(!G.playing&&!G.finished&&G.clock<0){cx.fillStyle='rgba(255,255,255,.55)';cx.font='15px -apple-system,sans-serif';cx.fillText(G.mode==='wait'?'Wait mode: the track pauses until you play each note':'Press Play, then play the notes as they reach the glowing line',W/2,laneTop+laneH*3);}
   if(settings.fretboard)drawFretboard(laneBot+14,fbH,W);
 }
+// technique marks: h / p arcs and slide lines from the previous note on the string, bend arrows, vibrato waves
+function drawTech(n,x,y,r,w,st,k,F){
+  const col=st===2?'#777':SCOL[n.s];cx.save();cx.lineWidth=Math.max(2,2.2*k);cx.strokeStyle=col;cx.fillStyle=col;
+  const lab=(t,lx,ly)=>{cx.font='bold '+F(11)+' -apple-system,sans-serif';const tw=cx.measureText(t).width+8;cx.fillStyle=hexA(COL.bg,0.85);rr(lx-tw/2,ly-8*k,tw,16*k,5);cx.fill();cx.fillStyle=st===2?'#999':'#ffffff';cx.fillText(t,lx,ly+1);};
+  if(n.from&&(n.tech==='h'||n.tech==='p'||n.tech==='s')){
+    const x0=hitX0+(n.from.t-G.clock)*ppb0;
+    if(n.tech==='s'){const up=n.f>n.from.f;const dy=r*0.55*(up?1:-1);cx.beginPath();cx.moveTo(x0+r*0.9,y+dy);cx.lineTo(x-r*0.9,y-dy);cx.stroke();lab(up?'slide ↗':'slide ↘',(x0+x)/2,y-r-8*k);}
+    else{const mx=(x0+x)/2,top=y-r-10*k;cx.beginPath();cx.moveTo(x0+r*0.4,y-r*0.8);cx.quadraticCurveTo(mx,top-6*k,x-r*0.4,y-r*0.8);cx.stroke();lab(n.tech==='h'?'h':'p',mx,top-4*k);}
+  }
+  if(n.bend){const top=y-r-16*k;cx.beginPath();cx.moveTo(x,y-r);cx.quadraticCurveTo(x+r*0.9,y-r-4*k,x+r*0.9,top+6*k);cx.stroke();
+    cx.beginPath();cx.moveTo(x+r*0.9-6*k,top+8*k);cx.lineTo(x+r*0.9+6*k,top+8*k);cx.lineTo(x+r*0.9,top-2*k);cx.closePath();cx.fill();
+    lab(n.bend===1?'bend ½':n.bend===2?'bend full':'bend '+(n.bend/2),x+r*0.9,top-12*k);}
+  if(n.vib){const x0=x+r+3,x1=Math.max(x0+18*k,Math.min(x+w-r*0.6,x0+60*k));cx.beginPath();for(let xx=x0;xx<=x1;xx+=2){const yy=y+Math.sin((xx-x0)/(4*k))*3*k;if(xx===x0)cx.moveTo(xx,yy);else cx.lineTo(xx,yy);}cx.stroke();}
+  cx.restore();
+}
+let hitX0=0,ppb0=1;
 function drawFretboard(y0,h,W){
   const ev=G.song.events;const i=firstPending();const tgt=i>=0?ev[i]:null;
   const cp=(G.capo||0);let maxF=12;if(tgt)for(const n of tgt.notes)maxF=Math.max(maxF,n.f+cp+1);if(tgt&&tgt.shape)for(const f of tgt.shape)maxF=Math.max(maxF,f+cp+1);maxF=Math.min(maxF,24);
@@ -2113,7 +2150,7 @@ function hudUpdate(now){
   {const left=Math.max(0,Math.ceil((G.song.length-Math.max(0,G.clock))/bps()));$('#hLeft').textContent=Math.floor(left/60)+':'+String(left%60).padStart(2,'0');}
   $('#hYou').textContent=analyser&&det.stableMidi!=null?midiToName(det.stableMidi):'–';
   let hint='';if(G.notice&&now<G.noticeUntil){$('#hint').textContent=G.notice;placeHint();return;}
-  if(G.waiting){const i=firstPending();const e=G.song.events[i];if(e)hint=e.strum?(e.strum==='U'?'Strum up':e.strum==='x'?'Muted strum':'Strum down')+' · '+e.label:e.chord?'Strum '+e.chord:'Play '+e.notes.map(n=>midiToName(n.midi+(G.capo||0))+' (string '+(6-n.s)+', fret '+n.f+')').join(' or ');}
+  if(G.waiting){const i=firstPending();const e=G.song.events[i];if(e)hint=e.strum?(e.strum==='U'?'Strum up':e.strum==='x'?'Muted strum':'Strum down')+' · '+e.label:e.chord?'Strum '+e.chord:'Play '+e.notes.map(n=>midiToName(n.midi+(G.capo||0))+' (string '+(6-n.s)+', fret '+n.f+')'+techWords(n)).join(' or ');}
   else if(CW<CH&&curScreen==='player')hint='Tip: turn your phone sideways for a wider view';
   $('#hint').textContent=hint;
   placeHint();
@@ -2430,8 +2467,8 @@ function newSeed(){return Math.floor(Math.random()*999999)+1;}
 function syncGenUI(){
   document.querySelectorAll('#genStyle button').forEach(b=>b.classList.toggle('on',genOpt.styles.includes(b.dataset.v)));
   $('#genKey').value=String(genOpt.key);$('#genScale').value=genOpt.scale;$('#genDiff').value=String(genOpt.diff);$('#genBars').value=genOpt.len;$('#genBpm').value=genOpt.bpm;$('#genSeed').value=genOpt.seed||'';
-  const D={melody:'A single-note melody over a chord progression, with a repeating phrase so it sounds like a real tune.',riff:'A one-bar riff on the low strings that moves with the chords and varies every fourth bar.',chords:'A chord progression to play, built from chords that belong to the key.',arp:'Chord tones picked one at a time, like fingerpicking.',strum:'A strum pattern (down, up and muted strums) over a chord progression.'};
-  const NM={melody:'melody',riff:'riff',chords:'chords',arp:'arpeggio',strum:'strumming'};
+  const D={solo:'A written solo to learn note for note: licks from a pentatonic box shape, phrased as call and answer, landing on the chord tones, with hammer-ons, pull-offs, slides, bends and vibrato. Pick Blues for a 12-bar blues solo.',melody:'A single-note melody over a chord progression, with a repeating phrase so it sounds like a real tune.',riff:'A one-bar riff on the low strings that moves with the chords and varies every fourth bar.',chords:'A chord progression to play, built from chords that belong to the key.',arp:'Chord tones picked one at a time, like fingerpicking.',strum:'A strum pattern (down, up and muted strums) over a chord progression.'};
+  const NM={melody:'melody',riff:'riff',chords:'chords',arp:'arpeggio',strum:'strumming',solo:'solo'};
   const st=genOpt.styles;
   $('#genDesc').textContent=st.length===1?D[st[0]]:'A mixed track: sections of '+st.map(s=>NM[s]).join(', ').replace(/, ([^,]*)$/,' and $1')+' take turns over the same chord progression, a few bars each. Very short tracks may not have room for every style.';
 }
@@ -2466,7 +2503,7 @@ $('#genSaveBtn').onclick=()=>{
 };
 function quickGen(style){
   const styles=style==='mix'?['melody','riff','chords','arp','strum']:[style];
-  const base={styles,key:'random',scale:style==='riff'?(Math.random()<.5?'pentMinor':'blues'):'random',diff:genOpt.diff||1,len:genOpt.quickLen||'b8',bars:8,bpm:style==='riff'?90:80,seed:newSeed()};
+  const base={styles,key:'random',scale:style==='riff'||style==='solo'?(['pentMinor','blues','minor','major'][Math.floor(Math.random()*4)]):'random',diff:genOpt.diff||1,len:genOpt.quickLen||'b8',bars:8,bpm:style==='riff'?90:80,seed:newSeed()};
   if(base.scale==='random'&&(style==='chords'||style==='arp'||style==='strum'||style==='mix'))base.scale=Math.random()<.65?'major':'minor';
   if(base.scale==='random'&&style==='melody'){const pool=['major','minor','pentMajor','pentMinor'];base.scale=pool[Math.floor(Math.random()*pool.length)];}
   G.quick=base;playGen(base);
@@ -2570,6 +2607,90 @@ function scaleShape(keyPc,scaleKey,box,nps){
   for(let s=0;s<6;s++){for(let k=0;k<nps;k++){const f=m-OPEN[s];if(f>=0&&f<=20)pos.push([s,f]);m++;while(!inS(m))m++;}}
   return {pos,fret:Math.min(...pos.map(p=>p[1]))};
 }
+/* ================= Written solos =================
+   Composes a solo you can learn note for note, the way solos are usually built:
+   · notes come from a pentatonic "box" shape (minor pentatonic for minor and blues keys, major pentatonic for
+     major keys), so the hand stays in one position and every note fits the key
+   · four-bar sections of call (a short lick), answer (a reply that lands on a long chord tone), the call again,
+     then a resolution, so it phrases like a singer with room to breathe
+   · strong beats and phrase endings target notes of the chord underneath (root, 3rd, 5th, 7th)
+   · the second half climbs higher (into the next box at Medium, up an octave at Hard), then comes home to the key note
+   · techniques appear where players would use them: hammer-ons and pull-offs between two notes on one string,
+     slides into notes and between boxes, full-step bends up into chord tones on the G, B and high e strings,
+     and vibrato on long notes */
+function genSolo(o){
+  const {keyPc,scaleKey,diff,bars,prog,r}=o;
+  const minor=!!MINORISH[scaleKey];const pent=minor?'pentMinor':'pentMajor';
+  const box0=scaleShape(keyPc,pent,0,2);let base=box0.pos;
+  // keep the main box low on the neck when it can sit an octave down
+  const lowest=Math.min(...base.map(p=>p[1]));if(lowest>=12)base=base.map(([s,f])=>[s,f-12]);
+  // open-position keys (like E) move up to the 12th fret at Medium and Hard, where bends are possible
+  else if(lowest===0&&diff>=2)base=base.map(([s,f])=>[s,f+12]);
+  const boxes=[base];
+  if(diff>=2){let b1=scaleShape(keyPc,pent,1,2).pos;const l1=Math.min(...b1.map(p=>p[1]));const lb=Math.min(...base.map(p=>p[1]));if(l1<lb)b1=b1.map(([s,f])=>[s,f+12]);if(Math.max(...b1.map(p=>p[1]))<=19)boxes.push(b1);}
+  if(diff>=3){const up=base.map(([s,f])=>[s,f+12]);if(Math.max(...up.map(p=>p[1]))<=20)boxes.push(up);}
+  const pools=boxes.map(b=>posNotes(b));
+  const chordAtBar=b=>prog[Math.min(prog.length-1,b)];
+  const tonesOf=c=>QI[c.q]?QI[c.q].map(x=>(c.pc+x)%12):[c.pc];
+  const RH={1:{call:[[1,1,2],[2,2],[1,1,1,1]],ans:[[1,3],[2,2],[1,1,2]]},
+            2:{call:[[.5,.5,1,2],[1,.5,.5,2],[.5,.5,.5,.5,2],[1.5,.5,2]],ans:[[.5,.5,3],[1,1,2],[.5,.5,1,2]]},
+            3:{call:[[.5,.25,.25,.5,.5,2],[.25,.25,.25,.25,.5,.5,2],[.5,.5,.25,.25,.5,2],[.75,.25,.5,.5,2]],ans:[[.25,.25,.5,3],[.5,.25,.25,1,2],[.5,.5,.5,.5,2]]}}[diff];
+  // solos live mostly on the D, G, B and high e strings: keep to the upper part of each box
+  const loOf=pool=>Math.floor(pool.length*0.35);
+  const ev=[];let pi=0,cur=Math.floor(pools[0].length*0.62);
+  const nearestTone=(pool,idx,tones,prefRoot,avoid)=>{let best=idx,bs=1e9;for(let j=loOf(pool);j<pool.length;j++){const pc=pool[j].midi%12;if(!tones.includes(pc))continue;let sc=Math.abs(j-idx)+(prefRoot&&pc!==prefRoot?2.5:0)+(j===avoid?1.6:0);if(sc<bs){bs=sc;best=j;}}return best;};
+  let motif=null;
+  for(let b=0;b<bars;b++){
+    const t0=b*4,role=b%4,c=chordAtBar(b),tones=tonesOf(c),last=b===bars-1;
+    // second half climbs: next box (Medium) or the octave box (Hard)
+    const sec=Math.floor(b/4);const wantBox=sec%2===1&&pools.length>1?(diff>=3&&pools.length>2&&sec%4===3?2:1):0;
+    if(wantBox!==pi&&role===0){const prev=pools[pi][cur];pi=wantBox;const pool=pools[pi];let bj=0,bd=1e9;pool.forEach((n,j)=>{if(j<loOf(pool))return;const d=Math.abs(n.midi-prev.midi)+(n.s===prev.s?-0.5:0);if(d<bd){bd=d;bj=j;}});cur=bj;}
+    const pool=pools[pi];
+    if(last){// home: land on the key note, held with vibrato
+      const j=nearestTone(pool,cur,[keyPc],keyPc);cur=j;ev.push({t:t0,d:3,notes:[{...pool[j],end:true}]});break;}
+    let rh,steps;
+    if(role===0||role===2){
+      if(role===0||!motif){rh=RH.call[Math.floor(r()*RH.call.length)];const dir=r()<0.6?-1:1;steps=rh.map((_,i)=>i===0?0:(r()<0.75?dir:-dir)*(r()<0.8?1:2));motif={rh,steps};}
+      else({rh,steps}=motif);
+    } else {rh=RH.ans[Math.floor(r()*RH.ans.length)];steps=rh.map((_,i)=>i===0?(r()<.5?1:-1):(r()<0.7?-1:1));}
+    // the call starts on a chord tone; later notes walk through the box
+    let bt=0;cur=nearestTone(pool,cur,tones);
+    for(let i=0;i<rh.length;i++){
+      const d=rh[i];const isLast=i===rh.length-1;
+      const was=i>0?cur:-1;if(i>0){cur+=steps[i];if(cur<loOf(pool))cur=loOf(pool)+1;if(cur>pool.length-1)cur=pool.length-2;}
+      if(isLast||bt%1===0)cur=nearestTone(pool,cur,tones,isLast&&role===3?c.pc:null,was);
+      // a phrase rests at the end so it can breathe (the answer and resolution hold their last note instead)
+      let dd=d;if(isLast&&(role===0||role===2)&&d>=2&&r()<0.6)dd=d-1;
+      ev.push({t:t0+bt,d:dd,notes:[{...pool[cur],end:isLast&&dd>=1}]});bt+=d;
+    }
+  }
+  // ---- techniques ----
+  const pH=[0,0.15,0.55,0.7][diff],pB=[0,0.3,0.5,0.6][diff],pS=[0,0.15,0.3,0.4][diff];
+  const out=[];
+  for(let i=0;i<ev.length;i++){
+    const e=ev[i],n=e.notes[0],pv=out[out.length-1],pn=pv&&pv.notes[0];const all=pools.flat();
+    if(n.end||(e.d>=1&&diff>=2&&r()<0.5)){
+      // a long note: bend up into it from a whole step below on the D, G, B or high e string
+      const src=n.s>=2&&n.f>=3?all.find(x=>x.s===n.s&&x.f===n.f-2):null;
+      if(src&&!(pn&&pn.s===n.s&&pn.f===src.f)&&r()<pB&&!(i===ev.length-1&&diff===1)){out.push({t:e.t,d:e.d,notes:[{s:n.s,f:src.f,midi:src.midi,bend:2,vib:e.d>=1.5}]});continue;}
+      // or slide into it from two frets below
+      if(diff>=2&&n.f>=3&&r()<pS&&pv&&e.t-(pv.t+pv.d)>=-1e-6&&pv.d>=0.5){pv.d=Math.max(0.25,pv.d-0.25);out.push({t:e.t-0.25,d:0.25,notes:[{s:n.s,f:n.f-2,midi:n.midi-2}]});out.push({t:e.t,d:e.d,notes:[{s:n.s,f:n.f,midi:n.midi,tech:'s',vib:e.d>=1.5}]});continue;}
+      out.push({t:e.t,d:e.d,notes:[{s:n.s,f:n.f,midi:n.midi,vib:e.d>=1}]});continue;
+    }
+    const nn={s:n.s,f:n.f,midi:n.midi};
+    // two notes on one string in quick succession: hammer on going up, pull off coming down
+    if(pn&&pn.s===n.s&&pn.f!==n.f&&!pn.bend&&Math.abs(e.t-(pv.t+pv.d))<1e-6&&pv.d<=0.5&&Math.abs(pn.f-n.f)<=3&&r()<pH)nn.tech=n.f>pn.f?'h':'p';
+    // moving to a new box on the same string: slide
+    else if(pn&&pn.s===n.s&&Math.abs(pn.f-n.f)>=3&&Math.abs(pn.f-n.f)<=7&&diff>=2)nn.tech='s';
+    out.push({t:e.t,d:e.d,notes:[nn]});
+  }
+  return finishEvents(out);
+}
+// 12-bar blues (I7 IV7 V7), with a "quick change" to the IV in bar 2 at Medium and Hard
+function bluesProg(keyPc,bars,quick){
+  const f=[0,quick?5:0,0,0,5,5,0,0,7,5,0,7];
+  return Array.from({length:bars},(_,i)=>{const pc=(keyPc+f[i%12])%12;return {pc,q:'7',name:NOTE_NAMES[pc]+'7'};});
+}
 function posNotes(pos){return pos.map(([s,f])=>({s,f,midi:OPEN[s]+f})).sort((a,b)=>a.midi-b.midi);}
 // straight up-and-down runs through a shape
 function genRun(pos,bars,step){const ns=posNotes(pos);const seq=[...ns,...ns.slice(1,-1).reverse()];const ev=[];let t=0;const total=bars*4;let i=0;
@@ -2608,8 +2729,19 @@ function genTriads(chords,strs,per,bars){
   return finishEvents(ev);
 }
 // hammer-ons / pull-offs: pairs on one string, moving across strings
-function genLegato(frets,strs,up,bars){const ev=[];let t=0;const total=(bars||8)*4;let i=0;
-  while(t<total-1e-6){const s=strs[Math.floor(i/2)%strs.length];const pair=up?frets:[...frets].reverse();const f=pair[i%2];ev.push({t,d:0.5,notes:[{s,f,midi:OPEN[s]+f}]});t+=0.5;i++;}
+function genLegato(frets,strs,up,bars,tech){const ev=[];let t=0;const total=(bars||8)*4;let i=0;
+  while(t<total-1e-6){const s=strs[Math.floor(i/2)%strs.length];const pair=up?frets:[...frets].reverse();const f=pair[i%2];const n={s,f,midi:OPEN[s]+f};
+    if(i%2===1)n.tech=tech||(up?'h':'p');ev.push({t,d:0.5,notes:[n]});t+=0.5;i++;}
+  return finishEvents(ev);}
+// slides: pick the low fret and slide up, then pick the high fret and slide back down, string by string
+function genSlides(frets,strs,bars){const ev=[];let t=0;const [a,b]=frets;const seq=[[a,0],[b,'s'],[b,0],[a,'s']];let i=0;
+  while(t<bars*4-1e-6){const s=strs[Math.floor(i/4)%strs.length];const [f,tc]=seq[i%4];const n={s,f,midi:OPEN[s]+f};if(tc)n.tech=tc;ev.push({t,d:1,notes:[n]});t+=1;i++;}
+  return finishEvents(ev);}
+// bends: pick a note, then bend the note two frets higher up to the next scale note, with vibrato at the top
+function genBends(key,bars){const ev=[];const sh=scaleShape(key,'pentMinor',0,2).pos;const lowF=Math.min(...sh.map(p=>p[1]));
+  const cands=sh.filter(([s,f])=>s>=3&&sh.some(([s2,f2])=>s2===s&&f2===f-2||s2===s&&f2===f-3));let t=0;
+  for(let b=0;b<bars;b++){const [s,f]=cands[b%cands.length];const half=b%4===3&&s>=4;const lo=sh.find(([s2,f2])=>s2===s&&f2<f)||[s,f-2];
+    const lab=NOTE_NAMES[key]+'m';ev.push({t,d:1,notes:[{s,f:lo[1],midi:OPEN[s]+lo[1]}],label:lab});ev.push({t:t+1,d:2.5,notes:[{s,f,midi:OPEN[s]+f,bend:half?1:2,vib:true}],label:lab});t+=4;}
   return finishEvents(ev);}
 const shapeL=(key,scale,box,nps,diff,bpm,run)=>seed=>{const sh=scaleShape(KPC[key],scale,box,nps);return {events:run?genRun(sh.pos,8,diff>=3?0.5:1):genDrill({positions:sh.pos,bars:8,diff,seed}),bpm,noChords:true};};
 const pickL=(chords,pat,bpm,barsPer,bpb)=>seed=>({events:genPick(chords,pat,barsPer||1,8),bpm,bpb:bpb||4});
@@ -2659,12 +2791,19 @@ const TIER_DEFS={
   {title:'Hammer-ons, pull-offs and slides',lessons:[
    L('i-hammer','Hammer-ons','Pick the lower note, hammer the higher','Pick the first note, then bring a finger down hard enough onto the higher fret that it sounds without picking. Fretline listens for both notes.',seed=>({events:genLegato([5,7],[5,4,3],true,8),bpm:75,noChords:true})),
    L('i-pull','Pull-offs','Pick the higher note, pull off to the lower','Keep the lower finger in place, then flick the higher finger slightly sideways off the string so the lower note sounds.',seed=>({events:genLegato([5,8],[5,4,3],false,8),bpm:75,noChords:true})),
+   L('i-slide','Slides','Pick once, slide to the next note','Pick the first note, then keep pressing as you slide the same finger up or down the string to the new fret. The second note isn\'t picked: the slide makes it sound.',seed=>({events:genSlides([5,7],[3,4,5],8),bpm:70,noChords:true})),
+   L('i-bend','Bends and vibrato','Push the string up to the next note','Fret the note with your 3rd finger and put your 1st and 2nd fingers behind it on the same string to help. Push the string up towards the ceiling until it sounds like the note you picked just before: that\'s a full bend (two frets). Hold it there and add vibrato by easing the bend a little and back.',seed=>({events:genBends(9,8),bpm:70,noChords:true})),
    L('i-trill','Trills and legato runs','Hammer and pull in a row','Alternate hammer-ons and pull-offs between two frets as evenly as you can. Keep both fingers close to the string.',seed=>({events:genLegato([7,9],[3,4,5],true,8),bpm:90,noChords:true}))]},
   {title:'Fingerstyle patterns',lessons:[
    L('i-travis-c','Travis picking in C','Alternating thumb','Your thumb alternates between two bass strings on every beat while your fingers add notes between them. Get the thumb steady on its own first.',pickL(['C','Am','Dm','G'],PATS.travis,70)),
    L('i-pima-am','p-i-m-a in A minor','Thumb, index, middle, ring','The classic classical-guitar pattern. Plant your fingers on the strings before you play each one for a smooth, even sound.',pickL(['Am','Dm','E','Am'],PATS.pima,72)),
    L('i-waltz-pick','Waltz pattern over a progression','3/4 fingerpicking','Keep the bass on beat 1 strong and the rest lighter, so the waltz feel comes through.',pickL(['C','Am','F','G'],PATS.waltz,80,1,3)),
    L('i-arp-d','Arpeggios in D major','Eighth-note broken chords','Hold each chord shape and let the notes ring into each other.',gen('arp',2,'major',2,75))]},
+  {title:'Your first solos',lessons:[
+   L('i-solo-1','A first solo in A minor','Shape 1 at the 5th fret','A written solo using the A minor pentatonic box you know. Notice the phrases: a short lick, a reply that lands on a long note, the lick again, then a resolution. Learn it two bars at a time with Wait mode.',gen('solo',9,'pentMinor',1,70)),
+   L('i-solo-2','Solo with hammer-ons, pull-offs and bends','Same box, more expression','Two notes on one string in a row are often hammered or pulled instead of picked, and long notes get a bend or vibrato. The h, p and bend marks on the highway show where.',gen('solo',9,'pentMinor',2,75)),
+   L('i-solo-maj','A major pentatonic solo in G','Bright, country-flavoured','The major pentatonic sounds happy and open. Over major chords it lands on the root, 3rd and 5th of each chord.',gen('solo',7,'pentMajor',2,80)),
+   L('i-solo-blues','A 12-bar blues solo in A','A7, D7, E7','A solo over the 12-bar blues. Listen to how the phrases change when the chord moves to D7 in bar 5 and E7 in bar 9.',gen('solo',9,'blues',2,85,12))]},
   {title:'Blues',lessons:[
    L('i-boogie-a','Boogie shuffle in A','12-bar form','The same boogie pattern, now in A. Keep the shuffle feel: long-short.',seed=>({events:genBoogie('A',2),bpm:80,noChords:true})),
    L('i-boogie-e','Boogie in E with the 7th','A busier shuffle','This version adds the flat 7th on the last beat of each bar. Stretch your 4th finger out for it.',seed=>({events:genBoogie('E',2),bpm:85,noChords:true})),
@@ -2684,6 +2823,10 @@ const TIER_DEFS={
    L('i-riff-d','Blues-rock riff in D','Riff with the blues scale','Lock in with the beat. Riffs should feel like a drum part.',gen('riff',2,'blues',2,95))]}
  ]},
  a:{title:'Advanced',blurb:'The whole fretboard in every key: pentatonic and three-note-per-string shapes, modes, triads, speed, advanced rhythm, fingerstyle and jazz harmony.',units:[
+  {title:'Solos across the neck',lessons:[
+   L('a-solo-e','Linking shapes in E minor','Shapes 1 and 2, then up the octave','This solo starts in shape 1, slides up into shape 2 for the second half, and climbs to the octave box near the end. Use the slides as your guide for moving position.',gen('solo',4,'pentMinor',3,85,16)),
+   L('a-solo-d','Major pentatonic solo in D','Faster licks with sixteenths','Sixteenth-note licks in D major pentatonic. Keep the hammer-ons and pull-offs even with the picked notes.',gen('solo',2,'pentMajor',3,85)),
+   L('a-solo-blues','Blues solo in E','12 bars, two choruses','Two times through the 12-bar blues. The second time round climbs higher and builds intensity, like a real blues solo.',gen('solo',4,'blues',3,90,24))]},
   {title:'Pentatonic in every position',lessons:['E','G','C','D'].flatMap(k=>[0,1,2,3,4].map(b=>L('a-pent-'+k+b,k+' minor pentatonic, shape '+(b+1),'Fret '+scaleShape(KPC[k],'pentMinor',b,2).fret,'Same five shapes, new key. Find the '+k+' roots first, then let the shape fall around them.',shapeL(k,'pentMinor',b,2,3,90))))},
   {title:'Major scale: all seven shapes',lessons:[0,1,2,3,4,5,6].map(b=>L('a-3nps-g'+b,'G major, '+ORD[b]+' degree shape','Three notes per string','Each shape starts on a different note of the scale on the low E string. Together they cover the whole neck in G.',shapeL('G','major',b,3,3,85)))},
   {title:'Modes',lessons:[['D','dorian',2,'minor with a bright 6th'],['G','mixolydian',7,'major with a flat 7th'],['F','lydian',5,'major with a raised 4th'],['E','phrygian',4,'minor with a dark flat 2nd'],['A','harmonicMinor',9,'minor with a raised 7th']].map(([k,sc,pc,d])=>L('a-mode-'+sc,k+' '+SCALE_NAMES[sc],d,'Each mode is a scale with its own colour. Listen for the note that makes it different ('+d+') and lean on it.',gen('melody',pc,sc,3,85)))},
@@ -2770,7 +2913,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.37';
+const APP_VERSION='1.38';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
