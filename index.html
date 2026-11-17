@@ -1930,6 +1930,11 @@ function matchEvent(e,i,now){
 // the right pitch (any octave if allowed); a bent note counts anywhere from the fretted pitch up to its target
 // is this pitch one of the last few notes, probably still ringing? (then it isn't a wrong note)
 function ringingPrev(m,ev,i){for(let k=Math.max(0,i-3);k<i;k++)for(const n of ev[k].notes){const d=((n.midi+(G.capo||0)-m)%12+12)%12;if(d===0)return true;}return false;}
+// The mic hears a pitch, not a string. Work out where you most likely played it: the fret and string closest to the
+// note you were meant to play (so fret 2 on the G string, not the same pitch higher up the D string).
+function playedPos(m,want){const cp=G.capo||0;let best=null,bc=1e9;
+  for(let s=0;s<6;s++){const f=m-cp-OPEN[s];if(f<0||f>20)continue;const c=want?Math.abs(f-want.f)+1.5*Math.abs(s-want.s):f+s*0.1;if(c<bc){bc=c;best={s,f};}}
+  return best;}
 function techWords(n){return n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
 function noteOk(n,m,cp){const a=n.midi+cp;if(m===a||(settings.anyOctave&&(((a-m)%12)+12)%12===0))return true;
   if(n.bend){for(let k=1;k<=n.bend;k++){if(m===a+k||(settings.anyOctave&&(((a+k-m)%12)+12)%12===0))return true;}}return false;}
@@ -1956,7 +1961,7 @@ function update(dt,now){
     if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){st[i]=2;G.misses++;G.streak=0;addPop('Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
     if(settings.fx!=='off'&&!ch&&!e.strum&&det.stableMidi!=null&&det.onsetAt>(G.wrongOnset||0)&&det.onsetAt>G.lastHitAt&&now-det.onsetAt>140&&now>muteUntil&&!ringingPrev(det.stableMidi,ev,i)){
       const m=det.stableMidi,cp=G.capo||0;
-      if(!e.notes.some(n=>noteOk(n,m,cp))&&!e.notes.some(n=>targetScore(n,cp)>=0.5)){G.wrongOnset=det.onsetAt;G.wrongAt=now;fxMiss(e,now);addPop('Wrong note','#ff5d73');break;}
+      if(!e.notes.some(n=>noteOk(n,m,cp))&&!e.notes.some(n=>targetScore(n,cp)>=0.5)){G.wrongOnset=det.onsetAt;G.wrongAt=now;fxMiss(e,now);const pp=playedPos(m,e.notes[0]);addPop(pp&&pp.f===e.notes[0].f&&pp.s!==e.notes[0].s?'Wrong string':'Wrong note','#ff5d73');break;}
     }
     if(matchEvent(e,i,now)){
       {const pk=Math.max(det.onsetAt,det.pitchOnsetAt||-1);if(G.mode==='play'&&now-pk<500&&pk>0){const clockAtPick=G.clock-(now-pk)/1000*b;(G.offs=G.offs||[]).push((clockAtPick-e.t)/b*1000);}}
@@ -2140,18 +2145,29 @@ function draw(now){
       if(n.tech||n.bend||n.vib)drawTech(n,x,y,r,w,st,k,F);
     }
   }
+  // what you're playing right now, on the string you most likely played it on: green when it's the right note,
+  // red when it isn't, so a wrong string shows up as a red mark on that string
+  if(G.playing&&!G.listen&&det.stableMidi!=null&&analyser&&det.rms>=gate()&&performance.now()-Math.max(det.onsetAt,det.pitchOnsetAt||-1)<1500){
+    const ni=firstPending();const ne=ni>=0?ev[ni]:null;const want=ne&&!ne.strum&&!ne.chord&&ne.notes.length?ne.notes[0]:null;
+    const prevE=G.lastHitKey&&ni>0?ev[ni-1]:null;
+    const pp=playedPos(det.stableMidi,want||(prevE&&prevE.notes[0])||null);
+    if(pp){const ok=ne&&ne.notes.some(n=>noteOk(n,det.stableMidi,G.capo||0));const justHit=prevE&&prevE.notes.some(n=>noteOk(n,det.stableMidi,G.capo||0));
+      if(want||!justHit){const col=ok||justHit?'#5ce1a6':'#ff5d73';const y=Y(pp.s);const rr2=r*0.92;
+        cx.save();cx.beginPath();cx.arc(hitX,y,rr2,0,Math.PI*2);cx.fillStyle=hexA(col,0.3);cx.fill();cx.lineWidth=Math.max(3,3*k);cx.strokeStyle=col;cx.setLineDash([5*k,4*k]);cx.stroke();cx.setLineDash([]);
+        cx.fillStyle='#ffffff';cx.font=`bold ${Math.round(rr2*0.95)}px -apple-system,sans-serif`;cx.textAlign='center';cx.textBaseline='middle';cx.fillText(String(pp.f),hitX,y+1);cx.restore();}}
+  }
   // chord row: names scroll in, pin at the left while active, get pushed off by the next
   if(hasSegs){
     const segs=G.segs;const rowY=laneTop-24*k;const pinX=hitX+6;
     cx.textAlign='left';cx.textBaseline='middle';
-    for(let k=0;k<segs.length;k++){
-      const sg=segs[k];const x=hitX+(sg.t-G.clock)*ppb;if(x>W+10)break;
+    for(let si=0;si<segs.length;si++){
+      const sg=segs[si];const x=hitX+(sg.t-G.clock)*ppb;if(x>W+10)break;
       const xe=hitX+(sg.end-G.clock)*ppb;if(xe<0)continue;
       const active=G.clock>=sg.t-1e-6&&G.clock<sg.end;
       cx.font='bold '+(active?F(24):F(19))+' -apple-system,sans-serif';
       const tw=cx.measureText(sg.name).width;
       let dx=Math.max(x+4,pinX);
-      const nx=k+1<segs.length?hitX+(segs[k+1].t-G.clock)*ppb:Infinity;
+      const nx=si+1<segs.length?hitX+(segs[si+1].t-G.clock)*ppb:Infinity;
       dx=Math.min(dx,nx-tw-10);
       if(dx+tw<0)continue;
       // start tick
@@ -2204,7 +2220,8 @@ function drawFretboard(y0,h,W){
   const pos0=f=>f===0?fx(0)-fw*0.38:fx(f)-fw/2;const pos=f=>pos0(f+cp);
   if(cp){const cxp=fx(cp)-fw*0.55;cx.fillStyle='#c9a227';rr(cxp-5,y0+1,10,h-2,4);cx.fill();cx.fillStyle='#0b0d12';cx.font='bold 10px -apple-system,sans-serif';cx.save();cx.translate(cxp,y0+h/2);cx.rotate(-Math.PI/2);cx.fillText('CAPO '+cp,0,1);cx.restore();cx.font='bold 11px -apple-system,sans-serif';}
   // detected
-  if(det.stableMidi!=null&&G.playing&&!G.listen){for(let s=0;s<6;s++){const f=det.stableMidi-OPEN[s];if(f>=cp&&f<=maxF){cx.strokeStyle='rgba(77,171,247,.9)';cx.lineWidth=2;cx.beginPath();cx.arc(pos0(f),Ys(s),Math.min(sh*0.42,10),0,7);cx.stroke();}}}
+  if(det.stableMidi!=null&&G.playing&&!G.listen){const want=tgt&&!tgt.strum&&!tgt.chord&&tgt.notes.length?tgt.notes[0]:null;const pp=playedPos(det.stableMidi,want);
+    if(pp&&pp.f+cp<=maxF){const ok=tgt&&tgt.notes.some(n=>noteOk(n,det.stableMidi,cp));cx.strokeStyle=ok?'#5ce1a6':'#ff5d73';cx.lineWidth=3;cx.beginPath();cx.arc(pos(pp.f),Ys(pp.s),Math.min(sh*0.5,12),0,7);cx.stroke();}}
   if(tgt){
     const rad=Math.min(sh*0.46,11);
     if((tgt.chord||tgt.strum)&&tgt.shape){tgt.shape.forEach((f,s)=>{if(f<0){cx.fillStyle='#ff6b81';cx.fillText('×',x0-18,Ys(s)+1);return;}cx.fillStyle=SCOL[s];cx.beginPath();cx.arc(pos(f),Ys(s),rad,0,7);cx.fill();cx.fillStyle=ink(SCOL[s]);cx.fillText(f===0?'o':String(f),pos(f),Ys(s)+1);});}
@@ -2987,7 +3004,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.41';
+const APP_VERSION='1.42';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
