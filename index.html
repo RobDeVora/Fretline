@@ -138,6 +138,7 @@ header h1 span{color:var(--accent)}
     <div class="hud">
       <div>Score <b id="hScore">0/0</b></div>
       <div>Streak <b id="hStreak">0</b></div>
+      <div>Left <b id="hLeft">0:00</b></div>
       <div class="you">You <b id="hYou">–</b></div>
     </div>
     <div class="hint" id="hint"></div>
@@ -1810,6 +1811,7 @@ function hudUpdate(now){
   if(now-hudT<80)return;hudT=now;
   const total=G.song.events.length;
   $('#hScore').textContent=G.hits+'/'+total;$('#hStreak').textContent=G.streak;
+  {const left=Math.max(0,Math.ceil((G.song.length-Math.max(0,G.clock))/bps()));$('#hLeft').textContent=Math.floor(left/60)+':'+String(left%60).padStart(2,'0');}
   $('#hYou').textContent=analyser&&det.stableMidi!=null?midiToName(det.stableMidi):'–';
   let hint='';if(G.notice&&now<G.noticeUntil){$('#hint').textContent=G.notice;return;}
   if(G.waiting){const i=firstPending();const e=G.song.events[i];if(e)hint=e.strum?(e.strum==='U'?'Strum up':e.strum==='x'?'Muted strum':'Strum down')+' · '+e.label:e.chord?'Strum '+e.chord:'Play '+e.notes.map(n=>midiToName(n.midi+(G.capo||0))+' (string '+(6-n.s)+', fret '+n.f+')').join(' or ');}
@@ -2375,7 +2377,7 @@ requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.27';
+const APP_VERSION='1.28';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
