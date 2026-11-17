@@ -1130,24 +1130,35 @@ async function loadSound(id,status){
   sampler.loading={id,p};
   try{return await p;}finally{if(sampler.loading&&sampler.loading.p===p)sampler.loading=null;}
 }
-function pluck(midi,when,vol,dur,cents,lp){
-  const det$=cents?Math.pow(2,cents/1200):1;const out=()=>{if(!lp)return actx.destination;const f=actx.createBiquadFilter();f.type='lowpass';f.frequency.value=lp;f.connect(actx.destination);return f;};
+let master=null;const voices={};
+function masterOut(){if(!master){const c=actx.createDynamicsCompressor();c.threshold.value=-12;c.knee.value=8;c.ratio.value=8;c.attack.value=0.003;c.release.value=0.2;const g=actx.createGain();g.gain.value=0.9;c.connect(g);g.connect(actx.destination);master=c;}return master;}
+function stopVoices(){if(!actx)return;const t=actx.currentTime;for(const k in voices){const v=voices[k];try{v.g.gain.cancelScheduledValues(t);v.g.gain.setValueAtTime(v.g.gain.value,t);v.g.gain.linearRampToValueAtTime(0.0001,t+0.08);v.src.stop(t+0.1);}catch(e){}delete voices[k];}}
+// s = string index: a new note on a string cuts off the note already ringing there, like a real guitar
+function pluck(midi,when,vol,dur,cents,lp,s){
+  const det$=cents?Math.pow(2,cents/1200):1;const dest=masterOut();
+  const out=()=>{if(!lp)return dest;const f=actx.createBiquadFilter();f.type='lowpass';f.frequency.value=lp;f.connect(dest);return f;};
+  const t=actx.currentTime+(when||0);const ring=s!=null;
+  let b=null,rate=1,gainMul=1;
   if(sampler.id!=='basic'){
-    let m=midi,rate=1;let b=sampler.buffers[m];
-    if(!b){for(let d=1;d<=3&&!b;d++){if(sampler.buffers[m-d]){b=sampler.buffers[m-d];rate=Math.pow(2,d/12);}else if(sampler.buffers[m+d]){b=sampler.buffers[m+d];rate=Math.pow(2,-d/12);}}}
-    if(b){const src=actx.createBufferSource();src.buffer=b;src.playbackRate.value=rate*det$;const g=actx.createGain();const t=actx.currentTime+(when||0);
-      const len=Math.max(0.25,Math.min(dur||2,b.duration));g.gain.setValueAtTime(vol*2.2,t);g.gain.setValueAtTime(vol*2.2,t+len);g.gain.linearRampToValueAtTime(0.0001,t+len+0.25);
-      src.connect(g);g.connect(out());src.start(t);src.stop(t+len+0.3);return;}
+    b=sampler.buffers[midi];
+    if(!b){for(let d=1;d<=3&&!b;d++){if(sampler.buffers[midi-d]){b=sampler.buffers[midi-d];rate=Math.pow(2,d/12);}else if(sampler.buffers[midi+d]){b=sampler.buffers[midi+d];rate=Math.pow(2,-d/12);}}}
+    if(b)gainMul=2.2;
   }
-  const src=actx.createBufferSource();src.buffer=ksBuffer(midi);src.playbackRate.value=det$;const g=actx.createGain();const t=actx.currentTime+(when||0);g.gain.setValueAtTime(vol,t);
-  if(dur&&dur<1.5){g.gain.setValueAtTime(vol,t+dur);g.gain.linearRampToValueAtTime(0.0001,t+dur+0.15);}
-  src.connect(g);g.connect(out());src.start(t);if(dur&&dur<1.5)src.stop(t+dur+0.2);}
+  if(!b)b=ksBuffer(midi);
+  const src=actx.createBufferSource();src.buffer=b;src.playbackRate.value=rate*det$;const g=actx.createGain();const v=vol*gainMul;
+  const full=b.duration/(rate*det$);
+  const len=ring?Math.min(full,4.5):Math.max(0.12,Math.min(dur||2,full));
+  g.gain.setValueAtTime(v,t);g.gain.setValueAtTime(v,t+Math.max(0,len-0.3));g.gain.linearRampToValueAtTime(0.0001,t+len);
+  src.connect(g);g.connect(out());src.start(t);src.stop(t+len+0.05);
+  if(ring){const old=voices[s];if(old){try{old.g.gain.cancelScheduledValues(t);old.g.gain.setValueAtTime(old.v*0.6,t);old.g.gain.linearRampToValueAtTime(0.0001,t+0.05);old.src.stop(t+0.07);}catch(e){}}
+    const me={src,g,v};voices[s]=me;src.onended=()=>{if(voices[s]===me)delete voices[s];};}
+}
 /* ---- hit / miss feedback sounds ---- */
 function fxHit(e,now){
   if(settings.fx!=='all'||!actx)return;
   const cp=G.capo||0;const sec=Math.min(1.5,e.d*60/(G.song.bpm*G.speed));
   const ns=e.strum?(e.strum==='x'?[]:(e.snotes||[])):e.notes;const many=ns.length>=3;
-  ns.slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s).forEach((n,i)=>pluck(n.midi+cp,many?i*0.012:0,many?0.14:0.28,sec));
+  ns.slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s).forEach((n,i)=>pluck(n.midi+cp,many?i*0.012:0,many?0.14:0.28,sec,0,0,n.s));
   muteUntil=Math.max(muteUntil,now+60);G.lastHitAt=Math.max(G.lastHitAt,now+150);G.ignoreOnsetUntil=now+150;
 }
 function fxMiss(e,now){
@@ -1160,9 +1171,9 @@ function fxMiss(e,now){
 function playEvent(e){
   if(!actx)return;
   const sec=G.song?e.d*60/(G.song.bpm*G.speed)+0.15:1.5;
-  if(e.strum){if(e.strum==='x'){if(sampler.id!=='basic'){(e.snotes||[]).forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.008,0.12,0.06));}else click(false,performance.now());return;}const ns=(e.snotes||[]).slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.012,e.strum==='U'?0.16:0.22,sec));return;}
-  if(e.chord||e.notes.length>=3){const ns=e.notes.slice().sort((a,b)=>a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.018,0.22,sec));}
-  else e.notes.forEach(n=>pluck(n.midi+(G.capo||0),0,0.4,sec));
+  if(e.strum){if(e.strum==='x'){stopVoices();if(sampler.id!=='basic'){(e.snotes||[]).forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.008,0.12,0.06));}else click(false,performance.now());return;}const ns=(e.snotes||[]).slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.012,e.strum==='U'?0.16:0.22,sec,0,0,n.s));return;}
+  if(e.chord||e.notes.length>=3){const ns=e.notes.slice().sort((a,b)=>a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.018,0.22,sec,0,0,n.s));}
+  else e.notes.forEach(n=>pluck(n.midi+(G.capo||0),0,0.4,sec,0,0,n.s));
 }
 function click(accent,now){
   if(!actx)return;const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=accent?1600:1100;
@@ -1270,6 +1281,7 @@ function openSong(def){
 $('#iStart').onclick=()=>{$('#intro').classList.remove('show');$('#btnPlay').onclick();};
 $('#iListen').onclick=()=>{$('#intro').classList.remove('show');$('#btnListen').onclick();};
 function resetRun(){
+  stopVoices();
   if(!G.song)return;
   G.state=new Uint8Array(G.song.events.length);
   G.clock=-G.song.bpb;G.hits=0;G.misses=0;G.streak=0;G.best=0;G.scan=0;G.playedIdx=0;G.lastClickBeat=Math.floor(G.clock)-1;
@@ -1308,7 +1320,7 @@ $('#rRetry').onclick=()=>{resetRun();$('#btnPlay').onclick();};
 $('#rBack').onclick=()=>$('#btnBack').onclick();
 $('#rNew').onclick=()=>regen();
 $('#btnRegen').onclick=()=>regen();
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&G.playing){G.playing=false;updateButtons();}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&G.playing){stopVoices();G.playing=false;updateButtons();}});
 
 function chordSegments(S){
   const segs=[];
@@ -1549,7 +1561,7 @@ async function loadForPlayer(){
   try{await loadSound(settings.sound,t=>showHint(t?t+' ('+name+')':''));showHint('');}
   catch(err){showHint('⚠ '+err.message+' Playing the basic sound instead.',8000);}
 }
-function previewSound(){if(!actx)return;const shape=[3,2,0,0,0,3];shape.forEach((f,s)=>pluck(OPEN[s]+f,s*0.03,0.22,1.8));[67,71,74,79].forEach((m,i)=>pluck(m,2+i*0.3,0.4,0.6));}
+function previewSound(){if(!actx)return;const shape=[3,2,0,0,0,3];shape.forEach((f,s)=>pluck(OPEN[s]+f,s*0.03,0.22,1.8,0,0,s));[[3,0],[3,4],[4,3],[5,3]].forEach(([s,f],i)=>pluck(OPEN[s]+f,2+i*0.3,0.4,0.6,0,0,s));}
 $('#sFx').onchange=e=>{settings.fx=e.target.value;saveSettings();};
 $('#sPreview').onclick=async()=>{await ensureAudio();if(settings.sound!=='basic'&&sampler.id!==settings.sound)await applySound(settings.sound);previewSound();};
 $('#sClose').onclick=()=>{settingsOpen=false;$('#settings').classList.remove('show');};
@@ -1872,7 +1884,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.9';
+const APP_VERSION='1.10';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
