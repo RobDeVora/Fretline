@@ -1222,7 +1222,7 @@ function yin(buf,sr){
 }
 const det={midi:null,stableMidi:null,count:0,freq:0,cents:0,rms:0,onsetAt:-1,hist:[]};
 function detectFrame(now){
-  analyser.getFloatTimeDomainData(timeBuf);
+  analyser.getFloatTimeDomainData(timeBuf);det.frame=(det.frame||0)+1;
   const sub=timeBuf.subarray(timeBuf.length-2048);
   let s=0;for(let i=0;i<sub.length;i++)s+=sub[i]*sub[i];const rms=Math.sqrt(s/sub.length);det.rms=rms;
   const g=gate();const minPrev=det.hist.length?Math.min(...det.hist):0;det.hist.push(rms);if(det.hist.length>6)det.hist.shift();
@@ -1235,6 +1235,35 @@ function detectFrame(now){
   if(m===det.midi)det.count++;else{det.midi=m;det.count=1;}
   det.stableMidi=det.count>=2?m:null;
 }
+/* ---- targeted note detection ----
+   Instead of asking "what single pitch is sounding?" (which a grazed second string can confuse), ask "is the note
+   I'm waiting for present?". For each harmonic of the expected note that the analysis window can resolve, measure
+   its strength at the exact frequency and compare it with the same harmonics a semitone above and below. A note
+   that's really there stands out from its neighbours even when another string rings at the same time. */
+let hann=null;
+function goertzel(buf,w,sr,f){const k=2*Math.cos(2*Math.PI*f/sr);let s1=0,s2=0;for(let i=0;i<buf.length;i++){const s0=buf[i]*w[i]+k*s1-s2;s2=s1;s1=s0;}return s1*s1+s2*s2-k*s1*s2;}
+function targetScoreBuf(buf,sr,midi,hs){
+  if(!hann||hann.length!==buf.length){hann=new Float32Array(buf.length);for(let i=0;i<buf.length;i++)hann[i]=0.5-0.5*Math.cos(2*Math.PI*i/(buf.length-1));}
+  const f0=midiToFreq(midi);const minF=Math.max(150,2.2*sr/buf.length/0.0595);// a semitone apart must be >~2 bins
+  let T=0,Lo=0,Hi=0,n=0;
+  for(const h of hs||[1,2,3,4,5,6,7,8,9,10]){const f=f0*h;if(f<minF)continue;if(f>3000||n>=5)break;n++;const wt=1/Math.sqrt(h);
+    T+=wt*Math.sqrt(goertzel(buf,hann,sr,f));Lo+=wt*Math.sqrt(goertzel(buf,hann,sr,f*0.943874));Hi+=wt*Math.sqrt(goertzel(buf,hann,sr,f*1.059463));}
+  if(!n||T<=0)return 0;
+  return T/(T+Math.max(Lo,Hi));// 0.5 = no better than a neighbouring note, near 1 = clearly present
+}
+// Is this note sounding? Both all its overtones and its odd ones must stand out from their neighbours (a note a fifth
+// below shares only the even ones). Grazing another string doesn't hide the note: its overtones still stand out.
+const ODD=[1,3,5,7,9,11,13];
+function noteHeardScore(buf,sr,midi,anyOct){
+  const sc=Math.min(targetScoreBuf(buf,sr,midi),targetScoreBuf(buf,sr,midi,ODD));
+  if(!anyOct&&targetScoreBuf(buf,sr,midi-12,[1,3,5,7])>0.8)return Math.min(sc,0.5);
+  return sc;
+}
+// best score for a note (any octave if allowed; anywhere up a bend)
+const tsCache=new Map();let tsFrame=-1;
+function targetScore(n,cp){if(!analyser||!timeBuf)return 0;if(tsFrame!==det.frame){tsCache.clear();tsFrame=det.frame;}const ck=n.midi+cp+'/'+(n.bend||0);if(tsCache.has(ck))return tsCache.get(ck);const sr=actx.sampleRate;const a=n.midi+cp;const cands=[a];
+  if(n.bend)for(let k=1;k<=n.bend;k++)cands.push(a+k);if(settings.anyOctave)for(const c of cands.slice())cands.push(c+12,c-12);
+  let best=0;for(const m of cands)if(m>=36&&m<=96)best=Math.max(best,noteHeardScore(timeBuf,sr,m,settings.anyOctave));tsCache.set(ck,best);return best;}
 function chordScore(pcs){
   analyser.getFloatFrequencyData(freqBuf);
   const sr=actx.sampleRate,binHz=sr/analyser.fftSize;const c=new Float32Array(12);let tot=0;
@@ -1863,10 +1892,19 @@ function matchEvent(e,i,now){
     if(sc>0.42)G.cf++;else G.cf=Math.max(0,G.cf-1);
     return G.cf>=3;
   }
-  const m=det.stableMidi;if(m==null)return false;
+  const m=det.stableMidi,cp=(G.capo||0);
   const legato=e.notes.some(n=>n.tech==='h'||n.tech==='p'||n.tech==='s');
-  if(!legato&&settings.backing&&G.band&&G.band.events.length&&!(det.onsetAt>G.lastHitAt&&now-det.onsetAt<700))return false;
-  const cp=(G.capo||0);return e.notes.some(n=>noteOk(n,m,cp));
+  const fresh=legato||(det.onsetAt>G.lastHitAt&&now-det.onsetAt<700);
+  const bandOn=settings.backing&&G.band&&G.band.events.length;
+  // 1) the pitch tracker heard exactly this note
+  if(m!=null&&e.notes.some(n=>noteOk(n,m,cp))&&(fresh||!bandOn))return true;
+  // 2) or the note is clearly present even though something else rang too (e.g. a grazed second string):
+  //    needs a fresh pick and two frames in a row
+  if(!fresh||!analyser||det.rms<gate())return false;
+  const ts=Math.max(...e.notes.map(n=>targetScore(n,cp)));
+  if(G.tcIdx!==i){G.tcIdx=i;G.tcf=0;}
+  if(ts>=0.68){G.tcf++;return G.tcf>=2;}
+  G.tcf=0;return false;
 }
 // the right pitch (any octave if allowed); a bent note counts anywhere from the fretted pitch up to its target
 function techWords(n){return n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
@@ -1895,7 +1933,7 @@ function update(dt,now){
     if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){st[i]=2;G.misses++;G.streak=0;addPop('Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
     if(settings.fx!=='off'&&!ch&&!e.strum&&det.stableMidi!=null&&det.onsetAt>(G.wrongOnset||0)&&det.onsetAt>G.lastHitAt&&now-det.onsetAt>70&&now>muteUntil){
       const m=det.stableMidi,cp=G.capo||0;
-      if(!e.notes.some(n=>noteOk(n,m,cp))){G.wrongOnset=det.onsetAt;G.wrongAt=now;fxMiss(e,now);addPop('Wrong note','#ff5d73');break;}
+      if(!e.notes.some(n=>noteOk(n,m,cp))&&!e.notes.some(n=>targetScore(n,cp)>=0.5)){G.wrongOnset=det.onsetAt;G.wrongAt=now;fxMiss(e,now);addPop('Wrong note','#ff5d73');break;}
     }
     if(matchEvent(e,i,now)){
       fxHit(e,now);
@@ -2913,7 +2951,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.38';
+const APP_VERSION='1.39';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
