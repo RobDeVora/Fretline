@@ -9,8 +9,9 @@
 <meta name="apple-mobile-web-app-title" content="Fretline">
 <meta name="theme-color" content="#0f1115">
 <title>Fretline – Guitar Trainer</title>
-<link rel="apple-touch-icon" id="touchIcon">
-<link rel="icon" id="favIcon">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
 <style>
 :root{--bg:#0f1115;--panel:#181b22;--panel2:#222632;--text:#eef1f6;--muted:#8b93a3;--accent:#5ce1a6;--accent2:#4cc9f0;--bad:#ff5d73;--line:#2a2f3a;--warn:#ffb347}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -44,6 +45,7 @@ header h1 span{color:var(--accent)}
 .item .del{padding:6px 9px;font-size:13px;background:transparent}
 .item .del.armed{background:var(--bad);color:#fff}
 .note-txt{color:var(--muted);font-size:13px;padding:4px 2px 12px}
+.links a{display:block;padding:9px 0;border-top:1px solid var(--line);color:var(--accent2);text-decoration:none;font-weight:600}.links a span{color:var(--muted);font-weight:400;font-size:13px}
 .addbtn{width:100%;padding:14px;margin-bottom:10px;border-style:dashed;background:transparent;color:var(--accent);font-weight:600}
 /* player */
 #player .top{display:flex;align-items:center;gap:6px;padding:6px 10px;flex-wrap:wrap}
@@ -59,7 +61,7 @@ header h1 span{color:var(--accent)}
 .hud{position:absolute;top:4px;right:6px;background:rgba(15,17,21,.85);border-radius:10px;padding:2px 6px;z-index:2;display:flex;gap:12px;font-size:13px;color:var(--muted);pointer-events:none;text-align:right}
 .hud b{color:var(--text);font-size:15px;font-variant-numeric:tabular-nums}
 .hud .you b{color:var(--accent2)}
-.hint{position:absolute;left:10px;top:6px;right:190px;font-size:13px;color:var(--warn);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hint{position:absolute;left:10px;top:7px;right:250px;font-size:13px;color:var(--warn);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #player .bottom{display:flex;align-items:center;justify-content:center;gap:10px;padding:6px 10px 8px}
 #player .bottom button{min-width:52px;padding:10px 14px}
 #btnPlay{min-width:110px!important}
@@ -102,6 +104,7 @@ header h1 span{color:var(--accent)}
 <section class="screen active" id="home">
   <header>
     <h1>Fret<span>line</span></h1>
+    <button id="btnInstall" class="primary" style="display:none">Install</button>
     <button id="btnTuner">Tuner</button>
     <button id="btnSettings">Settings</button>
   </header>
@@ -127,9 +130,9 @@ header h1 span{color:var(--accent)}
   <div class="stage">
     <canvas id="cv"></canvas>
     <div class="hud">
-      <div>Score<br><b id="hScore">0/0</b></div>
-      <div>Streak<br><b id="hStreak">0</b></div>
-      <div class="you">You<br><b id="hYou">–</b></div>
+      <div>Score <b id="hScore">0/0</b></div>
+      <div>Streak <b id="hStreak">0</b></div>
+      <div class="you">You <b id="hYou">–</b></div>
     </div>
     <div class="hint" id="hint"></div>
     <div class="overlay" id="results">
@@ -238,7 +241,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field inline"><label>Accept the right note in any octave</label><input type="checkbox" id="sOct"></div>
     <div class="field inline"><label>Show note names instead of fret numbers</label><input type="checkbox" id="sNames"></div>
     <div class="field inline"><label>Metronome click while playing</label><input type="checkbox" id="sMetro"></div>
-    <div class="row end"><button class="primary" id="sClose">Done</button></div>
+    <div class="row" style="justify-content:space-between"><span class="small" id="appVer"></span><button class="primary" id="sClose">Done</button></div>
   </div>
 </div>
 <div class="overlay" id="msg" style="position:fixed">
@@ -511,7 +514,7 @@ function genTrack(opt){
       const pat=pats[Math.floor(r()*pats.length)];
       for(let k=0;k<4/step;k++){const idx=pat[k%pat.length]%seq.length;ev.push({t,d:step,notes:[seq[idx]],chord:null,label:c.name});t+=step;}
     }
-    return {events:finishEvents(ev),title:'Arpeggios in '+keyName,key:keyName,desc:prog.map(p=>p.name).join(' ')};
+    return {events:labelByBar(finishEvents(ev),prog,bars),title:'Arpeggios in '+keyName,key:keyName,desc:prog.map(p=>p.name).join(' ')};
   }
   // melody / riff
   let lo,hi;
@@ -574,7 +577,7 @@ function genTrack(opt){
           if(diff>=2&&n.bt===0&&o.s<4){notes.push({s:o.s+1,f:o.f+2,midi:o.midi+7});}
           ev.push({t:t+n.bt,d:n.d,notes});}}t+=4;}
     ev[ev.length-1]&&(ev[ev.length-1].d=Math.max(ev[ev.length-1].d,1));
-    return {events:finishEvents(ev),title:'Riff in '+keyName,key:keyName,desc:prog.map(p=>p.name).join(' ')};
+    return {events:labelByBar(finishEvents(ev),prog,bars),title:'Riff in '+keyName,key:keyName,desc:prog.map(p=>p.name).join(' ')};
   }
   // melody with phrase structure A A' B A
   const phraseLen=bars>=8?2:1;
@@ -597,7 +600,7 @@ function genTrack(opt){
   let prev=ev.length?ev[ev.length-1].notes[0].midi:cur;
   let best=tonics[0]||pool[0];for(const m of tonics)if(Math.abs(m-prev)<Math.abs(best-prev))best=m;
   ev.push({t:endT,d:2,notes:[noteObj(best,pos)]});
-  return {events:finishEvents(ev),title:'Melody in '+keyName,key:keyName,desc:prog.map(p=>p.name).join(' ')};
+  return {events:labelByBar(finishEvents(ev),prog,bars),title:'Melody in '+keyName,key:keyName,desc:prog.map(p=>p.name).join(' ')};
 }
 
 /* ---- note lists -> events (shared by MIDI / MusicXML / Guitar Pro) ---- */
@@ -616,6 +619,7 @@ function eventsFromNotes(notes,opt){
   for(const n of ns){const g=groups[groups.length-1];if(g&&Math.abs(g.beat-n.beat)<1e-6)g.notes.push(n);else groups.push({beat:n.beat,notes:[n]});}
   if(!groups.length)return [];
   const shift=Math.floor(groups[0].beat/bpb)*bpb;
+  const labs=(opt.labels||[]).slice().sort((a,b)=>a.beat-b.beat);
   const ev=[];let prevF=0;
   for(let i=0;i<groups.length&&ev.length<4000;i++){
     const g=groups[i];let gn=g.notes;
@@ -631,7 +635,9 @@ function eventsFromNotes(notes,opt){
     else out=assignStrings(gn.map(n=>foldRange(n.midi)));
     if(!out.length)continue;
     if(out.length===1)prevF=out[0].f;
-    ev.push({t:g.beat-shift,d,notes:out});
+    const e2={t:g.beat-shift,d,notes:out};
+    if(labs.length){let L=null;for(const hm of labs){if(hm.beat<=g.beat+1e-6)L=hm.name;else break;}if(L)e2.label=L;}
+    ev.push(e2);
   }
   return finishEvents(ev);
 }
@@ -738,7 +744,7 @@ function parseMusicXML(text){
       cursor=Math.max(cursor,mEnd);
     }
     const pid=part.getAttribute('id');const label=names[pid]||pid||('Part '+(parts.length+1));
-    if(notes.length)parts.push({label,notes,isGuitar:hasTab||/guit|gtr/i.test(label),hasTab,count:notes.length});
+    if(notes.length)parts.push({label,notes,harm,isGuitar:hasTab||/guit|gtr/i.test(label),hasTab,count:notes.length});
     if(harm.length)parts.push({label:label+' – chord symbols',chords:harm,isGuitar:false,count:harm.length});
   }
   if(!parts.length)throw new Error('No notes or chord symbols found in this file.');
@@ -753,6 +759,7 @@ function chordEventsFromSymbols(harm,bpb){
 }
 function chordProMeta(text){const m=/\{\s*(?:title|t)\s*:\s*([^}]*)\}/i.exec(text);return {title:m?m[1].trim():''};}
 
+function labelByBar(ev,prog,bars){for(const e of ev){if(e.chord)continue;const b=Math.min(bars-1,Math.floor(e.t/4+1e-9));e.label=prog[b].name;}return ev;}
 if(typeof module!=='undefined')module.exports={parseMidi,eventsFromNotes,assignStrings,chordProMeta,parseMelody,parseFretSeq,parseChordSeq,parseChordSheet,parseTab,genTrack,chordShape,chordPCs,midiToName,fingerFor,songLength,SCALES};
 </script>
 
@@ -957,7 +964,16 @@ function renderList(){
     for(const [st,t,s] of quick)h+=`<div class="item" data-gen="${st}"><div class="ic" style="background:${CAT_COLOR.gen}">${t[0]}</div><div class="tx"><div class="t">Random ${t.toLowerCase()}</div><div class="s">${s}</div></div><div class="best">Play ›</div></div>`;
     h+=`<button class="addbtn" id="btnCustomGen">Customize a generated track…</button>`;
   }else if(curCat==='mine'){
-    h+=`<button class="addbtn" id="btnAdd">+ Add a tab or chord sheet</button>`;
+    h+=`<button class="addbtn" id="btnAdd">+ Add a song</button>`;
+    h+=`<div class="item" style="display:block;cursor:default"><div class="t">Find more free music</div>
+      <div class="s" style="white-space:normal;margin:4px 0 8px">Download a MIDI or MusicXML file from these public-domain libraries, then tap “Add a song” and load it.</div>
+      <div class="links">
+        <a href="https://www.mutopiaproject.org/cgibin/make-table.cgi?Instrument=Guitar" target="_blank" rel="noopener">Mutopia: classical guitar <span>(MIDI)</span></a>
+        <a href="https://www.mutopiaproject.org/cgibin/make-table.cgi?Style=Folk" target="_blank" rel="noopener">Mutopia: folk songs <span>(MIDI)</span></a>
+        <a href="https://www.mutopiaproject.org/" target="_blank" rel="noopener">Mutopia: everything <span>(MIDI, 2,000+ pieces)</span></a>
+        <a href="https://musescore.com/" target="_blank" rel="noopener">MuseScore <span>(public-domain scores download free as MusicXML or MIDI)</span></a>
+        <a href="https://imslp.org/" target="_blank" rel="noopener">IMSLP <span>(huge library; use pieces that offer MIDI or MusicXML, as most PDFs are scans)</span></a>
+      </div></div>`;
     if(!mySongs.length)h+=`<div class="note-txt">Load a Guitar Pro, MIDI, MusicXML, ChordPro or PDF file, or paste a tab or chord sheet, for a song you're learning, and it becomes a scrolling track. Saved songs are stored on this device.</div>`;
     for(const d of mySongs)h+=itemHTML({...d,cat:'mine',sub:d.kind==='tab'?'Tab':d.kind==='gen'?'Generated':d.kind==='file'?(d.fmt||'File'):'Chords'},d.kind==='tab'?'T':d.kind==='gen'?'G':d.kind==='file'?'F':'♪',`<button class="del" data-del="${esc(d.id)}">✕</button>`);
   }else{
@@ -982,7 +998,7 @@ function renderList(){
 const G={def:null,song:null,state:null,clock:0,playing:false,mode:'play',speed:1,listen:false,hits:0,misses:0,streak:0,best:0,scan:0,playedIdx:0,lastClickBeat:-99,lastHitAt:-1,lastHitKey:null,cf:0,cfIdx:-1,pops:[],waiting:false,finished:false};
 function bps(){return G.song.bpm*G.speed/60;}
 function openSong(def){
-  G.def=def;G.song=buildSong(def);G.state=new Uint8Array(G.song.events.length);
+  G.def=def;G.song=buildSong(def);G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);
   $('#pTitle').textContent=G.song.title;
   $('#btnRegen').style.display=def.cat==='gen'?'':'none';
   $('#rNew').style.display=def.cat==='gen'?'':'none';
@@ -1027,6 +1043,15 @@ $('#rNew').onclick=()=>regen();
 $('#btnRegen').onclick=()=>regen();
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&G.playing){G.playing=false;updateButtons();}});
 
+function chordSegments(S){
+  const segs=[];
+  for(const e of S.events){const n=e.chord||e.label;if(!n)continue;const last=segs[segs.length-1];
+    if(last&&last.name===n&&Math.abs(last.end-e.t)<1e-6&&!e.chord){last.end=e.t+e.d;continue;}
+    if(last&&last.name===n&&e.chord&&Math.abs(last.end-e.t)<1e-6){segs.push({t:e.t,end:e.t+e.d,name:n});continue;}
+    segs.push({t:e.t,end:e.t+e.d,name:n});}
+  for(let i=0;i<segs.length-1;i++)segs[i].end=Math.max(segs[i].end,segs[i+1].t);
+  return segs;
+}
 function isChordEv(e){return !!e.chord||e.notes.length>=3;}
 function evKey(e){return e.chord?'c:'+e.chord:'n:'+e.notes.map(n=>n.midi).join(',');}
 function firstPending(){for(let i=G.scan;i<G.song.events.length;i++)if(!G.state[i])return i;return -1;}
@@ -1095,7 +1120,7 @@ const SCOL=['#ff6b81','#ffa94d','#ffd43b','#69db7c','#4dabf7','#b197fc'];
 function rr(x,y,w,h,r){cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r);cx.arcTo(x+w,y+h,x,y+h,r);cx.arcTo(x,y+h,x,y,r);cx.arcTo(x,y,x+w,y,r);cx.closePath();}
 function draw(now){
   const W=CW,H=CH,S=G.song,ev=S.events;cx.clearRect(0,0,W,H);
-  const fbH=Math.max(64,Math.min(120,H*0.26));const laneTop=44,laneBot=H-fbH-18;const laneH=Math.max(12,(laneBot-laneTop)/6);
+  const fbH=Math.max(64,Math.min(120,H*0.26));const hasSegs=G.segs&&G.segs.length;const laneTop=hasSegs?64:44,laneBot=H-fbH-18;const laneH=Math.max(12,(laneBot-laneTop)/6);
   const hitX=Math.max(54,Math.min(W*0.2,140));const ppb=Math.max(70,Math.min(170,W/7))*settings.zoom;
   const Y=s=>laneTop+(5-s+0.5)*laneH;
   // beats
@@ -1118,12 +1143,9 @@ function draw(now){
       rr(x0,laneTop+2,ww,laneH*6-4,10);
       cx.fillStyle=st===1?'rgba(92,225,166,.28)':st===2?'rgba(120,120,130,.18)':'rgba(179,136,255,.18)';cx.fill();
       cx.lineWidth=2;cx.strokeStyle=st===1?'#5ce1a6':st===2?'#666':'#b388ff';cx.stroke();
-      cx.font='bold 15px -apple-system,sans-serif';cx.fillStyle='#fff';cx.textAlign='left';cx.fillText(e.chord,x0+8,laneTop-12);cx.textAlign='center';
       if(e.shape){cx.font='bold 12px -apple-system,sans-serif';for(let s=0;s<6;s++){const f=e.shape[s];cx.fillStyle=f<0?'#666':SCOL[s];cx.fillText(f<0?'×':String(settings.names&&f>=0?pcName(OPEN[s]+f):f),x0+12,Y(s));}}
       continue;
     }
-    if(e.label&&e.label!==lastLabel){cx.font='bold 13px -apple-system,sans-serif';cx.fillStyle='#b388ff';cx.textAlign='left';cx.fillText(e.label,x-r,laneTop-12);cx.textAlign='center';}
-    lastLabel=e.label||lastLabel;
     for(const n of e.notes){
       const y=Y(n.s);
       if(w>r*2.2){cx.fillStyle=(st===2?'#555':SCOL[n.s])+'44';rr(x,y-r*0.32,w-r*0.6,r*0.64,r*0.32);cx.fill();}
@@ -1133,6 +1155,27 @@ function draw(now){
       cx.fillStyle=st===2?'#999':'#0b0d12';cx.font=`bold ${Math.round(r*1.0)}px -apple-system,sans-serif`;
       cx.fillText(settings.names?pcName(n.midi):String(n.f),x,y+1);
     }
+  }
+  // chord row: names scroll in, pin at the left while active, get pushed off by the next
+  if(hasSegs){
+    const segs=G.segs;const rowY=laneTop-20;const pinX=hitX+6;
+    cx.textAlign='left';cx.textBaseline='middle';
+    for(let k=0;k<segs.length;k++){
+      const sg=segs[k];const x=hitX+(sg.t-G.clock)*ppb;if(x>W+10)break;
+      const xe=hitX+(sg.end-G.clock)*ppb;if(xe<0)continue;
+      const active=G.clock>=sg.t-1e-6&&G.clock<sg.end;
+      cx.font=(active?'bold 19px':'bold 16px')+' -apple-system,sans-serif';
+      const tw=cx.measureText(sg.name).width;
+      let dx=Math.max(x+4,pinX);
+      const nx=k+1<segs.length?hitX+(segs[k+1].t-G.clock)*ppb:Infinity;
+      dx=Math.min(dx,nx-tw-10);
+      if(dx+tw<0)continue;
+      // start tick
+      if(x>=pinX-4){cx.fillStyle='rgba(179,136,255,.55)';cx.fillRect(x,rowY-11,2,laneTop-rowY+11);}
+      if(active){cx.fillStyle='rgba(179,136,255,.18)';rr(dx-6,rowY-14,tw+12,28,8);cx.fill();}
+      cx.fillStyle=active?'#ffffff':'#c9b3ff';cx.fillText(sg.name,dx,rowY+1);
+    }
+    cx.textAlign='center';
   }
   // string labels
   cx.font='bold 12px -apple-system,sans-serif';
@@ -1216,7 +1259,7 @@ $('#impBack').onclick=$('#impCancel').onclick=()=>{show('home');renderList();};
 function fileEvents(){
   const part=impFile.parts[+$('#impPart').value]||impFile.parts[0];
   if(part.chords)return {kind:'file',events:chordEventsFromSymbols(part.chords,impFile.bpb)};
-  return {kind:'file',events:eventsFromNotes(part.notes,{bpb:impFile.bpb,topOnly:$('#impNotes').value==='top'})};
+  return {kind:'file',events:eventsFromNotes(part.notes,{bpb:impFile.bpb,topOnly:$('#impNotes').value==='top',labels:part.harm})};
 }
 function analyzeImport(){
   if(impFile){const r=fileEvents();if(!r.events.length)return {err:'That part has no playable notes. Try another part.'};return r;}
@@ -1419,11 +1462,14 @@ function loop(ts){
 }
 requestAnimationFrame(loop);
 
-/* ---- icon ---- */
-(function(){try{const c=document.createElement('canvas');c.width=c.height=180;const x=c.getContext('2d');const g=x.createLinearGradient(0,0,180,180);g.addColorStop(0,'#1b2030');g.addColorStop(1,'#0f1115');x.fillStyle=g;x.fillRect(0,0,180,180);
-  const cols=['#ff6b81','#ffa94d','#ffd43b','#69db7c','#4dabf7','#b197fc'];for(let i=0;i<6;i++){x.fillStyle=cols[i]+'aa';x.fillRect(18,40+i*20,144,i<3?2:3);}
-  x.fillStyle='#5ce1a6';x.fillRect(52,30,6,120);x.beginPath();x.arc(100,80,14,0,7);x.fillStyle='#ffd43b';x.fill();x.beginPath();x.arc(132,120,14,0,7);x.fillStyle='#4dabf7';x.fill();
-  const u=c.toDataURL('image/png');$('#touchIcon').href=u;$('#favIcon').href=u;}catch(e){}})();
+/* ---- installable app ---- */
+const APP_VERSION='1.4';
+if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
+let installPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
+window.addEventListener('appinstalled',()=>{installPrompt=null;$('#btnInstall').style.display='none';});
+$('#btnInstall').onclick=async()=>{if(!installPrompt)return;installPrompt.prompt();try{await installPrompt.userChoice;}catch(e){}installPrompt=null;$('#btnInstall').style.display='none';};
+$('#appVer').textContent='Fretline version '+APP_VERSION;
 
 updateMicBanner();renderTabs();renderList();
 </script>
