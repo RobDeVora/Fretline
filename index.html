@@ -297,6 +297,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
       <div class="meter"><i id="sMeter"></i></div><span class="small">Play a note. The bar should turn green while you play and stay low when you're quiet.</span></div>
     <div class="field"><label>Latency compensation: <span id="sLatV"></span> ms</label><input type="range" id="sLat" min="0" max="300" step="10"><span class="small">Raise this if you play on time but notes count as late.</span></div>
     <div class="field"><label>Highway size</label><select id="sBig"><option value="1">Normal</option><option value="1.3">Large</option><option value="1.6">Extra large</option></select><div class="small">Makes notes, fret numbers, chord names and strum arrows bigger.</div></div>
+    <div class="field"><label>Timing window</label><select id="sTiming"><option value="1">Normal</option><option value="1.5">Relaxed</option><option value="2">Very relaxed</option></select><span class="small">How early or late a note can be and still count. The shaded band around the hit line shows it.</span></div>
     <div class="field"><label>Strums show</label><select id="sStrumView"><option value="fingers">Chord fingering (fret numbers on each string)</option><option value="arrows">Big D / U arrows</option></select></div>
     <div class="field"><label>Note spacing (zoom): <span id="sZoomV"></span></label><input type="range" id="sZoom" min="0.6" max="2" step="0.1"></div>
     <div class="field inline"><label>Accept the right note in any octave</label><input type="checkbox" id="sOct"></div>
@@ -1159,7 +1160,7 @@ function buildSong(def){
 
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
-const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers'},store.get('settings',{}));
+const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1},store.get('settings',{}));
 function saveSettings(){store.set('settings',settings);}
 function gate(){return 0.04*Math.pow(0.65,settings.sens-1);}
 let bests=store.get('best',{});
@@ -1656,10 +1657,20 @@ document.querySelectorAll('#seLen button').forEach(b=>b.onclick=()=>{const n=+b.
 $('#seCancel').onclick=()=>$('#strumEd').classList.remove('show');
 $('#seSave').onclick=()=>{let p=sePat.join('');if(!/[DUx]/.test(p))p='D'+p.slice(1);$('#strumEd').classList.remove('show');if(G.seSave){G.seSave(p);G.seSave=null;}else saveStrumChoice(p);};
 function isChordEv(e){return !!e.chord||e.notes.length>=3;}
+// timing window in beats, measured against the latency-adjusted clock. Playing as a note's edge reaches its target
+// ring always counts (G.ringBeats is set by the drawing code), and the Timing setting widens everything.
+function hitWindow(e,b,gap){
+  const ch=isChordEv(e),m=settings.timing||1,lat=G.mode==='wait'?0:settings.latency/1000*b;
+  const wb=Math.max((e.strum?0.25:ch?0.3:0.25)*b*m,Math.min(G.ringBeats||0,0.5*b*m)+lat);
+  let wa=(e.strum?0.3:ch?0.6:0.35)*b*m;
+  // a late hit must not eat the next note's on-time hit
+  if(gap!=null&&!ch)wa=Math.min(wa,Math.max(0.15*b,gap*0.55));
+  return {wb,wa,lat};
+}
 function evKey(e){return e.chord?'c:'+e.chord:'n:'+e.notes.map(n=>n.midi).join(',');}
 function firstPending(){for(let i=G.scan;i<G.song.events.length;i++)if(!G.state[i])return i;return -1;}
 function matchEvent(e,i,now){
-  if(e.strum){if(det.onsetAt>G.usedOnset&&det.onsetAt>(G.ignoreOnsetUntil||0)&&now-det.onsetAt<200){G.usedOnset=det.onsetAt;return true;}return false;}
+  if(e.strum){if(det.onsetAt>G.usedOnset&&det.onsetAt>(G.ignoreOnsetUntil||0)&&now-det.onsetAt<300*(settings.timing||1)){G.usedOnset=det.onsetAt;return true;}return false;}
   const key=evKey(e);
   if(key===G.lastHitKey&&!(det.onsetAt>G.lastHitAt))return false;
   if(G.cfIdx!==i){G.cfIdx=i;G.cf=0;}
@@ -1689,7 +1700,7 @@ function update(dt,now){
   const eff=G.mode==='wait'?G.clock:G.clock-settings.latency/1000*b;
   for(let i=G.scan;i<ev.length;i++){
     if(st[i]){if(i===G.scan)G.scan++;continue;}
-    const e=ev[i];const ch=isChordEv(e);const wb=(e.strum?0.13:ch?0.3:0.2)*b,wa=(e.strum?0.18:ch?0.6:0.3)*b;
+    const e=ev[i];const ch=isChordEv(e);const {wb,wa}=hitWindow(e,b,ev[i+1]?ev[i+1].t-e.t:null);
     if(e.t-wb>eff)break;
     if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){st[i]=2;G.misses++;G.streak=0;addPop('Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
     if(settings.fx!=='off'&&!ch&&!e.strum&&det.stableMidi!=null&&det.onsetAt>(G.wrongOnset||0)&&det.onsetAt>G.lastHitAt&&now-det.onsetAt>70&&now>muteUntil){
@@ -1792,9 +1803,12 @@ function draw(now){
   {const zc=COL.zone;const ni=firstPending();const ne=ni>=0?ev[ni]:null;const dist=ne?ne.t-G.clock:9;
     const a=ne&&dist<0.75&&dist>-0.4?1-Math.max(0,dist)/0.75:0;// 0 far away → 1 at the line
     const tgt=new Set();if(ne&&a>0){if(ne.shape)ne.shape.forEach((f,s)=>{if(f>=0)tgt.add(s);});for(const n of ne.notes)tgt.add(n.s);}
-    const bw=Math.max(6,Math.min(laneH*0.7,0.15*bps()*ppb));
-    cx.fillStyle=hexA(zc,0.09+0.09*a);cx.fillRect(hitX-bw,laneTop,bw*2,laneH*6);
-    cx.fillStyle=hexA(zc,0.35);cx.fillRect(hitX-bw,laneTop,1,laneH*6);cx.fillRect(hitX+bw-1,laneTop,1,laneH*6);
+    G.ringBeats=(2*r+2)/ppb;// a note's edge touches its target ring this many beats before the line
+    // the band shows the real timing window for the next note (it widens with Settings › Timing window)
+    const hw=ne?hitWindow(ne,bps(),ev[ni+1]?ev[ni+1].t-ne.t:null):{wb:G.ringBeats,wa:0.35*bps(),lat:0};
+    const bl=Math.max(6,(hw.wb-hw.lat)*ppb),br=Math.max(6,Math.min(W-hitX,(hw.wa+hw.lat)*ppb));
+    cx.fillStyle=hexA(zc,0.07+0.08*a);cx.fillRect(hitX-bl,laneTop,bl+br,laneH*6);
+    cx.fillStyle=hexA(zc,0.3);cx.fillRect(hitX-bl,laneTop,1,laneH*6);cx.fillRect(hitX+br-1,laneTop,1,laneH*6);
     const wait=G.waiting?0.5+0.5*Math.sin(now/120):1;
     cx.save();cx.shadowColor=zc;cx.shadowBlur=(8+14*a)*wait;cx.fillStyle=hexA(zc,0.75+0.25*a);
     const lw=Math.max(3,3*k);cx.fillRect(hitX-lw/2,laneTop-6,lw,laneH*6+12);
@@ -1953,7 +1967,7 @@ function tunerUpdate(){
 
 /* ---- settings ---- */
 let settingsOpen=false;
-function syncSettingsUI(){$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+function syncSettingsUI(){$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();};
@@ -1981,6 +1995,7 @@ $('#sOct').onchange=e=>{settings.anyOctave=e.target.checked;saveSettings();};
 $('#sNames').onchange=e=>{settings.names=e.target.checked;saveSettings();};
 $('#sFretboard').onchange=e=>{settings.fretboard=e.target.checked;saveSettings();};
 $('#sStrumView').onchange=e=>{settings.strumView=e.target.value;saveSettings();};
+$('#sTiming').onchange=e=>{settings.timing=+e.target.value;saveSettings();};
 $('#sMetro').onchange=e=>{settings.metronome=e.target.checked;saveSettings();};
 /* ---- colours & theme settings ---- */
 function saveColors(c){settings.colors=c;saveSettings();applyColors();syncColorsUI();}
@@ -2581,7 +2596,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.34';
+const APP_VERSION='1.35';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
