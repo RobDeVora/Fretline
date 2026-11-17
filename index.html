@@ -297,6 +297,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
       <div class="meter"><i id="sMeter"></i></div><span class="small">Play a note. The bar should turn green while you play and stay low when you're quiet.</span></div>
     <div class="field"><label>Latency compensation: <span id="sLatV"></span> ms</label><input type="range" id="sLat" min="0" max="300" step="10"><span class="small">Raise this if you play on time but notes count as late.</span></div>
     <div class="field"><label>Highway size</label><select id="sBig"><option value="1">Normal</option><option value="1.3">Large</option><option value="1.6">Extra large</option></select><div class="small">Makes notes, fret numbers, chord names and strum arrows bigger.</div></div>
+    <div class="field"><label>Strums show</label><select id="sStrumView"><option value="fingers">Chord fingering (fret numbers on each string)</option><option value="arrows">Big D / U arrows</option></select></div>
     <div class="field"><label>Note spacing (zoom): <span id="sZoomV"></span></label><input type="range" id="sZoom" min="0.6" max="2" step="0.1"></div>
     <div class="field inline"><label>Accept the right note in any octave</label><input type="checkbox" id="sOct"></div>
     <div class="field inline"><label>Show note names instead of fret numbers</label><input type="checkbox" id="sNames"></div>
@@ -1158,7 +1159,7 @@ function buildSong(def){
 
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
-const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true},store.get('settings',{}));
+const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers'},store.get('settings',{}));
 function saveSettings(){store.set('settings',settings);}
 function gate(){return 0.04*Math.pow(0.65,settings.sens-1);}
 let bests=store.get('best',{});
@@ -1808,6 +1809,27 @@ function draw(now){
   let lastLabel=null;
   for(let i=0;i<ev.length;i++){
     const e=ev[i];const x=hitX+(e.t-G.clock)*ppb;if(x>W+80)break;const w=e.d*ppb;if(x+w<-80)continue;const st=G.state[i];
+    if(e.strum&&settings.strumView!=='arrows'&&e.strum!=='x'&&e.shape){
+      // strum as fingering: the chord's notes roll through the hit zone like single notes, joined by a stroke
+      // line with direction arrows at the top and bottom. The first strum of a chord shows the full fingering;
+      // repeats of the same chord shrink to coloured dots so you can see at a glance it's the same shape.
+      const dcol=st===1?'#5ce1a6':st===2?'#4a4f5a':e.strum==='U'?'#ffa94d':'#4dabf7';
+      const pv=ev[i-1],nx=ev[i+1];const first=!(pv&&pv.strum&&pv.label===e.label&&e.t-pv.t<2.01);
+      const gap=nx?nx.t-e.t:1;const rf=Math.max(6,Math.min(r,gap*ppb*0.47));const rs=first?rf:Math.max(4,rf*0.5);
+      const strs=[];e.shape.forEach((f,s)=>{if(f>=0)strs.push(s);});
+      if(strs.length){const yTop=Y(Math.max(...strs)),yBot=Y(Math.min(...strs));
+        cx.fillStyle=dcol;cx.globalAlpha=st===2?0.5:0.9;const lw=Math.max(2,2.5*k);cx.fillRect(x-lw/2,yTop,lw,yBot-yTop);cx.globalAlpha=1;}
+      // arrows just outside the strings: ▼ for a down strum, ▲ for up
+      const ah=Math.max(7,9*k),aw=ah*0.8,yA=laneTop-2,yB=laneTop+laneH*6+2;const down=e.strum==='D';cx.fillStyle=dcol;
+      const tri=(yb,dir)=>{cx.beginPath();if(dir>0){cx.moveTo(x-aw,yb-ah);cx.lineTo(x+aw,yb-ah);cx.lineTo(x,yb);}else{cx.moveTo(x-aw,yb+ah);cx.lineTo(x+aw,yb+ah);cx.lineTo(x,yb);}cx.closePath();cx.fill();};
+      if(down){tri(yA+ah*0.4,1);tri(yB+ah,1);}else{tri(yA-ah,-1);tri(yB-ah*0.4,-1);}
+      for(const s of strs){const f=e.shape[s];const y=Y(s);const sc=st===1?'#5ce1a6':st===2?'#4a4f5a':SCOL[s];
+        cx.beginPath();cx.arc(x,y,rs,0,Math.PI*2);cx.fillStyle=sc;cx.fill();
+        if(first){cx.fillStyle=st===2?'#999':st===1?'#0b0d12':ink(SCOL[s]);cx.font=`bold ${Math.round(rs*1.0)}px -apple-system,sans-serif`;
+          cx.fillText(settings.names?pcName(OPEN[s]+f):String(f),x,y+1);}}
+      if(first){cx.font='bold '+F(11)+' -apple-system,sans-serif';cx.fillStyle='#ff6b81';e.shape.forEach((f,s)=>{if(f<0)cx.fillText('×',x,Y(s)+1);});}
+      continue;
+    }
     if(e.strum){
       const top=laneTop+6,bot=laneTop+laneH*6-6;
       const col=st===1?'#5ce1a6':st===2?'#4a4f5a':e.strum==='U'?'#ffa94d':e.strum==='x'?'#ff6b81':'#4dabf7';
@@ -1931,7 +1953,7 @@ function tunerUpdate(){
 
 /* ---- settings ---- */
 let settingsOpen=false;
-function syncSettingsUI(){$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+function syncSettingsUI(){$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();};
@@ -1958,6 +1980,7 @@ $('#sZoom').oninput=e=>{settings.zoom=+e.target.value;saveSettings();syncSetting
 $('#sOct').onchange=e=>{settings.anyOctave=e.target.checked;saveSettings();};
 $('#sNames').onchange=e=>{settings.names=e.target.checked;saveSettings();};
 $('#sFretboard').onchange=e=>{settings.fretboard=e.target.checked;saveSettings();};
+$('#sStrumView').onchange=e=>{settings.strumView=e.target.value;saveSettings();};
 $('#sMetro').onchange=e=>{settings.metronome=e.target.checked;saveSettings();};
 /* ---- colours & theme settings ---- */
 function saveColors(c){settings.colors=c;saveSettings();applyColors();syncColorsUI();}
@@ -2534,7 +2557,7 @@ requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.32';
+const APP_VERSION='1.33';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
