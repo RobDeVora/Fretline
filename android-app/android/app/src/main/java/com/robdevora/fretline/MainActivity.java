@@ -6,6 +6,9 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.util.Base64;
+import android.webkit.WebView;
+
+import androidx.activity.OnBackPressedCallback;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.JSObject;
@@ -21,6 +24,18 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(IncomingPlugin.class);
         super.onCreate(savedInstanceState);
         handleIntent(getIntent());
+        // Back button / back gesture: let the page close whatever is open (Settings, a song, a dialog...).
+        // Only when it reports there's nothing left to close does the app go to the background.
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                WebView wv = getBridge() != null ? getBridge().getWebView() : null;
+                if (wv == null) { moveTaskToBack(true); return; }
+                wv.evaluateJavascript("(window.fretlineBack && window.fretlineBack()) ? 'yes' : 'no'", v -> {
+                    if (!"\"yes\"".equals(v)) moveTaskToBack(true);
+                });
+            }
+        });
     }
 
     @Override
