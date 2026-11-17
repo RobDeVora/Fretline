@@ -1427,13 +1427,15 @@ function showHint(t,ms){G.notice=t;G.noticeUntil=t?performance.now()+(ms||600000
 document.body.appendChild(document.getElementById('strumEd'));document.getElementById('strumEd').style.position='fixed';
 const PAT_PRESETS=[['D-D-D-D-','All downs'],['D-D-D-DU','Down ×3, down-up'],['D-DUD-DU','Down, down-up'],['D-DU-UDU','Folk'],['DUDUDUDU','Eighths'],['D--U-UDU','Push'],['D-xUD-xU','Muted backbeat'],['D-DUDU','Waltz 3/4']];
 function patLabel(p){return p.split('').map(c=>c==='-'?'·':c==='x'?'✕':c).join('');}
-function songStrumAuto(){const b=G.base;const fromFile=G.def&&G.def.strumAuto;return fromFile?{pat:fromFile,why:'from file'}:{pat:tempoPattern(b.bpm,b.bpb),why:'for '+b.bpm+' BPM'};}
+function isPolyPart(evs){if(!evs.length||evs.some(e=>e.chord||e.strum))return false;const poly=evs.filter(e=>e.notes.length>=3).length;return poly>=evs.length*0.3&&evs.some(e=>e.label);}
+function songStrumAuto(){const b=G.base;if(G.strumAutoCache&&G.strumAutoCache.id===G.def.id)return G.strumAutoCache.v;
+  const fromFile=(G.def&&G.def.strumAuto)||detectPattern(b.events,b.bpb);const v=fromFile?{pat:fromFile,why:'read from the file'}:{pat:tempoPattern(b.bpm,b.bpb),why:'for '+b.bpm+' BPM'};G.strumAutoCache={id:G.def.id,v};return v;}
 function currentStrumChoice(){const s=store.get('strum',{});return s[G.def.id]!=null?s[G.def.id]:(G.def.strum||'');}
 function setupStrum(){
-  const sel=$('#strumSel');const hasCh=G.base.events.some(e=>e.chord);sel.style.display=hasCh?'':'none';
+  const sel=$('#strumSel');const poly=isPolyPart(G.base.events);const hasCh=poly||G.base.events.some(e=>e.chord);sel.style.display=hasCh?'':'none';
   if(!hasCh){applyStrum('');return;}
   const choice=currentStrumChoice();const auto=songStrumAuto();
-  let o='<option value="">Strum: once per chord</option>'+`<option value="auto">Strum: suggested ${patLabel(auto.pat)} (${auto.why})</option>`;
+  let o=`<option value="">${poly?'Strum: as written in the file':'Strum: once per chord'}</option>`+`<option value="auto">Strum: suggested ${patLabel(auto.pat)} (${auto.why})</option>`;
   o+=PAT_PRESETS.map(([pp,n])=>`<option value="${pp}">Strum: ${n} ${patLabel(pp)}</option>`).join('');
   const isCustom=choice&&choice!=='auto'&&!PAT_PRESETS.some(x=>x[0]===choice);
   if(isCustom)o+=`<option value="${choice}">Strum: custom ${patLabel(choice)}</option>`;
@@ -1442,7 +1444,9 @@ function setupStrum(){
 }
 function applyStrum(choice){
   const pat=choice==='auto'?songStrumAuto().pat:choice;
-  G.song=pat?{...G.base,events:strumify(G.base.events,pat)}:G.base;
+  let src=G.base.events;
+  if(pat&&isPolyPart(src)){src=chordSegments(G.base).map(s=>chordEvent(s.name,s.t,Math.max(0.5,s.end-s.t)));}
+  G.song=pat?{...G.base,events:strumify(src,pat)}:G.base;
   G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);
 }
 $('#strumSel').onchange=e=>{
@@ -1712,7 +1716,7 @@ function meterUpdate(){const v=analyser?Math.min(1,det.rms/(gate()*4)):0;const e
 let impFile=null; // {name,fmt,bpm,bpb,parts,title}
 function setFileMode(on){$('#impFileBox').style.display=on?'':'none';$('#impTextField').style.display=on?'none':'';$('#impType').closest('.grid2').style.display=on?'none':'';}
 function impStrumValue(){return $('#impStrumField').style.display==='none'?'':$('#impStrum').value;}
-function openImport(){impCustom='';$('#impStrum').innerHTML='';impFile=null;setFileMode(false);$('#impFile').value='';$('#impTitle').value='';$('#impText').value='';$('#impPreview').textContent='';$('#impPreview').className='preview';show('import');}
+function openImport(){impCustom='';G.impStrumTouched=false;$('#impStrum').innerHTML='';impFile=null;setFileMode(false);$('#impFile').value='';$('#impTitle').value='';$('#impText').value='';$('#impPreview').textContent='';$('#impPreview').className='preview';show('import');}
 $('#impBack').onclick=$('#impCancel').onclick=()=>{show('home');renderList();};
 function fileEvents(){
   const part=impFile.parts[+$('#impPart').value]||impFile.parts[0];
@@ -1744,14 +1748,18 @@ function refreshPreview(){
 }
 let impCustom='';
 function syncImpStrum(r,isCh){
-  const f=$('#impStrumField');f.style.display=isCh?'':'none';if(!isCh)return;
-  const bpm=+$('#impBpm').value||90;const bpb=impFile?impFile.bpb||4:4;const auto=r.strumAuto||tempoPattern(bpm,bpb);
+  const polyFile=!isCh&&impFile&&$('#impNotes').value==='all'&&r.events.length&&r.events.filter(e=>e.notes.length>=3).length>=r.events.length*0.3;
+  const f=$('#impStrumField');f.style.display=isCh||polyFile?'':'none';if(!isCh&&!polyFile)return;
+  const bpm=+$('#impBpm').value||90;const bpb=impFile?impFile.bpb||4:4;const det=r.strumAuto||(polyFile?detectPattern(r.events,bpb):null);const auto=det||tempoPattern(bpm,bpb);
   const prev=$('#impStrum').value;
-  let o=`<option value="auto">Suggested: ${patLabel(auto)} (${r.strumAuto?'read from the file':'for '+bpm+' BPM'})</option><option value="">Once per chord</option>`+PAT_PRESETS.map(([pp,n])=>`<option value="${pp}">${n} ${patLabel(pp)}</option>`).join('');
+  let o=polyFile?`<option value="">As written in the file (recommended for guitar parts)</option><option value="auto">Pattern: ${patLabel(auto)} (${det?'read from the file':'for '+bpm+' BPM'})</option>`
+    :`<option value="auto">Suggested: ${patLabel(auto)} (${det?'read from the file':'for '+bpm+' BPM'})</option><option value="">Once per chord</option>`;
+  o+=PAT_PRESETS.map(([pp,n])=>`<option value="${pp}">${n} ${patLabel(pp)}</option>`).join('');
   if(impCustom)o+=`<option value="${impCustom}">Custom ${patLabel(impCustom)}</option>`;
-  $('#impStrum').innerHTML=o;$('#impStrum').value=prev&&[...$('#impStrum').options].some(x=>x.value===prev)?prev:'auto';
-  $('#impStrumNote').textContent='You can change this later from the Strum menu in the player.';
+  $('#impStrum').innerHTML=o;$('#impStrum').value=G.impStrumTouched&&[...$('#impStrum').options].some(x=>x.value===prev)?prev:(polyFile?'':'auto');
+  $('#impStrumNote').textContent=polyFile?'This guitar part already has its own rhythm. Pick a pattern to replace it with simple strummed chords. You can change this later from the Strum menu in the player.':'You can change this later from the Strum menu in the player.';
 }
+$('#impStrum').onchange=()=>{G.impStrumTouched=true;};
 $('#impStrumEdit').onclick=()=>{const v=$('#impStrum').value;openStrumEditor(v==='auto'||!v?'D-DU-UDU':v,pp=>{impCustom=pp;refreshPreview();$('#impStrum').value=pp;});};
 $('#impText').oninput=$('#impType').onchange=$('#impCb').oninput=$('#impBpm').oninput=refreshPreview;
 $('#impPart').onchange=()=>{const part=impFile&&impFile.parts[+$('#impPart').value];$('#impNotesField').style.display=part&&part.chords?'none':'';if(part&&!part.chords){const raw=eventsFromNotes(part.notes,{bpb:impFile.bpb});const poly=raw.filter(e=>e.notes.length>=3).length;
@@ -1869,7 +1877,7 @@ $('#impSave').onclick=()=>{
   const r=analyzeImport();if(r.err){$('#impPreview').textContent=r.err;$('#impPreview').className='preview err';return;}
   const title=$('#impTitle').value.trim()||'Untitled song';const bpm=Math.max(30,Math.min(240,+$('#impBpm').value||90));
   let d;
-  if(impFile)d={id:'m-'+Date.now(),cat:'mine',kind:'file',fmt:impFile.fmt,title,bpm,bpb:impFile.bpb||4,events:r.events,capo:r.capo||0,strum:impStrumValue(),strumAuto:r.strumAuto||null};
+  if(impFile)d={id:'m-'+Date.now(),cat:'mine',kind:'file',fmt:impFile.fmt,title,bpm,bpb:impFile.bpb||4,events:r.events,capo:r.capo||0,strum:impStrumValue(),strumAuto:r.strumAuto||detectPattern(r.events,impFile.bpb||4)||null};
   else d={id:'m-'+Date.now(),cat:'mine',title,bpm,bpb:4,kind:r.kind,cb:r.cb,src:$('#impText').value,capo:capoFromText($('#impText').value),strum:r.kind==='chords'?impStrumValue():''};
   mySongs.unshift(d);
   try{localStorage.setItem('fretline:songs',JSON.stringify(mySongs));}catch(e){showMsg('Not saved','<p>This song is too large to store on your phone, but you can still play it now.</p>');mySongs.shift();}
@@ -2036,7 +2044,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.14';
+const APP_VERSION='1.15';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
