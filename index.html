@@ -156,7 +156,7 @@ header h1 span{color:var(--accent)}
 
 <!-- IMPORT -->
 <section class="screen" id="import">
-  <header><button class="ghost" id="impBack">‹ Back</button><h1 style="font-size:18px">Add a tab or chord sheet</h1></header>
+  <header><button class="ghost" id="impBack">‹ Back</button><h1 style="font-size:18px">Add a song</h1></header>
   <div class="form">
     <div class="grid2">
       <div class="field"><label>Title</label><input id="impTitle" placeholder="My song"></div>
@@ -166,7 +166,15 @@ header h1 span{color:var(--accent)}
       <div class="field"><label>Type</label><select id="impType"><option value="auto">Detect automatically</option><option value="tab">Guitar tab</option><option value="chords">Chord sheet</option></select></div>
       <div class="field"><label>Beats per chord</label><input id="impCb" type="number" inputmode="numeric" value="4" min="1" max="16"></div>
     </div>
-    <div class="field"><label>Paste the tab or chords below (or load a .txt file)</label>
+    <div class="field"><label>Load a file</label>
+      <input type="file" id="impFile">
+      <span class="small">Guitar Pro (.gp, .gp3, .gp4, .gp5, .gpx), MIDI (.mid), MusicXML (.musicxml, .mxl, .xml), ChordPro (.cho, .chordpro, .crd), PDF or text (.txt)</span></div>
+    <div id="impFileBox" style="display:none;margin-bottom:10px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)">
+      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;font-weight:600" id="impFileName"></div><button id="impFileClear">Remove</button></div>
+      <div class="field" style="margin-top:8px"><label>Part to play</label><select id="impPart"></select></div>
+      <div class="field" id="impNotesField"><label>Notes</label><select id="impNotes"><option value="all">All notes (chords and harmonies)</option><option value="top">Top note only (the melody)</option></select></div>
+    </div>
+    <div class="field" id="impTextField"><label>…or paste a tab or chord sheet</label>
       <textarea id="impText" spellcheck="false" placeholder="e|-----0---3---|
 B|---1---1---1-|
 G|-0-----------|
@@ -175,9 +183,8 @@ A|-------------|
 E|-------------|
 
 or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
-    <div class="row"><input type="file" id="impFile" accept=".txt,text/plain" style="max-width:220px"></div>
     <div class="preview" id="impPreview"></div>
-    <p class="small">Standard tuning is assumed. Timing comes from the spacing in the tab, so evenly spaced tabs scroll most naturally. Fine-tune the speed with the tempo setting or the speed control while playing.</p>
+    <p class="small" id="impNote">Standard tuning is assumed. Timing comes from the spacing in the tab, so evenly spaced tabs scroll most naturally. Fine-tune the speed with the tempo setting or the speed control while playing.</p>
     <div class="row end"><button id="impCancel">Cancel</button><button class="primary" id="impSave">Save &amp; play</button></div>
   </div>
 </section>
@@ -592,7 +599,161 @@ function genTrack(opt){
   ev.push({t:endT,d:2,notes:[noteObj(best,pos)]});
   return {events:finishEvents(ev),title:'Melody in '+keyName,key:keyName,desc:prog.map(p=>p.name).join(' ')};
 }
-if(typeof module!=='undefined')module.exports={parseMelody,parseFretSeq,parseChordSeq,parseChordSheet,parseTab,genTrack,chordShape,chordPCs,midiToName,fingerFor,songLength,SCALES};
+
+/* ---- note lists -> events (shared by MIDI / MusicXML / Guitar Pro) ---- */
+function assignStrings(midis){
+  const ms=[...new Set(midis)].sort((a,b)=>b-a).slice(0,6);const used=new Set();const out=[];
+  for(const m of ms){let best=null,bc=1e9;for(let s=5;s>=0;s--){if(used.has(s))continue;const f=m-OPEN[s];if(f<0||f>22)continue;if(f<bc){bc=f;best={s,f};}}
+    if(best){used.add(best.s);out.push({s:best.s,f:best.f,midi:m});}}
+  return out;
+}
+function foldRange(m){while(m<40)m+=12;while(m>86)m-=12;return m;}
+function eventsFromNotes(notes,opt){
+  opt=opt||{};const bpb=opt.bpb||4;
+  const ns=notes.filter(n=>n.midi!=null&&isFinite(n.beat)).map(n=>({...n,beat:Math.round(n.beat*48)/48}));
+  ns.sort((a,b)=>a.beat-b.beat||b.midi-a.midi);
+  const groups=[];
+  for(const n of ns){const g=groups[groups.length-1];if(g&&Math.abs(g.beat-n.beat)<1e-6)g.notes.push(n);else groups.push({beat:n.beat,notes:[n]});}
+  if(!groups.length)return [];
+  const shift=Math.floor(groups[0].beat/bpb)*bpb;
+  const ev=[];let prevF=0;
+  for(let i=0;i<groups.length&&ev.length<4000;i++){
+    const g=groups[i];let gn=g.notes;
+    // dedupe same pitch, prefer one with tab info
+    const byM=new Map();for(const n of gn){const o=byM.get(n.midi);if(!o||(o.s==null&&n.s!=null))byM.set(n.midi,n);}gn=[...byM.values()];
+    if(opt.topOnly)gn=[gn.reduce((a,b)=>b.midi>a.midi?b:a)];
+    const gap=i+1<groups.length?groups[i+1].beat-g.beat:4;
+    let d=Math.max(...gn.map(n=>n.dur||0.5));d=Math.max(0.125,Math.min(d,gap>0?gap:d,4));
+    let out;
+    const tabOk=gn.every(n=>n.s!=null&&n.s>=0&&n.s<=5&&OPEN[n.s]+n.f===n.midi)&&new Set(gn.map(n=>n.s)).size===gn.length;
+    if(tabOk)out=gn.map(n=>({s:n.s,f:n.f,midi:n.midi}));
+    else if(gn.length===1){const m=foldRange(gn[0].midi);const o=noteObj(m,prevF>=5?prevF-1:null);out=o?[o]:[];}
+    else out=assignStrings(gn.map(n=>foldRange(n.midi)));
+    if(!out.length)continue;
+    if(out.length===1)prevF=out[0].f;
+    ev.push({t:g.beat-shift,d,notes:out});
+  }
+  return finishEvents(ev);
+}
+const GM_FAM=['Piano','Chromatic percussion','Organ','Guitar','Bass','Strings','Ensemble','Brass','Reed','Pipe','Synth lead','Synth pad','Synth effects','Ethnic','Percussive','Sound effects'];
+const GM_GTR=['Nylon guitar','Steel guitar','Jazz guitar','Clean guitar','Muted guitar','Overdrive guitar','Distortion guitar','Guitar harmonics'];
+function parseMidi(bytes){
+  const dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const tag=(o)=>String.fromCharCode(bytes[o],bytes[o+1],bytes[o+2],bytes[o+3]);
+  if(bytes.length<14||tag(0)!=='MThd')throw new Error('This is not a MIDI file.');
+  const hlen=dv.getUint32(0+4);const ntr=dv.getUint16(10);const div=dv.getUint16(12);
+  if(div&0x8000)throw new Error('This MIDI file uses SMPTE timing, which is not supported.');
+  let p=8+hlen;let tempo=null,tsN=4,tsD=4,tsSet=false;
+  const raw=[];const tnames=[];const progs={};
+  let t=0;
+  while(t<ntr&&p+8<=bytes.length){
+    const len=dv.getUint32(p+4);
+    if(tag(p)!=='MTrk'){p+=8+len;continue;}
+    let q=p+8;const end=Math.min(bytes.length,q+len);p=q+len;
+    let tick=0,status=0;const on={};let tname='';
+    const vlq=()=>{let v=0,b;do{b=bytes[q++];v=(v*128)+(b&0x7f);}while((b&0x80)&&q<end);return v;};
+    while(q<end){
+      tick+=vlq();if(q>=end)break;
+      let b=bytes[q];
+      if(b&0x80){status=b;q++;}else if(!status)break;
+      if(status===0xff){const type=bytes[q++];const l=vlq();const data=bytes.subarray(q,q+l);q+=l;
+        if(type===0x51&&tempo==null&&l>=3)tempo=(data[0]<<16)|(data[1]<<8)|data[2];
+        else if(type===0x58&&!tsSet&&l>=2){tsN=data[0];tsD=Math.pow(2,data[1]);tsSet=true;}
+        else if(type===0x03&&!tname){tname=String.fromCharCode(...data).replace(/[^\x20-\x7e]/g,'').trim();}
+        else if(type===0x2f)break;
+        status=0;continue;}
+      if(status===0xf0||status===0xf7){const l=vlq();q+=l;status=0;continue;}
+      const hi=status&0xf0,ch=status&0x0f;
+      if(hi===0x80||hi===0x90){const note=bytes[q++],vel=bytes[q++];const k=ch*128+note;
+        if(hi===0x90&&vel>0)(on[k]=on[k]||[]).push(tick);
+        else{const st=on[k]&&on[k].shift();if(st!=null)raw.push({track:t,ch,tick:st,dur:tick-st,midi:note});}}
+      else if(hi===0xc0){const pr=bytes[q++];const key=t+':'+ch;if(progs[key]==null)progs[key]=pr;}
+      else if(hi===0xd0)q+=1;
+      else q+=2;
+    }
+    tnames[t]=tname;t++;
+  }
+  const bpm=tempo?Math.round(60000000/tempo):120;
+  const bpb=Math.max(1,Math.round(tsN*4/tsD));
+  const groups=new Map();
+  for(const n of raw){if(n.ch===9)continue;const key=n.track+':'+n.ch;if(!groups.has(key))groups.set(key,[]);groups.get(key).push({beat:n.tick/div,dur:n.dur/div,midi:n.midi});}
+  const parts=[];
+  for(const [key,notes] of groups){
+    const [tr,ch]=key.split(':').map(Number);const pr=progs[key]!=null?progs[key]:(progs[tr+':'+ch]);
+    const isGuitar=pr!=null&&pr>=24&&pr<=31;
+    const inst=pr==null?'':isGuitar?GM_GTR[pr-24]:GM_FAM[Math.floor(pr/8)];
+    let label=tnames[tr]||inst||('Track '+(tr+1));
+    if(inst&&tnames[tr]&&tnames[tr].toLowerCase()!==inst.toLowerCase())label+=' ('+inst+')';
+    parts.push({label,notes,isGuitar:isGuitar||/guit|gtr/i.test(tnames[tr]||''),hasTab:false,count:notes.length});
+  }
+  parts.sort((a,b)=>(b.isGuitar-a.isGuitar)||(b.count-a.count));
+  if(!parts.length)throw new Error('No notes found in this MIDI file (drum tracks are skipped).');
+  return {bpm,bpb,parts,title:''};
+}
+const MXL_KIND={major:'',minor:'m',augmented:'aug',diminished:'dim',dominant:'7','major-seventh':'maj7','minor-seventh':'m7','diminished-seventh':'dim7','half-diminished':'m7b5','major-sixth':'6','minor-sixth':'m6','suspended-second':'sus2','suspended-fourth':'sus4',power:'5','dominant-ninth':'9','major-ninth':'maj9','minor-ninth':'m9'};
+function parseMusicXML(text){
+  const doc=new DOMParser().parseFromString(text,'application/xml');
+  if(doc.getElementsByTagName('parsererror').length)throw new Error('Could not read this MusicXML file.');
+  const root=doc.documentElement;
+  if(root.nodeName==='score-timewise')throw new Error('"Timewise" MusicXML is not supported. Export as regular (partwise) MusicXML.');
+  if(root.nodeName!=='score-partwise')throw new Error('This does not look like a MusicXML score.');
+  const kid=(el,name)=>{for(const c of el.children)if(c.nodeName===name)return c;return null;};
+  const txt=(el,sel)=>{const x=el.querySelector(sel);return x?x.textContent.trim():null;};
+  const names={};for(const sp of doc.querySelectorAll('part-list > score-part'))names[sp.getAttribute('id')]=txt(sp,'part-name')||sp.getAttribute('id');
+  const title=txt(root,'work > work-title')||txt(root,'movement-title')||'';
+  const STEP={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+  let bpm=null,bpb=null;const parts=[];
+  for(const part of root.children){
+    if(part.nodeName!=='part')continue;
+    let div=1,cursor=0,lastStart=0;const notes=[];const harm=[];const lastByPitch={};let hasTab=false;
+    for(const m of part.children){
+      if(m.nodeName!=='measure')continue;
+      const mStart=cursor;let mEnd=cursor;
+      for(const el of m.children){
+        const n=el.nodeName;
+        if(n==='attributes'){const d=txt(el,'divisions');if(d)div=+d||1;const b=txt(el,'time > beats'),bt=txt(el,'time > beat-type');if(b&&bt&&bpb==null)bpb=Math.max(1,Math.round(parseFloat(b)*4/(+bt)));}
+        else if(n==='direction'||n==='sound'){const s=n==='sound'?el:el.querySelector('sound');if(s&&s.getAttribute('tempo')&&bpm==null)bpm=Math.round(+s.getAttribute('tempo'));
+          if(bpm==null&&n==='direction'){const pm=txt(el,'metronome > per-minute');if(pm&&+pm)bpm=Math.round(+pm);}}
+        else if(n==='backup'){cursor-=(+txt(el,'duration')||0)/div;}
+        else if(n==='forward'){cursor+=(+txt(el,'duration')||0)/div;}
+        else if(n==='harmony'){const st=txt(el,'root > root-step');if(st){const al=+(txt(el,'root > root-alter')||0);let r=NOTE_NAMES[((STEP[st]+al)%12+12)%12];const k=kid(el,'kind');const kt=k?k.textContent.trim():'major';
+            const off=+(txt(el,'offset')||0)/div;harm.push({beat:cursor+off,name:r+(MXL_KIND[kt]!=null?MXL_KIND[kt]:'')});}}
+        else if(n==='note'){
+          if(kid(el,'grace'))continue;
+          const isChord=!!kid(el,'chord');const d=(+txt(el,'duration')||0)/div;
+          const start=isChord?lastStart:cursor;
+          if(!isChord){lastStart=cursor;cursor+=d;}
+          if(kid(el,'rest'))continue;
+          const pe=kid(el,'pitch');if(!pe)continue;
+          const midi=(+txt(pe,'octave')+1)*12+STEP[txt(pe,'step')]+Math.round(+(txt(pe,'alter')||0));
+          const ties=[...el.children].filter(c=>c.nodeName==='tie').map(c=>c.getAttribute('type'));
+          if(ties.includes('stop')&&lastByPitch[midi]){lastByPitch[midi].dur+=d;continue;}
+          const nt={beat:start,dur:d,midi};
+          const sE=el.querySelector('notations technical string'),fE=el.querySelector('notations technical fret');
+          if(sE&&fE){const s=6-(+sE.textContent);const f=+fE.textContent;if(s>=0&&s<=5&&isFinite(f)){nt.s=s;nt.f=f;hasTab=true;}}
+          notes.push(nt);lastByPitch[midi]=nt;
+        }
+        mEnd=Math.max(mEnd,cursor);
+      }
+      cursor=Math.max(cursor,mEnd);
+    }
+    const pid=part.getAttribute('id');const label=names[pid]||pid||('Part '+(parts.length+1));
+    if(notes.length)parts.push({label,notes,isGuitar:hasTab||/guit|gtr/i.test(label),hasTab,count:notes.length});
+    if(harm.length)parts.push({label:label+' – chord symbols',chords:harm,isGuitar:false,count:harm.length});
+  }
+  if(!parts.length)throw new Error('No notes or chord symbols found in this file.');
+  parts.sort((a,b)=>(b.isGuitar-a.isGuitar));
+  return {bpm:bpm||100,bpb:bpb||4,parts,title};
+}
+function chordEventsFromSymbols(harm,bpb){
+  const hs=harm.slice().sort((a,b)=>a.beat-b.beat);if(!hs.length)return [];
+  const shift=Math.floor(hs[0].beat/bpb)*bpb;const ev=[];
+  for(let i=0;i<hs.length;i++){const nx=i+1<hs.length?hs[i+1].beat:hs[i].beat+bpb;const d=Math.max(0.5,Math.min(8,nx-hs[i].beat));if(i&&Math.abs(hs[i].beat-hs[i-1].beat)<1e-6)continue;ev.push(chordEvent(hs[i].name,hs[i].beat-shift,d));}
+  return ev;
+}
+function chordProMeta(text){const m=/\{\s*(?:title|t)\s*:\s*([^}]*)\}/i.exec(text);return {title:m?m[1].trim():''};}
+
+if(typeof module!=='undefined')module.exports={parseMidi,eventsFromNotes,assignStrings,chordProMeta,parseMelody,parseFretSeq,parseChordSeq,parseChordSheet,parseTab,genTrack,chordShape,chordPCs,midiToName,fingerFor,songLength,SCALES};
 </script>
 
 <script>
@@ -797,8 +958,8 @@ function renderList(){
     h+=`<button class="addbtn" id="btnCustomGen">Customize a generated track…</button>`;
   }else if(curCat==='mine'){
     h+=`<button class="addbtn" id="btnAdd">+ Add a tab or chord sheet</button>`;
-    if(!mySongs.length)h+=`<div class="note-txt">Paste a tab or chord sheet for a song you're learning, and it becomes a scrolling track. Saved songs are stored on this device.</div>`;
-    for(const d of mySongs)h+=itemHTML({...d,cat:'mine',sub:d.kind==='tab'?'Tab':d.kind==='gen'?'Generated':'Chords'},d.kind==='tab'?'T':d.kind==='gen'?'G':'♪',`<button class="del" data-del="${esc(d.id)}">✕</button>`);
+    if(!mySongs.length)h+=`<div class="note-txt">Load a Guitar Pro, MIDI, MusicXML, ChordPro or PDF file, or paste a tab or chord sheet, for a song you're learning, and it becomes a scrolling track. Saved songs are stored on this device.</div>`;
+    for(const d of mySongs)h+=itemHTML({...d,cat:'mine',sub:d.kind==='tab'?'Tab':d.kind==='gen'?'Generated':d.kind==='file'?(d.fmt||'File'):'Chords'},d.kind==='tab'?'T':d.kind==='gen'?'G':d.kind==='file'?'F':'♪',`<button class="del" data-del="${esc(d.id)}">✕</button>`);
   }else{
     for(const d of LIB.filter(x=>x.cat===curCat))h+=itemHTML(d,d.cat==='lesson'?'L':d.cat==='song'?'♫':'#');
   }
@@ -1048,28 +1209,152 @@ $('#sMetro').onchange=e=>{settings.metronome=e.target.checked;saveSettings();};
 function meterUpdate(){const v=analyser?Math.min(1,det.rms/(gate()*4)):0;const el=$('#sMeter');el.style.width=(v*100)+'%';el.style.background=det.rms>gate()?'#5ce1a6':'#555';}
 
 /* ---- import ---- */
-function openImport(){$('#impTitle').value='';$('#impText').value='';$('#impPreview').textContent='';$('#impPreview').className='preview';show('import');}
+let impFile=null; // {name,fmt,bpm,bpb,parts,title}
+function setFileMode(on){$('#impFileBox').style.display=on?'':'none';$('#impTextField').style.display=on?'none':'';$('#impType').closest('.grid2').style.display=on?'none':'';}
+function openImport(){impFile=null;setFileMode(false);$('#impFile').value='';$('#impTitle').value='';$('#impText').value='';$('#impPreview').textContent='';$('#impPreview').className='preview';show('import');}
 $('#impBack').onclick=$('#impCancel').onclick=()=>{show('home');renderList();};
+function fileEvents(){
+  const part=impFile.parts[+$('#impPart').value]||impFile.parts[0];
+  if(part.chords)return {kind:'file',events:chordEventsFromSymbols(part.chords,impFile.bpb)};
+  return {kind:'file',events:eventsFromNotes(part.notes,{bpb:impFile.bpb,topOnly:$('#impNotes').value==='top'})};
+}
 function analyzeImport(){
+  if(impFile){const r=fileEvents();if(!r.events.length)return {err:'That part has no playable notes. Try another part.'};return r;}
   const text=$('#impText').value;const type=$('#impType').value;const cb=Math.max(1,+$('#impCb').value||4);
-  if(!text.trim())return {err:'Paste a tab or chord sheet first.'};
+  if(!text.trim())return {err:'Paste a tab or chord sheet, or load a file.'};
   let kind=type,events=[];
   if(type==='auto'||type==='tab'){const r=parseTab(text);if(r.events.length>=2||type==='tab'){kind='tab';events=r.events;}}
   if(kind!=='tab'){kind='chords';events=parseChordSheet(text,cb);}
   if(!events.length)return {err:kind==='tab'?'No tab found. Tab lines should look like  e|--0--3--|  with six lines per block.':'No chords found. Put chord names on their own lines (G  C  D) or in brackets like [G].'};
   return {kind,events,cb};
 }
-$('#impText').oninput=$('#impType').onchange=$('#impCb').oninput=()=>{
+function refreshPreview(){
   const r=analyzeImport();const p=$('#impPreview');
-  if(r.err){p.textContent=$('#impText').value.trim()?r.err:'';p.className='preview err';return;}
+  if(r.err){p.textContent=(impFile||$('#impText').value.trim())?r.err:'';p.className='preview err';return;}
   p.className='preview ok';
-  p.textContent=r.kind==='tab'?'Found a tab: '+r.events.length+' notes/chords, starting '+r.events.slice(0,6).map(e=>e.notes.map(n=>(6-n.s)+'/'+n.f).join('+')).join(' '):'Found '+r.events.length+' chords: '+r.events.slice(0,12).map(e=>e.chord).join(' ')+(r.events.length>12?' …':'');
+  const evs=r.events;const isCh=evs[0]&&evs[0].chord;
+  if(isCh)p.textContent='Found '+evs.length+' chords: '+evs.slice(0,12).map(e=>e.chord).join(' ')+(evs.length>12?' …':'');
+  else p.textContent='Found '+evs.length+' notes/chords, starting '+evs.slice(0,6).map(e=>e.notes.map(n=>(6-n.s)+'/'+n.f).join('+')).join(' ')+(impFile?' · '+impFile.bpm+' BPM':'');
+}
+$('#impText').oninput=$('#impType').onchange=$('#impCb').oninput=refreshPreview;
+$('#impPart').onchange=()=>{const part=impFile&&impFile.parts[+$('#impPart').value];$('#impNotesField').style.display=part&&part.chords?'none':'';if(part&&!part.chords)$('#impNotes').value=part.isGuitar?'all':'top';refreshPreview();};
+$('#impNotes').onchange=refreshPreview;
+$('#impFileClear').onclick=()=>{impFile=null;$('#impFile').value='';setFileMode(false);refreshPreview();};
+function loadScript(srcs){return new Promise((res,rej)=>{let i=0;const next=()=>{if(i>=srcs.length)return rej(new Error('Could not download the file reader. Check your internet connection.'));const s=document.createElement('script');s.src=srcs[i++];s.onload=()=>res();s.onerror=()=>{s.remove();next();};document.head.appendChild(s);};next();});}
+async function unzip(bytes){
+  const dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  let e=bytes.length-22;while(e>=0&&dv.getUint32(e,true)!==0x06054b50)e--;if(e<0)throw new Error('This file is damaged or not a zip archive.');
+  const n=dv.getUint16(e+10,true);let p=dv.getUint32(e+16,true);const files={};
+  for(let i=0;i<n;i++){if(dv.getUint32(p,true)!==0x02014b50)break;const method=dv.getUint16(p+10,true),csize=dv.getUint32(p+20,true),nlen=dv.getUint16(p+28,true),xlen=dv.getUint16(p+30,true),clen=dv.getUint16(p+32,true),lho=dv.getUint32(p+42,true);
+    const name=new TextDecoder().decode(bytes.subarray(p+46,p+46+nlen));p+=46+nlen+xlen+clen;files[name]={method,csize,lho};}
+  async function read(name){const f=files[name];const lnl=dv.getUint16(f.lho+26,true),lxl=dv.getUint16(f.lho+28,true);const st=f.lho+30+lnl+lxl;const data=bytes.slice(st,st+f.csize);
+    if(f.method===0)return data;if(f.method!==8)throw new Error('Unsupported compression in this file.');
+    if(typeof DecompressionStream==='undefined')throw new Error('This browser cannot open compressed .mxl files. Update your browser or export uncompressed .musicxml.');
+    const out=await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();return new Uint8Array(out);}
+  return {names:Object.keys(files),read};
+}
+async function readMxl(bytes){
+  const z=await unzip(bytes);let path=null;
+  if(z.names.includes('META-INF/container.xml')){const c=new TextDecoder().decode(await z.read('META-INF/container.xml'));const m=/full-path="([^"]+)"/.exec(c);if(m)path=m[1];}
+  if(!path||!z.names.includes(path))path=z.names.find(n=>!n.startsWith('META-INF')&&/\.(musicxml|xml)$/i.test(n));
+  if(!path)throw new Error('No score found inside this .mxl file.');
+  return new TextDecoder().decode(await z.read(path));
+}
+async function readGuitarPro(bytes){
+  if(!window.alphaTab)await loadScript(['https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.3.1/dist/alphaTab.min.js','https://unpkg.com/@coderline/alphatab@1.3.1/dist/alphaTab.min.js']);
+  const AT=window.alphaTab;
+  let score;
+  try{score=AT.importer.ScoreLoader.loadScoreFromBytes(bytes,new AT.Settings());}catch(e){throw new Error('Could not read this Guitar Pro file. Try exporting it as MusicXML or MIDI from your tab app.');}
+  const mbs=score.masterBars||[];const barStart=[];let acc=0;
+  for(const mb of mbs){barStart.push(acc);acc+=(mb.timeSignatureNumerator||4)*4/(mb.timeSignatureDenominator||4);}
+  const parts=[];
+  for(const tr of score.tracks||[]){
+    const staff=tr.staves&&tr.staves[0];if(!staff)continue;
+    if(staff.isPercussion||(tr.playbackInfo&&tr.playbackInfo.primaryChannel===9))continue;
+    const tuning=staff.tuning||(staff.stringTuning&&staff.stringTuning.tunings)||[];
+    const nStr=tuning.length;const notes=[];
+    (staff.bars||[]).forEach((bar,bi)=>{
+      const voice=bar.voices&&bar.voices[0];if(!voice)return;let pos=barStart[bi]||0;
+      for(const bt of voice.beats||[]){
+        let dur;
+        if(bt.playbackDuration>0)dur=bt.playbackDuration/960;
+        else{const dv=bt.duration;dur=dv>0?4/dv:dv<0?4*(-dv):1;if(bt.dots===1)dur*=1.5;else if(bt.dots===2)dur*=1.75;if(bt.tupletNumerator>0&&bt.tupletDenominator>0)dur*=bt.tupletDenominator/bt.tupletNumerator;}
+        if(bt.graceType)dur=0;
+        if(!bt.isRest&&!bt.graceType){
+          for(const nt of bt.notes||[]){
+            if(nt.isDead||nt.isTieDestination)continue;
+            let midi=typeof nt.realValue==='number'?nt.realValue:null;
+            if(midi==null&&nStr&&nt.string>0)midi=tuning[nStr-nt.string]+nt.fret;
+            if(midi==null||!isFinite(midi))continue;
+            const o={beat:pos,dur,midi};
+            if(nStr===6&&nt.string>=1&&nt.string<=6&&nt.fret>=0){o.s=nt.string-1;o.f=nt.fret;}
+            notes.push(o);
+          }
+        }
+        pos+=dur;
+      }
+    });
+    const isStd=nStr===6&&[...tuning].sort((a,b)=>a-b).join()===OPEN.join();
+    if(notes.length)parts.push({label:(tr.name||'Track')+(nStr&&nStr!==6?' ('+nStr+'-string)':isStd?'':' (alt. tuning)'),notes,isGuitar:nStr===6||nStr===7,hasTab:true,count:notes.length});
+  }
+  if(!parts.length)throw new Error('No playable tracks found in this Guitar Pro file.');
+  const mb0=mbs[0]||{};
+  return {bpm:Math.round(score.tempo||100),bpb:Math.max(1,Math.round((mb0.timeSignatureNumerator||4)*4/(mb0.timeSignatureDenominator||4))),parts,title:score.title||''};
+}
+async function readPdfText(bytes){
+  if(!window.pdfjsLib)await loadScript(['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js','https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js']);
+  const L=window.pdfjsLib;L.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const pdf=await L.getDocument({data:bytes}).promise;const out=[];
+  for(let pn=1;pn<=Math.min(pdf.numPages,30);pn++){
+    const page=await pdf.getPage(pn);const tc=await page.getTextContent();
+    const items=tc.items.filter(it=>it.str&&it.str.length);
+    if(!items.length)continue;
+    const ws=items.filter(it=>it.str.trim().length>1).map(it=>it.width/it.str.length).filter(w=>w>0).sort((a,b)=>a-b);
+    const cw=ws.length?ws[Math.floor(ws.length/2)]:5;
+    const minX=Math.min(...items.map(it=>it.transform[4]));
+    const lines=[];
+    for(const it of items){const y=it.transform[5];let ln=lines.find(l=>Math.abs(l.y-y)<cw*0.8);if(!ln){ln={y,items:[]};lines.push(ln);}ln.items.push(it);}
+    lines.sort((a,b)=>b.y-a.y);
+    for(const ln of lines){ln.items.sort((a,b)=>a.transform[4]-b.transform[4]);let s='';for(const it of ln.items){const col=Math.round((it.transform[4]-minX)/cw);if(col>s.length)s+=' '.repeat(col-s.length);else if(s.length&&!s.endsWith(' ')&&!/^[-|]/.test(it.str))s+=' ';s+=it.str;}out.push(s.replace(/\s+$/,''));}
+    out.push('');
+  }
+  const text=out.join('\n');
+  if(!text.trim())throw new Error('This PDF has no readable text (it may be a scan or photo).');
+  return text;
+}
+$('#impFile').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const ext=(f.name.split('.').pop()||'').toLowerCase();const base=f.name.replace(/\.[^.]+$/,'');
+  const p=$('#impPreview');p.className='preview';p.textContent='Reading '+f.name+'…';
+  try{
+    const buf=new Uint8Array(await f.arrayBuffer());
+    let info=null,fmt='';
+    if(ext==='mid'||ext==='midi'||ext==='kar'){info=parseMidi(buf);fmt='MIDI';}
+    else if(ext==='mxl'){info=parseMusicXML(await readMxl(buf));fmt='MusicXML';}
+    else if(ext==='musicxml'||(ext==='xml')){info=parseMusicXML(new TextDecoder().decode(buf));fmt='MusicXML';}
+    else if(/^(gp|gp3|gp4|gp5|gpx|gp6|gp7)$/.test(ext)){p.textContent='Loading the Guitar Pro reader…';info=await readGuitarPro(buf);fmt='Guitar Pro';}
+    else if(ext==='pdf'){p.textContent='Loading the PDF reader…';const text=await readPdfText(buf);impFile=null;setFileMode(false);$('#impText').value=text;if(!$('#impTitle').value)$('#impTitle').value=base;refreshPreview();
+      if(p.className.includes('ok'))p.textContent+=' · Text pulled from the PDF is shown above; check it and fix anything that came out jumbled.';return;}
+    else{const text=new TextDecoder().decode(buf);impFile=null;setFileMode(false);$('#impText').value=text;
+      const meta=/^(cho|chordpro|chopro|crd|pro)$/.test(ext)?chordProMeta(text):{title:''};
+      if(!$('#impTitle').value)$('#impTitle').value=meta.title||base;refreshPreview();return;}
+    impFile={...info,fmt,name:f.name};
+    $('#impFileName').textContent=f.name+' · '+fmt;
+    $('#impPart').innerHTML=info.parts.map((pt,i)=>`<option value="${i}">${esc(pt.label)} (${pt.count} ${pt.chords?'chords':'notes'})</option>`).join('');
+    $('#impBpm').value=info.bpm;
+    if(!$('#impTitle').value)$('#impTitle').value=info.title||base;
+    setFileMode(true);$('#impPart').onchange();
+  }catch(err){impFile=null;setFileMode(false);p.className='preview err';p.textContent=err.message||String(err);}
 };
-$('#impFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{$('#impText').value=rd.result;if(!$('#impTitle').value)$('#impTitle').value=f.name.replace(/\.[^.]+$/,'');$('#impText').oninput();};rd.readAsText(f);};
 $('#impSave').onclick=()=>{
   const r=analyzeImport();if(r.err){$('#impPreview').textContent=r.err;$('#impPreview').className='preview err';return;}
-  const d={id:'m-'+Date.now(),cat:'mine',title:$('#impTitle').value.trim()||'Untitled song',bpm:Math.max(30,Math.min(240,+$('#impBpm').value||90)),bpb:4,kind:r.kind,cb:r.cb,src:$('#impText').value};
-  mySongs.unshift(d);store.set('songs',mySongs);curCat='mine';store.set('cat',curCat);renderTabs();
+  const title=$('#impTitle').value.trim()||'Untitled song';const bpm=Math.max(30,Math.min(240,+$('#impBpm').value||90));
+  let d;
+  if(impFile)d={id:'m-'+Date.now(),cat:'mine',kind:'file',fmt:impFile.fmt,title,bpm,bpb:impFile.bpb||4,events:r.events};
+  else d={id:'m-'+Date.now(),cat:'mine',title,bpm,bpb:4,kind:r.kind,cb:r.cb,src:$('#impText').value};
+  mySongs.unshift(d);
+  try{localStorage.setItem('fretline:songs',JSON.stringify(mySongs));}catch(e){showMsg('Not saved','<p>This song is too large to store on your phone, but you can still play it now.</p>');mySongs.shift();}
+  curCat='mine';store.set('cat',curCat);renderTabs();
   openSong(d);
 };
 
