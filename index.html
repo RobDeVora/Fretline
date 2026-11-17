@@ -1083,6 +1083,27 @@ const sampler={id:'basic',buffers:{},loading:null};
 const FLAT_NAMES=['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
 function b64ToBuf(s){const bin=atob(s);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u.buffer;}
 function decodeAB(ab){return new Promise((res,rej)=>{try{const p=actx.decodeAudioData(ab,res,rej);if(p&&p.then)p.then(res,rej);}catch(e){rej(e);}});}
+const SF_HOSTS=['https://gleitz.github.io/midi-js-soundfonts/','https://paulrosen.github.io/midi-js-soundfonts/','https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/'];
+async function fetchSoundText(file,status){
+  let cache=null;
+  try{cache=await caches.open('fretline-sounds');const hit=await cache.match('fretline-sound/'+file);if(hit){status('Loading saved sound…');return await hit.text();}}catch(e){cache=null;}
+  let lastErr='';
+  for(const host of SF_HOSTS){
+    try{
+      status('Downloading sound…');
+      const r=await fetch(host+file,{mode:'cors'});if(!r.ok){lastErr='error '+r.status;continue;}
+      let txt;
+      if(r.body&&r.body.getReader){const rd=r.body.getReader();const parts=[];let got=0;
+        for(;;){const {done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;status('Downloading sound… '+(got/1048576).toFixed(1)+' MB');}
+        txt=new TextDecoder().decode(await new Blob(parts).arrayBuffer());}
+      else txt=await r.text();
+      if(!/data:audio/.test(txt)){lastErr='unexpected file';continue;}
+      try{if(cache)await cache.put('fretline-sound/'+file,new Response(txt));}catch(e){}
+      return txt;
+    }catch(e){lastErr=e.message||'network error';}
+  }
+  throw new Error('Could not download this sound ('+lastErr+'). Check your internet connection.');
+}
 async function loadSound(id,status){
   status=status||(()=>{});
   if(id==='basic'){sampler.id='basic';sampler.buffers={};status('');return true;}
@@ -1091,12 +1112,10 @@ async function loadSound(id,status){
   const p=(async()=>{
     await ensureAudio();
     const [font,inst]=id.split('/');
-    status('Downloading sound…');
-    window.MIDI=window.MIDI||{};MIDI.Soundfont=MIDI.Soundfont||{};delete MIDI.Soundfont[inst];
     const file=font+'/'+inst+'-mp3.js';
-    try{await loadScript(['https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/'+file,'https://gleitz.github.io/midi-js-soundfonts/'+file]);}
-    catch(e){throw new Error('Could not download this sound. Check your internet connection.');}
-    const sf=MIDI.Soundfont[inst];if(!sf)throw new Error('This sound could not be read.');
+    const txt=await fetchSoundText(file,status);
+    const sf={};const re=/"([A-G]b?#?-?\d)"\s*:\s*"(data:audio\/[^"]+)"/g;let mm;while((mm=re.exec(txt)))sf[mm[1]]=mm[2];
+    if(!Object.keys(sf).length)throw new Error('This sound file could not be read.');
     status('Preparing notes…');
     const bufs={};const jobs=[];
     for(let m=36;m<=92;m++){
@@ -1106,7 +1125,7 @@ async function loadSound(id,status){
     }
     await Promise.all(jobs);
     if(!Object.keys(bufs).length)throw new Error('This sound could not be decoded on this device.');
-    sampler.id=id;sampler.buffers=bufs;delete MIDI.Soundfont[inst];status('');return true;
+    sampler.id=id;sampler.buffers=bufs;status('');return true;
   })();
   sampler.loading={id,p};
   try{return await p;}finally{if(sampler.loading&&sampler.loading.p===p)sampler.loading=null;}
@@ -1270,13 +1289,13 @@ $('#btnPlay').onclick=async()=>{
   if(G.playing&&!G.listen){G.playing=false;keepAwake(false);updateButtons();return;}
   if(G.listen){resetRun();}
   const ok=await enableMic();if(!ok)return;
-  if(settings.fx!=='off'&&settings.sound!=='basic'&&sampler.id!==settings.sound){showHint('Loading guitar sound…');await applySound(settings.sound,true);showHint('');}
+  if(settings.fx!=='off'&&settings.sound!=='basic'&&sampler.id!==settings.sound)await loadForPlayer();
   if(G.finished)resetRun();
   G.playing=true;keepAwake(true);updateButtons();
 };
 $('#btnListen').onclick=async()=>{
   await ensureAudio();
-  if(settings.sound!=='basic'&&sampler.id!==settings.sound){showHint('Loading guitar sound…');await applySound(settings.sound,true);showHint('');}
+  if(settings.sound!=='basic'&&sampler.id!==settings.sound)await loadForPlayer();
   if(G.listen&&G.playing){resetRun();return;}
   resetRun();G.listen=true;G.playing=true;updateButtons();
 };
@@ -1302,7 +1321,7 @@ function chordSegments(S){
 }
 function syncCapo(){const s=$('#capoSel');if(!s.options.length)s.innerHTML='<option value="0">No capo</option>'+[1,2,3,4,5,6,7,8,9].map(n=>`<option value="${n}">Capo ${n}</option>`).join('');s.value=String(G.capo||0);s.classList.toggle('on',!!G.capo);}
 $('#capoSel').onchange=e=>{G.capo=+e.target.value;const cs=store.get('capo',{});if(G.def){cs[G.def.id]=G.capo;store.set('capo',cs);}syncCapo();};
-function showHint(t){const el=$('#hint');if(el)el.textContent=t;}
+function showHint(t,ms){G.notice=t;G.noticeUntil=t?performance.now()+(ms||600000):0;const el=$('#hint');if(el)el.textContent=t;}
 function isChordEv(e){return !!e.chord||e.notes.length>=3;}
 function evKey(e){return e.chord?'c:'+e.chord:'n:'+e.notes.map(n=>n.midi).join(',');}
 function firstPending(){for(let i=G.scan;i<G.song.events.length;i++)if(!G.state[i])return i;return -1;}
@@ -1492,7 +1511,7 @@ function hudUpdate(now){
   const total=G.song.events.length;
   $('#hScore').textContent=G.hits+'/'+total;$('#hStreak').textContent=G.streak;
   $('#hYou').textContent=analyser&&det.stableMidi!=null?midiToName(det.stableMidi):'–';
-  let hint='';
+  let hint='';if(G.notice&&now<G.noticeUntil){$('#hint').textContent=G.notice;return;}
   if(G.waiting){const i=firstPending();const e=G.song.events[i];if(e)hint=e.strum?(e.strum==='U'?'Strum up':e.strum==='x'?'Muted strum':'Strum down')+' · '+e.label:e.chord?'Strum '+e.chord:'Play '+e.notes.map(n=>midiToName(n.midi+(G.capo||0))+' (string '+(6-n.s)+', fret '+n.f+')').join(' or ');}
   else if(CW<CH&&curScreen==='player')hint='Tip: turn your phone sideways for a wider view';
   $('#hint').textContent=hint;
@@ -1516,7 +1535,7 @@ function tunerUpdate(){
 
 /* ---- settings ---- */
 let settingsOpen=false;
-function syncSettingsUI(){$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;}
+function syncSettingsUI(){$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();};
 $('#sSound').innerHTML=SOUNDS.map(([v,n])=>`<option value="${v}">${esc(n)}</option>`).join('');
 function soundStatus(t){$('#sSoundStatus').textContent=t;}
@@ -1525,6 +1544,11 @@ async function applySound(id,quiet){
   catch(err){const keep=settings.sound!=='basic'&&sampler.id===settings.sound;soundStatus(err.message+(keep?' Keeping your previous sound.':' Using the basic sound for now.'));if(!keep)sampler.id='basic';if(!quiet)$('#sSound').value=settings.sound==='basic'?'basic':settings.sound;return false;}
 }
 $('#sSound').onchange=async e=>{const id=e.target.value;if(await applySound(id))previewSound();};
+async function loadForPlayer(){
+  const name=(SOUNDS.find(s=>s[0]===settings.sound)||[,'guitar sound'])[1];
+  try{await loadSound(settings.sound,t=>showHint(t?t+' ('+name+')':''));showHint('');}
+  catch(err){showHint('⚠ '+err.message+' Playing the basic sound instead.',8000);}
+}
 function previewSound(){if(!actx)return;const shape=[3,2,0,0,0,3];shape.forEach((f,s)=>pluck(OPEN[s]+f,s*0.03,0.22,1.8));[67,71,74,79].forEach((m,i)=>pluck(m,2+i*0.3,0.4,0.6));}
 $('#sFx').onchange=e=>{settings.fx=e.target.value;saveSettings();};
 $('#sPreview').onclick=async()=>{await ensureAudio();if(settings.sound!=='basic'&&sampler.id!==settings.sound)await applySound(settings.sound);previewSound();};
@@ -1848,7 +1872,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.8';
+const APP_VERSION='1.9';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
