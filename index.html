@@ -225,6 +225,19 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
 </section>
 
 <!-- GENERATOR -->
+<!-- LIBRARY -->
+<section class="screen" id="library">
+  <header><button class="ghost" id="libBack">‹ Back</button><h1 style="font-size:18px">Free song library</h1></header>
+  <div class="form">
+    <div class="field"><input id="libSearch" type="search" placeholder="Search title or composer"></div>
+    <div class="seg" id="libLvl" style="display:flex;margin-bottom:8px"><button data-v="0" class="on" style="flex:1">All</button><button data-v="1" style="flex:1">Beginner</button><button data-v="2" style="flex:1">Intermediate</button><button data-v="3" style="flex:1">Advanced</button></div>
+    <div class="field"><select id="libStyle"><option value="">All styles</option><option>Folk &amp; traditional</option><option>Practice progressions</option><option>Classical guitar</option></select></div>
+    <div class="small" id="libCount" style="margin:2px 0 8px"></div>
+    <div id="libList"></div>
+    <p class="small" style="margin-top:14px">Classical pieces come from the <a href="https://www.mutopiaproject.org/" target="_blank" rel="noopener" style="color:var(--accent2)">Mutopia Project</a>, typeset by its volunteers and shared as public domain or under Creative Commons licences; each song shows its credit. Chord charts are written for Fretline. Downloaded songs go to My Songs and work offline.</p>
+  </div>
+</section>
+
 <section class="screen" id="gen">
   <header><button class="ghost" id="genBack">‹ Back</button><h1 style="font-size:18px">Generate a track</h1></header>
   <div class="form">
@@ -1102,7 +1115,7 @@ function buildSong(def){
   }
   if(!def.noChords)inferChords(events,def.bpb||4);
   const song={id:def.id,title:def.title,cat:def.cat,bpm:def.bpm||90,bpb:def.bpb||4,events,length:songLength(events),gen:def.gen||null};
-  if(def.cat!=='gen')def._built=song;
+  if(def.cat!=='gen')Object.defineProperty(def,'_built',{value:song,writable:true,configurable:true,enumerable:false});
   return song;
 }
 
@@ -1382,6 +1395,7 @@ function renderList(){
     h+=`<button class="addbtn" id="btnCustomGen">Customize a generated track…</button>`;
   }else if(curCat==='mine'){
     h+=`<button class="addbtn" id="btnAdd">+ Add a song</button>`;
+    h+=`<button class="addbtn" data-lib="1">📚 Browse the free song library (300+ songs)</button>`;
     h+=`<div class="item" style="display:block;cursor:default"><div class="t">Find more free music</div>
       <div class="s" style="white-space:normal;margin:4px 0 8px">Download a MIDI or MusicXML file from these public-domain libraries, then tap “Add a song” and load it.</div>
       <div class="links">
@@ -1394,6 +1408,7 @@ function renderList(){
     if(!mySongs.length)h+=`<div class="note-txt">Load a Guitar Pro, MIDI, MusicXML, ChordPro or PDF file, or paste a tab or chord sheet, for a song you're learning, and it becomes a scrolling track. Saved songs are stored on this device.</div>`;
     for(const d of mySongs)h+=itemHTML({...d,cat:'mine',sub:d.kind==='tab'?'Tab':d.kind==='gen'?'Generated':d.kind==='file'?(d.fmt||'File'):'Chords'},d.kind==='tab'?'T':d.kind==='gen'?'G':d.kind==='file'?'F':'♪',`<button class="del" data-del="${esc(d.id)}">✕</button>`);
   }else{
+    if(curCat==='song')h+=`<button class="addbtn" data-lib="1">📚 Browse the free song library (300+ songs)</button>`;
     for(const d of LIB.filter(x=>x.cat===curCat))h+=itemHTML(d,d.cat==='lesson'?'L':d.cat==='song'?'♫':'#');
   }
   L.innerHTML=h;
@@ -1413,13 +1428,55 @@ function renderList(){
     mySongs=mySongs.filter(x=>x.id!==b.dataset.del);store.set('songs',mySongs);renderList();
   });
   const a=$('#btnAdd');if(a)a.onclick=()=>openImport();
+  L.querySelectorAll('[data-lib]').forEach(b=>b.onclick=()=>openLibrary());
   const cg=$('#btnCustomGen');if(cg)cg.onclick=()=>openGen();
 }
+
+/* ================= Free song library ================= */
+let LIBRARY=null,libLvl=0,libShown=60;
+async function loadLibrary(){if(LIBRARY)return LIBRARY;const r=await fetch('library/index.json');if(!r.ok)throw new Error('offline');LIBRARY=(await r.json()).songs;return LIBRARY;}
+async function loadLibEvents(def){
+  const r=await fetch(def.libFile);if(!r.ok)throw new Error('missing');const info=parseMidi(new Uint8Array(await r.arrayBuffer()));
+  const part=info.parts[0];const ev=eventsFromNotes(part.notes,{bpb:info.bpb,labels:part.harm});
+  def.bpb=info.bpb;Object.defineProperty(def,'events',{value:ev,writable:true,configurable:true,enumerable:false});
+}
+function openLibrary(){show('library');libShown=60;$('#libList').innerHTML='<div class="note-txt">Loading the library…</div>';
+  loadLibrary().then(renderLibrary).catch(()=>{$('#libList').innerHTML='<div class="note-txt">The library needs an internet connection the first time. Connect and try again.</div>';});}
+function libMatches(){const q=$('#libSearch').value.trim().toLowerCase();const st=$('#libStyle').value;
+  return LIBRARY.filter(x=>(!libLvl||x.lvl===libLvl)&&(!st||x.style===st)&&(!q||(x.title+' '+x.by).toLowerCase().includes(q)));}
+function renderLibrary(){
+  if(!LIBRARY)return;const m=libMatches();const have=new Set(mySongs.map(x=>x.lib).filter(Boolean));
+  $('#libCount').textContent=m.length+' song'+(m.length===1?'':'s');
+  const fmt=sec=>sec?(sec>=60?Math.floor(sec/60)+' min ':'')+(sec%60?sec%60+' s':''):'';
+  let h='';for(const x of m.slice(0,libShown)){const got=have.has(x.id);
+    h+=`<div class="item" data-libid="${esc(x.id)}"><div class="ic" style="background:${x.kind==='chords'?'#ffa94d':'#4dabf7'};color:#0b0d12">${x.kind==='chords'?'♪':'𝄞'}</div><div class="tx"><div class="t">${esc(x.title)}</div><div class="s" style="white-space:normal">${esc(x.by)} · ${['','Beginner','Intermediate','Advanced'][x.lvl]||''} · ${x.kind==='chords'?'Chords':'Notes'}${x.sec?' · '+fmt(x.sec):''}</div><div class="s" style="white-space:normal;font-size:11px">${esc(x.credit)} · ${esc(x.license)}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener" style="color:var(--accent2)">source</a>`:''}</div></div><div class="best">${got?'✓ Play':'Get ›'}</div></div>`;}
+  if(m.length>libShown)h+=`<button id="libMore" style="width:100%;margin-top:4px">Show more (${m.length-libShown} left)</button>`;
+  if(!m.length)h='<div class="note-txt">No songs match. Try another search or level.</div>';
+  $('#libList').innerHTML=h;
+  $('#libList').querySelectorAll('.item[data-libid]').forEach(el=>el.onclick=ev=>{if(ev.target.closest('a'))return;getLibSong(LIBRARY.find(x=>x.id===el.dataset.libid));});
+  const more=$('#libMore');if(more)more.onclick=()=>{libShown+=60;renderLibrary();};
+}
+async function getLibSong(x){
+  let d=mySongs.find(m=>m.lib===x.id);
+  if(!d){
+    const base={id:'m-'+x.id,cat:'mine',lib:x.id,title:x.title,bpm:x.bpm,capo:0,credit:x.credit+' · '+x.license};
+    if(x.kind==='chords')d={...base,kind:'chords',bpb:x.bpb,cb:x.cb,src:x.src,strum:'auto'};
+    else{d={...base,kind:'file',fmt:'Library',bpb:4,libFile:x.file,strum:''};
+      try{await loadLibEvents(d);}catch(e){showMsg('Download failed','<p>Check your internet connection and try again.</p>');return;}}
+    mySongs.unshift(d);store.set('songs',mySongs);
+  }
+  openSong(d);
+}
+$('#libBack').onclick=()=>{show('home');renderList();};
+$('#libSearch').oninput=()=>{libShown=60;renderLibrary();};
+$('#libStyle').onchange=()=>{libShown=60;renderLibrary();};
+document.querySelectorAll('#libLvl button').forEach(b=>b.onclick=()=>{libLvl=+b.dataset.v;document.querySelectorAll('#libLvl button').forEach(x=>x.classList.toggle('on',x===b));libShown=60;renderLibrary();});
 
 /* ================= Game ================= */
 const G={def:null,song:null,state:null,clock:0,playing:false,mode:'play',speed:1,listen:false,hits:0,misses:0,streak:0,best:0,scan:0,playedIdx:0,lastClickBeat:-99,lastHitAt:-1,lastHitKey:null,cf:0,cfIdx:-1,pops:[],waiting:false,finished:false};
 function bps(){return G.song.bpm*G.speed/60;}
 function openSong(def){
+  if(def.libFile&&!def.events){showHint('Loading '+def.title+'…',4000);loadLibEvents(def).then(()=>openSong(def)).catch(()=>showMsg('Could not load the song','<p>Fretline couldn’t load this song. Connect to the internet and try again (after the first time, it works offline).</p>'));return;}
   G.def=def;G.base=buildSong(def);G.song=G.base;
   {const cs=store.get('capo',{});G.origCapo=G.capo=cs[def.id]!=null?cs[def.id]:(def.capo||0);}
   setupStrum();syncCapo();G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);
@@ -2130,7 +2187,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.21';
+const APP_VERSION='1.22';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
