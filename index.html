@@ -1759,7 +1759,8 @@ function tunerUpdate(){
 /* ---- settings ---- */
 let settingsOpen=false;
 function syncSettingsUI(){$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
-  $('#sDiag').textContent=diag.where?('Sound check: '+diag.where+': '+diag.sample+' notes with guitar samples, '+diag.basic+' with basic synth'+(diag.missing.size?' (missing: '+[...diag.missing].slice(0,8).join(',')+')':'')+' · engine '+diag.sound):'';}
+  // only speak up when Listen had to fall back to the basic synth for some notes
+  $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();};
 $('#sSound').innerHTML=SOUNDS.map(([v,n])=>`<option value="${v}">${esc(n)}</option>`).join('');
 function soundStatus(t){$('#sSoundStatus').textContent=t;}
@@ -2126,7 +2127,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.19';
+const APP_VERSION='1.20';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
