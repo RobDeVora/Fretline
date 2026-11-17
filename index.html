@@ -2097,7 +2097,7 @@ function loop(ts){
 requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
-const APP_VERSION='1.16';
+const APP_VERSION='1.17';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
@@ -2124,6 +2124,8 @@ async function receiveShare(){
   }catch(err){}
 }
 receiveShare();
+/* ---- "Open with Fretline" for song files (where the browser supports file handling) ---- */
+if('launchQueue' in window)launchQueue.setConsumer(async lp=>{if(!lp.files||!lp.files.length)return;try{const f=await lp.files[0].getFile();openImport();await loadImportFile(f);}catch(e){}});
 </script>
 </body>
 </html>

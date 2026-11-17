@@ -45,6 +45,11 @@
             "application/pdf",
             "audio/midi",
             "audio/x-midi",
+            "application/x-guitar-pro",
+            "application/x-midi",
+            "audio/x-mid",
+            "audio/sp-midi",
+            "audio/mid",
             "application/xml",
             "text/xml",
             "application/vnd.recordare.musicxml",
@@ -69,5 +74,44 @@
         }
       ]
     }
-  }
+  },
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "audio/midi": [
+          ".mid",
+          ".midi"
+        ],
+        "audio/x-midi": [
+          ".kar"
+        ],
+        "application/x-guitar-pro": [
+          ".gp",
+          ".gp3",
+          ".gp4",
+          ".gp5",
+          ".gpx"
+        ],
+        "application/vnd.recordare.musicxml+xml": [
+          ".musicxml",
+          ".xml"
+        ],
+        "application/vnd.recordare.musicxml": [
+          ".mxl"
+        ],
+        "application/x-chordpro": [
+          ".cho",
+          ".chordpro",
+          ".crd"
+        ],
+        "application/pdf": [
+          ".pdf"
+        ],
+        "text/plain": [
+          ".txt"
+        ]
+      }
+    }
+  ]
 }
