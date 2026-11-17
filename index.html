@@ -996,7 +996,8 @@ function isDoubleTime(segs,bpm){
   if(!bpm||bpm<110||segs.length<6)return false;
   const L=segs.slice(0,-1).map(x=>x.d).sort((a,b)=>a-b);const med=L[Math.floor(L.length/2)];
   const even=L.filter(d=>Math.abs(d/2-Math.round(d/2))<0.01).length;
-  return med>=8&&even>=L.length*0.85;
+  // chords lasting 8+ beats, or a bar each at a fast tempo (130+ BPM), mean the file counts a slow song in double time
+  return (med>=8||(bpm>=130&&med>=4))&&even>=L.length*0.85;
 }
 function gridSegs(segs){
   if(segs.length<3)return segs;
@@ -2387,7 +2388,7 @@ requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.29';
+const APP_VERSION='1.30';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
