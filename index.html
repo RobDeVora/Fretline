@@ -1352,12 +1352,16 @@ function pluck(midi,when,vol,dur,cents,lp,s){
   if(!b)b=ksBuffer(midi);
   const src=actx.createBufferSource();src.buffer=b;src.playbackRate.value=rate*det$;const g=actx.createGain();const v=vol*gainMul;
   const full=b.duration/(rate*det$);
-  const len=ring?Math.min(full,4.5):Math.max(0.12,Math.min(dur||2,full));
-  g.gain.setValueAtTime(v,t);g.gain.setValueAtTime(v,t+Math.max(0,len-0.3));g.gain.linearRampToValueAtTime(0.0001,t+len);
-  src.connect(g);g.connect(out());src.start(t);src.stop(t+len+0.05);
-  if(ring){const old=voices[s];if(old){try{old.g.gain.cancelScheduledValues(t);old.g.gain.setValueAtTime(old.v*0.6,t);old.g.gain.linearRampToValueAtTime(0.0001,t+0.05);old.src.stop(t+0.07);}catch(e){}}
-    const me={src,g,v};voices[s]=me;src.onended=()=>{if(voices[s]===me)delete voices[s];};}
+  // a note sounds for its written length, then is damped quickly the way a lifted finger stops a string;
+  // before, every string rang for up to 4.5 s and the leftovers piled up into a constant hum under the song
+  const hold=Math.max(ring?0.3:0.12,Math.min(dur||2,full,4.5));
+  g.gain.setValueAtTime(v,t);g.gain.setValueAtTime(v,t+hold);g.gain.setTargetAtTime(0.0001,t+hold,0.06);
+  const end=Math.min(full,hold+0.4);
+  src.connect(g);g.connect(out());src.start(t);src.stop(t+end+0.05);
+  if(ring){dampString(s,t);const me={src,g,v};voices[s]=me;src.onended=()=>{if(voices[s]===me)delete voices[s];};}
 }
+// stop whatever is ringing on string s at time t (fast fade, no click)
+function dampString(s,t){const old=voices[s];if(!old)return;try{old.g.gain.cancelScheduledValues(t);old.g.gain.setValueAtTime(old.v*0.6,t);old.g.gain.linearRampToValueAtTime(0.0001,t+0.05);old.src.stop(t+0.07);}catch(e){}delete voices[s];}
 /* ---- hit / miss feedback sounds ---- */
 function fxHit(e,now){
   if(settings.fx!=='all'||!actx)return;
@@ -1376,8 +1380,8 @@ function fxMiss(e,now){
 function playEvent(e){
   if(!actx)return;
   const sec=G.song?e.d*60/(G.song.bpm*G.speed)+0.15:1.5;
-  if(e.strum){if(e.strum==='x'){stopVoices();if(sampler.id!=='basic'){(e.snotes||[]).forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.008,0.12,0.06));}else click(false,performance.now());return;}const ns=(e.snotes||[]).slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.012,e.strum==='U'?0.16:0.22,sec,0,0,n.s));return;}
-  if(e.chord||e.notes.length>=3){const ns=e.notes.slice().sort((a,b)=>a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.018,0.22,sec,0,0,n.s));}
+  if(e.strum){if(e.strum==='x'){stopVoices();if(sampler.id!=='basic'){(e.snotes||[]).forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.008,0.12,0.06));}else click(false,performance.now());return;}if(e.shape)e.shape.forEach((f,s)=>{if(f<0)dampString(s,actx.currentTime);});const ns=(e.snotes||[]).slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.012,e.strum==='U'?0.16:0.22,sec,0,0,n.s));return;}
+  if(e.chord||e.notes.length>=3){if(e.shape)e.shape.forEach((f,s)=>{if(f<0)dampString(s,actx.currentTime);});const ns=e.notes.slice().sort((a,b)=>a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.018,0.22,sec,0,0,n.s));}
   else e.notes.forEach(n=>pluck(n.midi+(G.capo||0),0,0.4,sec,0,0,n.s));
 }
 function click(accent,now){
@@ -2530,7 +2534,7 @@ requestAnimationFrame(loop);
 
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.31';
+const APP_VERSION='1.32';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
