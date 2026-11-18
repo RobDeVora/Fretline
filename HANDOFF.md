@@ -434,7 +434,10 @@ a fake WebGPU session (reset on run 2, NaN from run 4): exact output.
 Owner asked to keep the model safe from cache clears: Cache Storage survives Android "Clear cache" but not "Clear
 data"; true protection = a native file in the app (APK). Bigger next step proposed: run Demucs natively in the APK
 (onnxruntime-android: all cores + NNAPI/GPU), model stored as an app file.
-**Needs:** owner to rerun graphics chip and send the report + say how the guitar track sounds. Then:
+Rerun with 47 nodes pinned to CPU: the GPU reset before finishing even part 1, three times (more CPU↔GPU traffic).
+Conclusion: in the WebView only the single-thread processor path works (≈2.4× audio length, guitar stem judged
+excellent). Default is now "Processor (reliable)"; graphics chip labelled experimental. storage.persist() is refused
+in the WebView. Next: native Demucs in the APK (onnxruntime-android) — awaiting owner's go-ahead. and send the report + say how the guitar track sounds. Then:
 Basic Pitch (`@spotify/basic-pitch`, model inside the npm package) on the guitar stem → draft song; backing track =
 band without guitar.
 

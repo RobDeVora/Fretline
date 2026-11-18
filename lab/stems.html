@@ -29,7 +29,7 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
   <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac">
   <div class="row">
     <div><label for="secs">How much</label><select id="secs"><option value="30">First 30 s (quick test)</option><option value="60">First 60 s</option><option value="0">Whole song</option></select></div>
-    <div><label for="be">Run on</label><select id="be"><option value="auto">Graphics chip if possible</option><option value="wasm">Processor only</option></select></div>
+    <div><label for="be">Run on</label><select id="be"><option value="wasm">Processor (reliable)</option><option value="auto">Graphics chip (experimental, resets on phones)</option></select></div>
   </div>
   <label for="lean">Loading</label>
   <select id="lean"><option value="lean">Lean: least memory (try this first)</option><option value="basic">Some optimising</option><option value="all">Fully optimised (needs the most memory)</option></select>
