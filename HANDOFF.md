@@ -1,32 +1,100 @@
-# Fretline: session handoff (18 Nov 2026, v1.68 + APK from v1.63)
+# Fretline: session handoff (18 Nov 2026, web v1.68, Android app from the v1.63 build)
 
-Read this first in a new session. It covers how the project is set up, what was built in the last session, the
-problem still being worked on, and what to do next.
+Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
+how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
 
 ## The project
 
-- **Repo:** `RobDeVora/Fretline` (public). Owner works on an Android phone; changes go **straight to `main`**
-  (no branches/PRs). They test on the phone and send screenshots and detection reports.
-- **Web app:** a single file, `index.html` (~3,250 lines: CSS, a `<script id="core">` with pure logic that's also
-  exported for Node, and a second `<script>` with UI, audio, detection and drawing). Served by GitHub Pages at
-  `https://robdevora.github.io/Fretline/`.
-- **Service worker:** `sw.js`, network-first.
-- **Android app:** `android-app/`, a Capacitor 7 wrapper that **loads the live site**, so web changes reach the app
-  without a new APK. Native code: `MainActivity.java` (share/open-with intents, back button → `window.fretlineBack()`),
-  `IncomingPlugin.java`. Any push touching `android-app/` triggers `.github/workflows/android.yml`, which builds and
-  publishes `Fretline.apk` to the `android-latest` release. The signing keystore is committed (owner knows; fine
-  for sideloading).
+- **Repo:** `RobDeVora/Fretline` (public). The owner works on an Android phone (Samsung SM-S948U1, Bluetooth
+  "Buds4 Pro" headphones) and tests everything there. Changes go **straight to `main`** (no branches or PRs).
+  They send screenshots and **detection reports** (results card › 📋 Copy detection report), sometimes as attached
+  .txt files.
+- **Web app:** one file, `index.html` (~3,900 lines: CSS, a `<script id="core">` with pure logic also exported for
+  Node, and a second `<script>` with UI, audio, detection and drawing). GitHub Pages:
+  `https://robdevora.github.io/Fretline/`. `sw.js` is the network-first service worker.
+- **Android app:** `android-app/`, a Capacitor 7 wrapper that **loads the live site**, so web changes reach it
+  without a new APK. Native code in `android/app/src/main/java/com/robdevora/fretline/`:
+  - `MainActivity.java`: share/open-with intents, back button → `window.fretlineBack()`, **full screen**
+    (`hideSystemBars`: status and nav bars hidden, swipe from an edge shows them briefly; re-applied on
+    focus/resume and after the decor view attaches).
+  - `IncomingPlugin.java`: delivers shared/opened files to the page.
+  - `NativeMicPlugin.java`: records the **phone's built-in mic** with AudioRecord (UNPROCESSED, else
+    VOICE_RECOGNITION) and streams 10 ms float32 chunks to the page (`pcm` events). `listInputs()`,
+    `start({type})` (built-in / bluetooth / wired / usb; Bluetooth uses call mode), `outputRoute()` and `route`
+    events (where sound goes: speaker / bluetooth / wired / usb).
+  - Any push touching `android-app/` triggers `.github/workflows/android.yml`, which builds `Fretline.apk` and
+    publishes it to the `android-latest` release. The signing keystore is committed (owner knows; fine for
+    sideloading). Settings › App says whether the installed APK is the latest build.
 
 ### Release routine (every change)
-1. Edit `index.html`.
+1. Edit `index.html` (and Java for native changes).
 2. Bump `const APP_VERSION='1.xx'` in `index.html` **and** `const CACHE = 'fretline-vNN'` in `sw.js`.
-3. Syntax check every script block, e.g.
+3. Syntax check every script block:
    `node -e "const h=require('fs').readFileSync('index.html','utf8');for(const x of h.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)){try{new Function(x[1])}catch(e){console.log('ERR',e.message)}}"`
-4. Test in headless Chrome (Playwright, `/usr/bin/google-chrome`); see `tools/detection-tests/`.
-5. Commit with a descriptive message and push to `main`. Pages deploys in ~1 min.
-6. The owner updates with **Settings › Check for updates** (compares the live `APP_VERSION`).
+   Beware: an inline `//` comment inside a one-line statement comments out the rest of that line (this broke
+   drawing once). Use `/* */` in single-line code.
+4. Test in headless Chrome (Playwright, `/usr/bin/google-chrome`). See **Testing** below.
+5. Commit and push to `main`. Pages deploys in ~1 min; check with `gh run list -R RobDeVora/Fretline -L 1`.
+   For native changes, wait for the "Build Android app" run (`gh run watch`), then send the APK link:
+   `https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk`.
+6. The owner updates with **Settings › App › Check for updates** (compares the live `APP_VERSION`). A new APK has
+   to be installed by hand. Tell them clearly when a change needs the APK.
 
-## What exists now (features added in the last session, roughly in order)
+## Where things stand (end of 18 Nov session)
+
+**Confirmed working on the owner's phone:**
+- Native built-in mic via the app (fixed notes going silent with Bluetooth headphones): 32/32 on the A blues melody.
+- Full screen, per-output sound delay (report shows "output bluetooth (Robert's Buds4 Pro)"), 60 frames/s.
+- Landscape layout: the hand stands on the bottom edge, the highway fills the screen, lyrics fit.
+- **v1.68, two-note steps:** playing E0+A2 throughout "Boogie shuffle in E" scored 28/96. The pattern matches
+  exactly 28 steps; 27 of them counted (only #0, the first, missed), and just one wrong step counted (#6, E+C#).
+  All A and B steps (including B+G#) were correctly missed.
+
+**Open / to watch:**
+- **False hits on single notes (v1.65/1.66):** sim results are good, but sympathetic open strings can't be
+  simulated. The owner hasn't sent a single-note "play one wrong note throughout" report since v1.66. Next time,
+  ask for one (e.g. the A minor pentatonic lesson) to confirm.
+- **First note of a song** is often missed or judged without context (no history yet). Seen in the sims and in
+  the 1.68 report (#0).
+- The first E+C# false hit (#6 in the 1.68 report) suggests the "tracker heard it recently" rule can carry over
+  from a previous step. Fine for now; watch it.
+- Double stops in sim: E2+C#3 played over A2+E3 steps still pass 6 (E3 = E2's octave). See v1.67 notes.
+- **MP3 play-along idea:** discussed, not started (see the section below).
+- Not done: same-pitch-different-string detection; a "Jam" style; immersive mode is done but notch/cutout mode is
+  left at default.
+
+**Owner's preferences and style:** plain, practical explanations; they like seeing screenshots of layout changes;
+they want detection to be strict (wrong notes must not count) and report results honestly. They prefer
+one-tap/one-time settings and maximum screen space for the highway and hand.
+
+## How note detection works now
+
+`detectFrame` (every animation frame, analyser fftSize 4096): level (RMS), YIN pitch on the last 2048 samples
+(`det.midi` raw, `det.stableMidi` after 2 frames), pick onsets (level jump; energy burst above 2.5 kHz for re-picks),
+room noise. `gate()` = min(sensitivity cutoff, max(4×room noise, 0.0012)).
+
+`matchEvent(e,i,now)`:
+- **Chords (3+ notes or a chord symbol):** `chordScore` over 3 frames; strums count on a pick onset. Per-string
+  dead/muted check (`chordStrings`, `chordCheck`) after a strum is credited.
+- **Single notes and two-note steps:**
+  1. **Path 1:** the tracker's reading matches a note (`noteOk`; "any octave" is now **off by default**), freshly
+     picked, confirmed by the targeted check, and (two-note steps) `partnerOk` for the other note.
+  2. **Path 2:** targeted check (`targetInfo`: Goertzel on resolvable overtones vs. semitone neighbours) ≥ 0.63
+     and the note's strength jumped 2.5× (or a quick re-pick), for 2 frames. Blocked when the tracker clearly
+     hears a different, real note `mh` (stable, or raw `det.midi` at a pick):
+     - the expected note's own unshared overtones are under 30% of `mh`'s strength (sympathetic open strings),
+       unless `mh` is one of the last 3 expected notes (previous note ringing) or the expected note sits on
+       `mh`'s overtones;
+     - the expected note is `mh`'s 2nd..8th overtone and `mh` was just re-picked (its own unshared overtones
+       jumped at least half as much; history `G.uHist` per heard note);
+     - two-note steps: each note must stand out on its own against an `mh` that's in neither; then `partnerOk`.
+  - `partnerOk(e, base)`: the other note counts if the tracker reported it in the last 500 ms
+    (`G.heardRecent`), else if its overtones not shared with the base note stand out (all, or the lowest three)
+    with ≥ 20% of the base note's strength.
+- **Wrong notes** are reported after a 250 ms wait (`wrongSuspect` / `wrongSettle`) and dropped if the note is
+  credited or a new pick arrives. **Timing grades** (Perfect ≤ 50 ms, Good ≤ 100, Okay) from the pick time.
+
+## Features from earlier sessions (still current)
 
 - Setting to hide the fretboard; remaining-time counter in the HUD; tip text kept clear of the HUD.
 - Strumming: pattern locked to the bar grid (no overlapping strums); double-time MIDI detection (130+ BPM with a
@@ -60,54 +128,7 @@ problem still being worked on, and what to do next.
 - **Settings › Microphone** (v1.50): choose the input device; shows mic name and whether noise suppression,
   echo cancellation and auto volume are actually on.
 
-## How note detection works now (single notes)
-
-`detectFrame` (every animation frame, analyser fftSize 4096): level (RMS), YIN pitch on the last 2048 samples
-(`det.stableMidi` after 2 frames), pick onsets from (a) level jump while climbing, re-armed once the note fades,
-and (b) a burst of energy above 2.5 kHz (re-picks on a ringing string); pitch-change onsets; room noise
-(5th percentile of level over ~30 s). `gate()` = min(sensitivity cutoff, max(4×room noise, 0.0012)).
-
-`matchEvent` (single notes) counts a note when either:
-1. the pitch tracker's reading matches **and** is freshly picked **and** is confirmed by the targeted check
-   (exact ≥ 0.45; octave reading needs expected ≥ 0.55 or the octave note itself ≥ 0.7); "any octave" = ±1 octave;
-2. **targeted check** (`targetInfo` → Goertzel on each resolvable overtone vs. the semitone neighbours, min of
-   all-overtone and odd-overtone scores) ≥ 0.63 **and** the note's strength jumped 2.5× over the previous ~0.4 s
-   (or it's a quick repeat of the same note with a fresh pick), for 2 frames, at ≥ half the cutoff.
-
-Wrong-note sound: pitch reading wrong and expected note absent (< 0.5) 140 ms after a pick, or a fresh pick with
-no sign of the expected note (< 0.3) after 220 ms. Ignores pitches of the last few notes (still ringing).
-
-Chords/strums: strums count on a pick onset; chord events use `chordScore`. Per-string check (`chordStrings`,
-`chordCheck`) runs 130-340 ms after the strum is credited.
-
-## Current problem being worked on
-
-The owner (Android phone, **Bluetooth headphones**, playing "Melody in A blues · 0:59 #292482" at 65 BPM in
-Generate) gets ~69% with misses clustered on some notes. The latest detection report (v1.49) showed every miss as
-**"heard nothing · picks 0/0 · level 0.1/1.2"** while hits had levels 2-97, and room noise 0.1, i.e. the mic signal
-drops to near digital silence for whole notes. Timing readout also jumped 259 → 421 ms between runs with no change.
-
-**Diagnosis:** call-style processing is gating the input. Most likely Android is recording from the **Bluetooth
-headset's call microphone** (HFP/SCO: far from the guitar, voice-only noise suppression, variable latency), or the
-phone applies noise suppression despite the constraints. Simulations can't reproduce this; everything passes there.
-
-**v1.50 (just shipped) asks the owner to:**
-1. Open Settings and report the blue "mic: …" line (device name + whether noise suppression etc. are on).
-2. Choose the phone's own microphone in Settings › Microphone if listed, play the song again, send the report.
-3. If only "Automatic" exists, do one run with Bluetooth disconnected (speaker, untick headphones, or wired) and
-   compare reports. If the 0.1 levels disappear, the headset mic is the cause.
-4. Hold off on "Set it to 420 ms" until the mic is sorted, then recalibrate (tap test for sound delay, then the
-   results card's latency suggestion).
-
-### Next steps depending on the answer
-- **Headset mic confirmed and the phone mic can be chosen:** consider remembering/auto-preferring a built-in mic
-  when a Bluetooth input is detected (label contains "Bluetooth"/"Headset"/"Hands-free"), with a one-time tip.
-- **Web can't pick the phone mic:** the Android app could force it natively (e.g. in `MainActivity`, use
-  `AudioManager.setCommunicationDevice` / avoid SCO, or `AudioRecord` with `MediaRecorder.AudioSource.UNPROCESSED`
-  or `VOICE_RECOGNITION` routed to the built-in mic, streamed to the page via the plugin). This needs an APK
-  rebuild and real-device testing.
-- **Noise suppression shows ON despite constraints:** document it in the tip; the native route above also fixes it.
-- Then recalibrate timing (sound delay tap test, then latency suggestion) and ask for a fresh report.
+## Changelog of the last session (v1.51 to v1.68)
 
 ## v1.51: native built-in mic (Android app)
 
@@ -362,7 +383,9 @@ overtone test for the second note (tuned on sampled notes) is too strict for a r
 report showed the tracker flicking between both notes ("heard E2>B2>E2"). `partnerOk` now accepts the second note if
 the tracker itself reported it in the last 500 ms (`G.heardRecent`, filled in `matchEvent`; time from `now`, not
 performance.now(), so the sim's clock works); the overtone test stays as the fallback. Sim unchanged (its sampled
-notes don't make the tracker flick): correct 95/96, E2+B2 36/96. Needs the owner's next report to confirm.
+notes don't make the tracker flick): correct 95/96, E2+B2 36/96.
+**Confirmed on the phone:** E0+A2 throughout → 28/96: 27 of the 28 real E+B steps, 1 false (#6 E+C#), all A/B
+steps (incl. B+G#) correctly missed.
 
 ## Idea: play along with an MP3
 
@@ -378,7 +401,16 @@ library. Not started — waiting for the go-ahead.
 - A "Jam" style: improvise over the band with the scale shown on the fretboard.
 
 ## Testing
-See `tools/detection-tests/README.md`: real guitar recordings (`tonejs-instrument-guitar-acoustic-mp3` via
+See `tools/detection-tests/README.md` (every test is listed with how to run it and its last results). Setup in a
+fresh workspace: `mkdir -p /tmp/samp && cd /tmp/samp && npm pack tonejs-instrument-guitar-acoustic-mp3@1.1.2 &&
+tar xzf *.tgz` for the samples; `pip install --break-system-packages mido` to build test MIDI files. Most UI tests
+need the repo served locally (`python3 -m http.server 8769 -d <repo>`), because module/worklet loading fails from
+file://. Key detection checks to rerun after any detection change: `song_report_sim.py` (17/17),
+`sweep_fretboard.py <repo> <string> 0.5` (18/18), `sweep_wrong_notes.py <repo> <string> 0.5` (0 hits),
+`test_one_note_all_song.py` (correct 33/34; `PLAY=55` 1/34), `test_double_stops.py` (correct 95/96;
+`PLAY2='[40,47]'` 36/96).
+
+Real guitar recordings (`tonejs-instrument-guitar-acoustic-mp3` via
 `npm pack`) through the app's real per-frame code. Network in the workspace only allows package registries
 (npm works; GitHub Pages / jsdelivr / gleitz soundfonts are blocked), so the band's soundfonts can't be fetched
 there (tests used stand-in samples).
