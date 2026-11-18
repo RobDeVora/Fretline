@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, v1.67 + APK from v1.63)
+# Fretline: session handoff (18 Nov 2026, v1.68 + APK from v1.63)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -354,6 +354,15 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.68: two-note steps, real guitar
+
+On the owner's phone v1.67 scored 3/96 playing E0+A2 through the boogie: even the real E+B steps failed — the
+overtone test for the second note (tuned on sampled notes) is too strict for a real guitar via the phone mic. But the
+report showed the tracker flicking between both notes ("heard E2>B2>E2"). `partnerOk` now accepts the second note if
+the tracker itself reported it in the last 500 ms (`G.heardRecent`, filled in `matchEvent`; time from `now`, not
+performance.now(), so the sim's clock works); the overtone test stays as the fallback. Sim unchanged (its sampled
+notes don't make the tracker flick): correct 95/96, E2+B2 36/96. Needs the owner's next report to confirm.
 
 ## Idea: play along with an MP3
 

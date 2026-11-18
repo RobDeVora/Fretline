@@ -2331,8 +2331,12 @@ function firstPending(){for(let i=G.scan;i<G.song.events.length;i++)if(!G.state[
 /* Two notes at once (a double stop, a power chord's two strings): the note the tracker hears is one of them, and the
    other must really sound too. Judged on the other note's overtones that don't land on the first one's (so a low E's
    own overtones can't pass for the B or C# above it); it must stand out from its neighbours and be reasonably strong. */
+// notes the pitch tracker reported in the last half second (two notes sounding together make it flick between them)
+function recentHeard(now){const R=G.heardRecent||(G.heardRecent=[]);while(R.length&&R[0].at<now-500)R.shift();return new Set(R.map(x=>x.m));}
 function partnerOk(e,base,cp){if(e.notes.length<2)return true;const sr=actx.sampleRate,bm=base.midi+cp,fb=midiToFreq(bm);const bT=targetInfo(base,cp).T||1e-9;
+  const heard=recentHeard(G._mNow||performance.now());
   for(const n of e.notes){if(n===base)continue;const tm=n.midi+cp,ft=midiToFreq(tm);
+    if(heard.has(tm))continue; // the tracker itself heard this note: it's there
     const hs=[1,2,3,4,5,6,7,8].filter(x=>{const f=ft*x,k=Math.round(f/fb);return !(k>=1&&Math.abs(f-k*fb)/f<0.015);});
     if(!hs.length){if(targetScore(n,cp)<0.55)return false;continue;}
     // its lowest unshared overtones are the telling ones (A2's 2nd at 220 Hz is strong when it's played, absent if not)
@@ -2351,7 +2355,8 @@ function matchEvent(e,i,now){
     if(sc>0.42)G.cf++;else G.cf=Math.max(0,G.cf-1);
     return G.cf>=3;
   }
-  const m=det.stableMidi,cp=(G.capo||0);
+  const m=det.stableMidi,cp=(G.capo||0);G._mNow=now;
+  if(m!=null){const R=G.heardRecent||(G.heardRecent=[]);if(!R.length||R[R.length-1].m!==m||now-R[R.length-1].at>100)R.push({at:now,m});}
   const legato=e.notes.some(n=>n.tech==='h'||n.tech==='p'||n.tech==='s');
   const pick=Math.max(det.onsetAt,det.pitchOnsetAt||-1);
   const fresh=legato||(pick>G.lastHitAt&&now-pick<700);
@@ -3813,7 +3818,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.67';
+const APP_VERSION='1.68';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
