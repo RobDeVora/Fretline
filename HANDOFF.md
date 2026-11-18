@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, v1.62 + new APK)
+# Fretline: session handoff (18 Nov 2026, v1.63 + new APK)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -292,6 +292,15 @@ fretboard) that anticipates the following notes, and said notes move too fast to
   Android 13+ uses getAudioDevicesForAttributes, older picks Bluetooth > wired > USB > speaker). The page keeps
   `settings.soundDelays[route]` and `settings.phonesBy[route]` (written in `saveSettings`), swaps them in
   `applyRoute`, shows a hint on change; speaker starts on "auto" until set. Report shows `output …`.
+
+## v1.63
+
+- Finger strip sits flush at the bottom when the fretboard is off (the 14 px bottom margin goes to the strip),
+  with a 16k gap above so the hit line's bottom arrow and strum arrows never touch it. Queue on the badge line;
+  chords in the queue show their name once per change (not "0" for the first string, not "C C C").
+- Owner on web v1.62 still saw the status bar: probably the old APK. Settings › App now says whether the installed
+  app is the latest build (`#appBuild`, checks `NativeMic.outputRoute`). `hideSystemBars` made sturdier: platform
+  WindowInsetsController on 30+, legacy immersive flags below, re-run after the decor view attaches.
 
 ## Idea: play along with an MP3
 

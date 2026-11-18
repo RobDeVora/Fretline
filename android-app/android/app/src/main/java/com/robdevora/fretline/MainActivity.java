@@ -28,6 +28,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NativeMicPlugin.class);
         super.onCreate(savedInstanceState);
         hideSystemBars();
+        getWindow().getDecorView().post(this::hideSystemBars); // again once the window is attached
         handleIntent(getIntent());
         // Back button / back gesture: let the page close whatever is open (Settings, a song, a dialog...).
         // Only when it reports there's nothing left to close does the app go to the background.
@@ -45,11 +46,27 @@ public class MainActivity extends BridgeActivity {
 
     /** Full screen: no status bar or navigation bar. Swiping in from the edge shows them for a moment. */
     private void hideSystemBars() {
+        final android.view.View decor = getWindow().getDecorView();
         try {
-            WindowInsetsControllerCompat c = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-            if (c == null) return;
-            c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            c.hide(WindowInsetsCompat.Type.systemBars());
+            WindowInsetsControllerCompat c = WindowCompat.getInsetsController(getWindow(), decor);
+            if (c != null) {
+                c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                c.hide(WindowInsetsCompat.Type.systemBars());
+            }
+        } catch (Exception ignored) { }
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                android.view.WindowInsetsController pc = getWindow().getInsetsController();
+                if (pc != null) {
+                    pc.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                    pc.hide(android.view.WindowInsets.Type.statusBars() | android.view.WindowInsets.Type.navigationBars());
+                }
+            } else {
+                decor.setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+            }
         } catch (Exception ignored) { }
     }
 

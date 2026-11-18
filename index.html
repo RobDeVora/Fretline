@@ -370,6 +370,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <button id="cReset" style="margin-bottom:6px">Reset colours</button>
     </div>
     <div class="stab" data-t="app">
+    <div class="small" id="appBuild" style="margin-bottom:8px"></div>
     <div class="field" id="sAndroid" style="display:none"><a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2);font-weight:600">📱 Get the Android app</a><div class="small">Adds “Open with Fretline” for song files and downloads from links. Your saved songs stay in this browser; the app starts fresh.</div></div>
     <div class="field"><div class="row" style="margin:0;align-items:center;gap:8px"><span class="small" id="appVer" style="flex:1"></span><button id="sUpd">Check for updates</button></div>
       <span class="small" id="sUpdMsg"></span></div>
@@ -2600,7 +2601,7 @@ function drawFingerGuide(y,W,h,k,shade){
   const ev=G.song.events;let i=firstPending();if(i<0)return;while(i<ev.length&&ev[i].rest)i++;const e=ev[i];if(!e)return;
   cx.fillStyle='rgba(0,0,0,'+(shade||0.3)+')';cx.fillRect(0,y,W,h);
   const cy=y+h/2,R=Math.max(7,Math.min(h*0.36,13*k)),ta=cx.textAlign,tb=cx.textBaseline;cx.textBaseline='middle';
-  const hand=e.hand||1;const fs=Math.round(Math.max(10,11*k));
+  const hand=e.hand||1;let qy=cy;const fs=Math.round(Math.max(10,11*k));
   // which strings each finger presses for the next event
   const use={};const fr=e.shape?e.shape.map((f,s)=>({s,f,fg:e.fgs?e.fgs[s]:null})):(e.notes||[]).map(n=>({s:n.s,f:n.f,fg:n.fg}));
   for(const x of fr){if(x.f==null||x.f<0||x.fg==null||x.fg<0)continue;(use[x.fg]=use[x.fg]||[]).push(STRING_LABELS[x.s]+(x.f>0?x.f:''));}
@@ -2608,7 +2609,7 @@ function drawFingerGuide(y,W,h,k,shade){
   if(h>=44){ // the hand, then what to press: a finger badge with string and fret for each finger used
     const hh=h-6,hw=hh*1.3;x+=hh*0.2;drawHand(x,y+4,hw,hh,use);x+=hw+10;
     cx.textBaseline='middle';cx.textAlign='left';cx.font='600 '+fs+'px -apple-system,sans-serif';cx.fillStyle='rgba(255,255,255,.7)';
-    const lab=hand<=1?'1st position':'Hand at fret '+hand;const y1=cy-h*0.22,y2=cy+h*0.18;cx.fillText(lab,x,y1);let wmax=cx.measureText(lab).width;
+    const lab=hand<=1?'1st position':'Hand at fret '+hand;const y1=cy-h*0.22,y2=cy+h*0.18;qy=y2;cx.fillText(lab,x,y1);let wmax=cx.measureText(lab).width;
     let bx=x;const br=Math.max(8,Math.min(h*0.17,12*k));const bf=Math.round(br*1.15);
     const items=[];for(let f=1;f<=4;f++)if(use[f])for(const sf of use[f])items.push([f,sf]);if(use[0])for(const sf of use[0])items.push([0,sf]);
     for(const [f,sf] of items){cx.beginPath();cx.arc(bx+br,y2,br,0,7);cx.fillStyle=FCOL[f];cx.fill();cx.fillStyle=ink(FCOL[f]);cx.textAlign='center';cx.font='800 '+bf+'px -apple-system,sans-serif';cx.fillText(f?String(f):'0',bx+br,y2+1);
@@ -2632,17 +2633,17 @@ function drawFingerGuide(y,W,h,k,shade){
   }
   // coming up
   x+=8;cx.textAlign='left';cx.fillStyle='rgba(255,255,255,.5)';cx.font=fs+'px -apple-system,sans-serif';
-  if(x+60<W){cx.fillText('then',x,cy);x+=cx.measureText('then').width+6;}
-  let ph=hand;const r2=Math.max(5,R*0.68);let shown=0;
+  if(x+60<W){cx.fillText('then',x,qy);x+=cx.measureText('then').width+6;}
+  let ph=hand;const r2=Math.max(5,R*0.68);let shown=0;let lastChip=e.shape||(e.notes&&e.notes.length>1)?(e.label||e.chord||null):null;
   for(let j=i+1;j<ev.length&&x<W-r2*2-4&&shown<6;j++){const n=ev[j];if(n.rest)continue;shown++;
     if(n.hand&&n.hand!==ph){const t=(n.hand>ph?'↗':'↘')+n.hand;cx.fillStyle='#fff';cx.font='bold '+fs+'px -apple-system,sans-serif';cx.textAlign='left';
-      const tw=cx.measureText(t).width;if(x+tw>W-4)break;cx.fillText(t,x,cy);x+=tw+5;ph=n.hand;}
+      const tw=cx.measureText(t).width;if(x+tw>W-4)break;cx.fillText(t,x,qy);x+=tw+5;ph=n.hand;}
     const fgs=n.shape?(n.fgs||[]).filter(v=>v>0):(n.notes||[]).map(m=>m.fg).filter(v=>v!=null);
-    if(n.shape&&n.fgs){ // a chord: its name in a chip
-      const t=n.label||'chord';cx.font='bold '+Math.round(r2*1.3)+'px -apple-system,sans-serif';const tw=cx.measureText(t).width+8;if(x+tw>W-4)break;
-      cx.fillStyle='rgba(255,255,255,.14)';rr(x,cy-r2,tw,r2*2,r2);cx.fill();cx.fillStyle='#fff';cx.textAlign='center';cx.fillText(t,x+tw/2,cy+1);x+=tw+4;continue;}
-    const fg=fgs.length?fgs[0]:null;if(fg==null)continue;
-    cx.beginPath();cx.arc(x+r2,cy,r2,0,7);cx.fillStyle=FCOL[fg];cx.fill();cx.fillStyle=ink(FCOL[fg]);cx.textAlign='center';cx.font='bold '+Math.round(r2*1.1)+'px -apple-system,sans-serif';cx.fillText(String(fg),x+r2,cy+1);x+=r2*2+4;}
+    if(n.shape||(n.notes&&n.notes.length>1)){ // a chord: its name in a chip
+      const t=n.label||n.chord||'chord';if(t===lastChip){shown--;continue;}lastChip=t;cx.font='bold '+Math.round(r2*1.3)+'px -apple-system,sans-serif';const tw=cx.measureText(t).width+8;if(x+tw>W-4)break;
+      cx.fillStyle='rgba(255,255,255,.14)';rr(x,qy-r2,tw,r2*2,r2);cx.fill();cx.fillStyle='#fff';cx.textAlign='center';cx.fillText(t,x+tw/2,qy+1);x+=tw+4;continue;}
+    lastChip=null;const fg=fgs.length?fgs[0]:null;if(fg==null)continue;
+    cx.beginPath();cx.arc(x+r2,qy,r2,0,7);cx.fillStyle=FCOL[fg];cx.fill();cx.fillStyle=ink(FCOL[fg]);cx.textAlign='center';cx.font='bold '+Math.round(r2*1.1)+'px -apple-system,sans-serif';cx.fillText(String(fg),x+r2,qy+1);x+=r2*2+4;}
   cx.textAlign=ta;cx.textBaseline=tb;
 }
 function drawLyrics(lines,y,W,h,k,shade){
@@ -2670,7 +2671,7 @@ function draw(now){
     const ts=S.events.filter(e=>!e.rest).map(e=>e.t);const gs=[];for(let j=1;j<ts.length;j++){const g=ts[j]-ts[j-1];if(g>0.06)gs.push(g);}gs.sort((a,b)=>a-b);G._gapQ=gs.length?Math.max(0.125,gs[Math.floor(gs.length*0.15)]):1;}
   // finger guide strip (and lyrics) under the strings; on short screens they get smaller, then lie over the highway
   let fgH=0,fgOver=0;if(settings.fingerGuide!==false){const room=laneBot-laneTop;const full=Math.round(88*k),small=Math.max(48,Math.round(40*k));
-    const fbx=settings.fretboard?10*k:0;if(room-small-fbx>=6*16)fgH=Math.round(Math.max(small,Math.min(full,room-fbx-6*21)));else fgOver=small;if(fgH&&settings.fretboard)fgH+=Math.round(10*k);laneBot-=fgH;}
+    const fbx=settings.fretboard?10*k:0;if(room-small-fbx>=6*16)fgH=Math.round(Math.max(small,Math.min(full,room-fbx-6*21)));else fgOver=small;const gapG=Math.round(16*k);if(fgH){fgH+=gapG;if(settings.fretboard)fgH+=Math.round(10*k);else laneBot+=14;}laneBot-=fgH;}
   let lyrH=0,lyrOver=0;const LY=settings.sing&&songLyrics(S);if(LY){const room=laneBot-laneTop;
     if(room-Math.round(44*k)>=110)lyrH=Math.round(44*k);else if(room-Math.round(24*k)>=6*14)lyrH=Math.round(24*k);else lyrOver=Math.round(24*k);if(lyrH)lyrH+=6;laneBot-=lyrH;}const laneH=Math.max(12,(laneBot-laneTop)/6);
   const hitX=Math.max(54,Math.min(W*0.2,140));let ppb=Math.max(70,Math.min(170,W/7))*settings.zoom*Math.sqrt(k);
@@ -2818,7 +2819,8 @@ function draw(now){
   if(G.playing&&G.clock<0){cx.fillStyle='rgba(255,255,255,.9)';cx.font='bold 56px -apple-system,sans-serif';cx.fillText(String(Math.ceil(-G.clock)),W/2,laneTop+laneH*3);}
   if(!G.playing&&!G.finished&&G.clock<0){cx.fillStyle='rgba(255,255,255,.55)';cx.font='15px -apple-system,sans-serif';cx.fillText(G.mode==='wait'?'Wait mode: the track pauses until you play each note':'Press Play, then play the notes as they reach the glowing line',W/2,laneTop+laneH*3);}
   if(lyrH)drawLyrics(LY,laneBot+4,W,lyrH-6,k);else if(lyrOver)drawLyrics(LY,laneBot-lyrOver+2,W,lyrOver,k,0.62);
-  if(fgH)drawFingerGuide(laneBot+lyrH+6,W,fgH-4-(settings.fretboard?Math.round(10*k):0),k);else if(fgOver)drawFingerGuide(laneBot-fgOver-(lyrOver||0),W,fgOver,k,0.7);
+  // the strip sits at the bottom (above the fretboard if that's on), clear of the hit line's arrows
+  if(fgH){const gapG=Math.round(16*k);drawFingerGuide(laneBot+lyrH+gapG,W,fgH-gapG-(settings.fretboard?Math.round(10*k):0),k);}else if(fgOver)drawFingerGuide(laneBot-fgOver-(lyrOver||0),W,fgOver,k,0.7);
   if(settings.fretboard)drawFretboard(laneBot+14+lyrH+fgH,fbH,W);
 }
 // technique marks: h / p arcs and slide lines from the previous note on the string, bend arrows, vibrato waves
@@ -2899,7 +2901,8 @@ function tunerUpdate(){
 
 /* ---- settings ---- */
 let settingsOpen=false;
-function syncSettingsUI(){$('#sFingerGuide').checked=settings.fingerGuide!==false;$('#cNoteBy').value=settings.noteBy==='string'?'string':'finger';$('#sVoxOn').checked=settings.vocalGuide!==false;$('#sVoxLib').checked=settings.vocalLibrary!==false;$('#sVoxFile').checked=settings.vocalFiles!==false;$('#sVoxMade').checked=settings.vocalMadeUp!==false;
+function syncSettingsUI(){{const P=IS_APP&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;
+  $('#appBuild').innerHTML=!IS_APP?'':P&&P.outputRoute?'Android app: latest build (full screen, sound delay per output'+(outRoute?' · sound now on '+ROUTE_NAMES[outRoute]:'')+')':'Android app: an older build. <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">Install the latest Fretline.apk</a> for full screen and a sound delay for each output.';}$('#sFingerGuide').checked=settings.fingerGuide!==false;$('#cNoteBy').value=settings.noteBy==='string'?'string':'finger';$('#sVoxOn').checked=settings.vocalGuide!==false;$('#sVoxLib').checked=settings.vocalLibrary!==false;$('#sVoxFile').checked=settings.vocalFiles!==false;$('#sVoxMade').checked=settings.vocalMadeUp!==false;
   $('#sVoxVol').value=settings.vocalVol==null?0.7:settings.vocalVol;$('#sVoxV').textContent=Math.round((settings.vocalVol==null?0.7:settings.vocalVol)*100)+'%';$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
@@ -3723,7 +3726,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.62';
+const APP_VERSION='1.63';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
