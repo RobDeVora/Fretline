@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.68, Android app from the v1.63 build)
+# Fretline: session handoff (18 Nov 2026, web v1.69, Android app from the v1.63 build)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,40 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.69: highway speed in pixels per second; early hits can't take the previous step's pick
+
+**Highway.** Owner: the highway can't be both readable and a reasonable speed; slowing it crowds the notes. Compared
+with a screen recording of another tab app (an advanced song): it scrolls ~17% of the screen width per second
+(~140 CSS px/s on the owner's phone), whatever the tempo, with ~32 px notes, and lets 16th notes touch. Fretline
+was pixels per *beat* (`W/7 × zoom × sqrt(note size)`, then up to ×1.6 more for busy songs), so a 120 BPM song moved
+~270-440 px/s and the practice-speed control slowed the highway instead of spreading notes out. Now
+`pps = clamp(W×0.17, 110, 220) × zoom` and `ppb = pps / bps()`: same on-screen speed for every song and practice
+speed (slower practice = more space between notes), note size no longer changes speed, no busy-song boost (notes
+shrink to r ≥ 10 for quick passages instead). Setting renamed "Highway speed" with a hint; `settings.zoom` reset to
+1 once (`zoomV2`).
+
+**Detection.** Owner's 1.68 report (boogie): they fretted "fret 4 and fret 2" where the chart said open E + A fret 4
+(E0+C#3), and those steps counted; 27/96 overall, many hits graded "okay" 180-470 ms early with picks 0/0.
+
+(a) Octave: A4+D2 = C#3+E3, and E3 carries every even overtone of E2 (the tracker even reported "E2"). Sim: 24/24
+E+C# steps credited. New `lowOddOk` (called first in `partnerOk`, so both paths): the step's lowest note's 3rd
+overtone must be ≥ 0.15 of its 2nd/4th (Goertzel directly; `targetScoreBuf` skips < ~400 Hz), best reading during
+the step (`G._oddMax`); skipped when the other note shares the 3rd (E+B, A+E). Sim ratios: real E0+A4 ~2.6, A4+D2
+~0.08, real A0+D4 ~0.18 (closest to the line — watch A+F# steps on the phone). Now 0 of those steps credited. Low E
+fretted at 2 (F#2+C#3) was already rejected.
+
+(b) Window: the early hits were the previous step's pick. The early window
+(`max(0.25 s, ring-touch time ≤ 0.5 s) + latency`) grows as the highway slows (ring-touch time = note diameter /
+speed) and at 70 BPM reached back past the previous step (429 ms). Also `heardRecent` (500 ms) let the previous
+step's note count as the partner. Now `hitWindow(e,b,gap,pgap)` caps the early window for single notes / two-note
+steps at half the gap to the previous note (min 0.12 s); `G._winAt` (when the step's window opened, set in the update
+loop) is required for a fresh pick in path 1 and for `recentHeard` readings. Sim (`test_window_steal.py`): fret 2/4 swapped
+11 → 5 false (the rest are the known sampled-note overtone leaks), correct 95/96, E2+B2 throughout 36/96,
+`song_report_sim.py` 17/17.
+
+**Needs:** owner to repeat the A4+D2 boogie run (E+C# steps should all miss) and a correct run (watch A+F# steps) and send the report; check that the highway speed feels right
+and that correct playing still scores.
 
 ## v1.68: two-note steps, real guitar
 
