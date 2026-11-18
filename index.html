@@ -1518,13 +1518,30 @@ function detectFrame(now){
   if(rms<g||now<muteUntil){det.midi=null;det.stableMidi=null;det.count=0;return;}
   const f=yin(sub,actx.sampleRate);
   if(f<=0||f>1400){det.midi=null;det.stableMidi=null;det.count=0;return;}
-  const mf=freqToMidiFloat(f);const m=Math.round(mf);
+  const mf0=freqToMidiFloat(f);followTuning(mf0,rms,g);const mf=mf0-tuneCents(Math.round(mf0))/100;const m=Math.round(mf);
   det.freq=f;det.cents=Math.round((mf-m)*100);
   if(m===det.midi)det.count++;else{det.midi=m;det.count=1;}
   det.stableMidi=det.count>=2?m:null;
   // a change to a new steady pitch is a pick too, even when the volume barely rises (the last note still ringing)
   if(det.stableMidi!=null&&det.stableMidi!==det.lastStable){det.lastStable=det.stableMidi;det.pitchOnsetAt=now;det.pitchOnsetMidi=det.stableMidi;}
 }
+/* v1.76: follow the guitar's tuning. Yousician and Simply both insist you tune with their own tuner (a guitar a bit
+   sharp or flat throws their checks off), and Simply's engine "learns the instrument on the fly". Here: how far steady
+   notes sit from the nearest semitone, learned per note (each string can be off by its own amount; last 30 readings,
+   used from 5) with the median of all notes as the fallback (last 60, from 10). Applied when it's 8 cents or more, up
+   to 40, to every expected frequency (targeted checks, second-note check, chord sound) and the pitch reading.
+   Remembered between songs. */
+const TUNE=Object.assign({all:[],by:{}},(()=>{const t=store.get('tune2',null);return t&&t.by?{all:t.all||[],by:t.by}:{};})());
+let tuneOff=0,tuneSaveAt=0;const tuneMed={};
+function medOf(a){const so=a.slice().sort((x,y)=>x-y);return so[so.length>>1];}
+function tuneRecalc(){tuneOff=TUNE.all.length>=10?Math.round(medOf(TUNE.all)):0;for(const k in TUNE.by){const a=TUNE.by[k];tuneMed[k]=a.length>=5?medOf(a):null;}}
+tuneRecalc();
+function tuneCents(m){const v=tuneMed[m]!=null?tuneMed[m]:tuneOff;return Math.abs(v)>=8?Math.max(-40,Math.min(40,v)):0;}
+function tuneMulFor(m){return Math.pow(2,tuneCents(Math.round(m))/1200);}
+function followTuning(mf,rms,g){if(det.count<2||rms<g)return;const m=Math.round(mf),c=(mf-m)*100;if(Math.abs(c)>45)return;
+  TUNE.all.push(c);if(TUNE.all.length>60)TUNE.all.shift();const a=TUNE.by[m]||(TUNE.by[m]=[]);a.push(c);if(a.length>30)a.shift();
+  tuneOff=TUNE.all.length>=10?Math.round(medOf(TUNE.all)):0;tuneMed[m]=a.length>=5?medOf(a):null;
+  const now=performance.now();if(now-tuneSaveAt>5000){tuneSaveAt=now;store.set('tune2',{all:TUNE.all,by:TUNE.by});}}
 /* ---- targeted note detection ----
    Instead of asking "what single pitch is sounding?" (which a grazed second string can confuse), ask "is the note
    I'm waiting for present?". For each harmonic of the expected note that the analysis window can resolve, measure
@@ -1535,7 +1552,7 @@ function goertzel(buf,w,sr,f){const k=2*Math.cos(2*Math.PI*f/sr);let s1=0,s2=0;f
 const hannBy={};
 function targetScoreBuf(buf,sr,midi,hs,info){
   if(!hann||hann.length!==buf.length){const H=hannBy[buf.length];if(H)hann=H;else{hann=new Float32Array(buf.length);for(let i=0;i<buf.length;i++)hann[i]=0.5-0.5*Math.cos(2*Math.PI*i/(buf.length-1));hannBy[buf.length]=hann;}}
-  const f0=midiToFreq(midi);const minF=Math.max(150,2.2*sr/buf.length/0.0595);// a semitone apart must be >~2 bins
+  const f0=midiToFreq(midi)*tuneMulFor(midi);const minF=Math.max(150,2.2*sr/buf.length/0.0595);// a semitone apart must be >~2 bins
   let T=0,Lo=0,Hi=0,n=0;
   for(const h of hs||[1,2,3,4,5,6,7,8,9,10]){const f=f0*h;if(f<minF)continue;if(f>3000||n>=5)break;n++;const wt=1/Math.sqrt(h);
     T+=wt*Math.sqrt(goertzel(buf,hann,sr,f));Lo+=wt*Math.sqrt(goertzel(buf,hann,sr,f*0.943874));Hi+=wt*Math.sqrt(goertzel(buf,hann,sr,f*1.059463));}
@@ -2381,7 +2398,11 @@ let noteChromaAt=-1,noteChroma=null;
 function strumChroma(){if(noteChromaAt===det.frame&&noteChroma)return noteChroma;noteChromaAt=det.frame;
   let buf=timeBuf;if(analyserL&&longBuf){if(longFrame!==det.frame){analyserL.getFloatTimeDomainData(longBuf);longFrame=det.frame;}buf=longBuf;}
   const sr=actx.sampleRate;targetScoreBuf(buf,sr,60,[1]);const w=hannBy[buf.length];const c=new Float32Array(12);
-  for(let m=40;m<=83;m++)c[m%12]+=Math.sqrt(goertzel(buf,w,sr,midiToFreq(m)));return (noteChroma=c);}
+  const a=[];for(let m=40;m<=83;m++)a.push(Math.sqrt(goertzel(buf,w,sr,midiToFreq(m)*tuneMulFor(m))));
+  /* v1.76 spectral whitening (Klapuri): each note's level against its neighbourhood (±6 semitones), compressed, so the
+     phone mic's weak bass or treble and an uneven strum don't tilt the chord match */
+  for(let j=0;j<a.length;j++){let e=0,n=0;for(let q=Math.max(0,j-6);q<=Math.min(a.length-1,j+6);q++){e+=a[q];n++;}e=e/n+1e-9;c[(40+j)%12]+=a[j]*Math.pow(e,-0.67);}
+  return (noteChroma=c);}
 function chordFit(pcs,cc){const c=cc||strumChroma();const t=new Float32Array(12);for(const r of pcs){t[r]+=1;t[(r+7)%12]+=0.5;t[(r+4)%12]+=0.25;t[(r+10)%12]+=0.15;}
   let d=0,a=0,b=0;for(let j=0;j<12;j++){const x=c[j];d+=x*t[j];a+=x*x;b+=t[j]*t[j];}return a>0?d/Math.sqrt(a*b):0;}
 function strumPcs(e){const cp=G.capo||0;if(e._pcsFor!==cp){let p=null;const ns=e.snotes||[];
@@ -2524,7 +2545,7 @@ function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]
 function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.notes.push(txt);}
 function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);}}
 function diagReport(){
-  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+') · '+G.hits+'/'+S.events.length];
+  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+')'+(tuneOff?' · tuning '+(tuneOff>0?'+':'')+tuneOff+' cents':'')+' · '+G.hits+'/'+S.events.length];
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
     L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.notes.length?' · '+d.notes.join(','):''));});
@@ -3907,7 +3928,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.75';
+const APP_VERSION='1.76';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

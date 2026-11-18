@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.75, Android app from the v1.63 build)
+# Fretline: session handoff (18 Nov 2026, web v1.76, Android app from the v1.63 build)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,21 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.76: research-led: tuning follower and whitened chord sound
+
+Owner asked to research Yousician / Gibson App (gold standard) and Simply Guitar (weak) and strengthen recognition.
+Write-up with sources: **`docs/RECOGNITION_RESEARCH.md`** (read it before more detection work). Adopted:
+- **Tuning follower**: `followTuning` (in `detectFrame`) records each steady pitch reading's cents from the nearest
+  semitone, per note (`TUNE.by[m]`, last 30, used from 5) and overall (`TUNE.all`, last 60, from 10); `tuneCents(m)`
+  (≥ 8, ≤ 40) shifts the pitch reading and every expected frequency (`targetScoreBuf`, so targeted checks and
+  `lowPartner`; `strumChroma`). Saved in `store` `tune2`. Report header: `tuning ±N cents`. A single global offset cost
+  the in-tune boogie 12 steps (sample notes off by different amounts), per-note fixed it. Sim with `DETUNE=±30`
+  (new option in `test_window_steal.py` / `test_strums.py`): boogie 54→78 / 43→71, arpeggio 47→64 / 57→60, strums
+  95→102 / 99→102.
+- **Whitening** in `strumChroma` (each note ÷ its ±6-semitone mean^0.67): strums in tune 100→102.
+Regressions all unchanged (boogie 95, swapped 8, E+B 38, E+C# 45, late 96, arpeggio 64 and wrong 0, strums Em/D/G
+exact, one-note 33/1/4/4, melody 17, double stops 95, sweeps G/B 18/18 and 0/18).
 
 ## v1.75: string colours separate from note colours
 
