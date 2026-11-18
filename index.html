@@ -327,10 +327,18 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
       <span class="small">Uses the guitar sound above. Without headphones the phone's mic can hear the app, so “play the right note” works best with headphones.</span></div>
     <div class="field"><label>Backing band volume: <span id="sBandV"></span></label><input type="range" id="sBandVol" min="0" max="1" step="0.05"><span class="small">Drums, bass and piano that fit what you're playing. Turn the band on or off with 🥁 Band while playing a song. Use headphones so the mic only hears your guitar.</span></div>
     <div class="field inline"><label>Point out dead strings in chords</label><input type="checkbox" id="sDead"></div>
-    <div class="small" style="margin-top:-6px">After you strum a chord, ✓ and ✕ by each string show which rang, and an orange ! marks a muted string that rang. A string that can\'t be heard apart from another one in the chord is left unmarked.</div>
+    <div class="small" style="margin-top:-6px">After you strum a chord, ✓ and ✕ by each string show which rang, and an orange ! marks a muted string that rang. A string that can’t be heard apart from another one in the chord is left unmarked.</div>
     <div class="field inline"><label>I'm using headphones</label><input type="checkbox" id="sPhones"></div>
     <div class="small" style="margin-top:-6px">Turn on when the app's sound goes to headphones. The mic then can't hear the band or the hit and miss sounds, so Fretline stops making allowances for them and reacts faster to your playing.</div>
     <div class="field inline"><label>Metronome click while playing</label><input type="checkbox" id="sMetro"></div>
+    <h3 style="margin:14px 0 4px">Singing</h3>
+    <div class="small" style="margin-bottom:6px">Turn lyrics on or off for each song with 🎤 Sing while playing.</div>
+    <div class="field inline"><label>Vocal guide: play the singing melody</label><input type="checkbox" id="sVoxOn"></div>
+    <div class="field"><label>Vocal guide volume: <span id="sVoxV"></span></label><input type="range" id="sVoxVol" min="0" max="1" step="0.05"><span class="small">A flute plays the tune you sing, with or without the band. Where the melody comes from:</span></div>
+    <div class="field inline"><label>Real tunes in library songs</label><input type="checkbox" id="sVoxLib"></div>
+    <div class="field inline"><label>Melody and words from MIDI and MusicXML files</label><input type="checkbox" id="sVoxFile"></div>
+    <div class="field inline"><label>Make up a melody for chord sheets</label><input type="checkbox" id="sVoxMade"></div>
+    <div class="small" style="margin-bottom:10px">Chord sheets only have chords and words, so the app writes a tune that fits them. It won't be the song's real tune. If a song has a real tune, that's used first.</div>
     <details class="field colors" id="sColors"><summary>🎨 Colors &amp; theme</summary>
       <canvas id="cPrev"></canvas>
       <div class="field"><label>App theme</label><select id="cTheme"></select></div>
@@ -479,6 +487,44 @@ const CHORD_RE=/^[A-G][#b]?(?:maj|min|m|M|dim|aug|sus|add|°|ø|\+|-|\d|b|#)*(?:
    Each piece of text gets the time of its chord; text before a line's first chord (a pickup) goes with that chord.
    Returns lines: [{t0, segs:[{t,d,text}]}]. Lines with no chords (e.g. later verses written without them) are left
    out, because the chords aren't repeated for them either. */
+/* A library song's real tune with its words: "D4/1/A- | G4/2/ma- B4/.5/zing G4/.5 | ... // ..." — note/beats/syllable.
+   "r/2" is a rest, syllable "_" ties the note to the one before, no syllable = the same syllable carries on, "word-"
+   means the word continues, "//" starts a new lyric line, "|" bar lines are only for reading. Starts at -pickup. */
+function parseTune(str,pickup){
+  const vocal=[],lines=[];let t=-(pickup||0),line=[],lastSeg=null;
+  for(const tok of String(str).trim().split(/\s+/)){
+    if(tok==='|')continue;
+    if(tok==='//'){if(line.length)lines.push(line);line=[];lastSeg=null;continue;}
+    const [p,dur,syl]=tok.split('/');const d=parseFloat(dur);if(!(d>0))continue;
+    if(p!=='r'){const midi=nameToMidi(p);if(midi!=null){
+      if(syl==='_'&&vocal.length)vocal[vocal.length-1].d+=d;else vocal.push({t,d,midi});
+      if(syl&&syl!=='_'){const cont=syl.endsWith('-');lastSeg={t,d,text:cont?syl.slice(0,-1):syl+' '};line.push(lastSeg);}
+      else if(lastSeg)lastSeg.d=t+d-lastSeg.t;}}
+    t+=d;
+  }
+  if(line.length)lines.push(line);
+  return {vocal,lyrics:lines.map(segs=>{segs[segs.length-1].text=segs[segs.length-1].text.replace(/\s+$/,'');return {t0:segs[0].t,segs};})};
+}
+/* words found in a MIDI or MusicXML file, [{beat,text,nl}] (nl: starts a new line), as lyric lines. A pause of 3+
+   beats also starts a line, and long lines are split between words. */
+function wordsToLyrics(words){
+  const ws=words.filter(w=>w.text!=null).sort((a,b)=>a.beat-b.beat);const lines=[];let cur=[],len=0;
+  ws.forEach((w,i)=>{const nx=ws[i+1];const d=nx?Math.max(0.25,Math.min(nx.beat-w.beat,4)):2;
+    const prev=cur[cur.length-1];const wordStart=!prev||/\s$/.test(prev.text)||/^\s/.test(w.text);
+    if(prev&&(w.nl||w.beat-prev.t>=3||(len>34&&wordStart))){lines.push(cur);cur=[];len=0;}
+    let tx=w.text;if(!cur.length)tx=tx.replace(/^\s+/,'');cur.push({t:w.beat,d,text:tx});len+=tx.length;});
+  if(cur.length)lines.push(cur);
+  return lines.map(segs=>{segs[segs.length-1].text=segs[segs.length-1].text.replace(/\s+$/,'');return {t0:segs[0].t,segs};}).filter(L=>L.segs.some(s=>s.text.trim()));
+}
+// the sung line of a part: the top note at each moment
+function monoLine(notes){const by=new Map();for(const n of notes){const k=Math.round(n.beat*48);const o=by.get(k);if(!o||n.midi>o.midi)by.set(k,n);}
+  return [...by.values()].sort((a,b)=>a.beat-b.beat).map(n=>({beat:n.beat,dur:n.dur,midi:n.midi}));}
+// which part carries the words: the one whose notes start where the words do
+function vocalPart(cands,words){
+  if(words&&words.length){let best=null,bs=0;for(const c of cands){const on=new Set(c.notes.map(n=>Math.round(n.beat*8)));
+      let hit=0;for(const w of words){const k=Math.round(w.beat*8);if(on.has(k)||on.has(k-1)||on.has(k+1))hit++;}const s=hit/words.length;if(s>bs){bs=s;best=c;}}
+    if(best&&bs>=0.5)return best;}
+  return cands.find(c=>/vocal|voice|vox|melody|sing|soprano|lead\s*v/i.test(c.label))||null;}
 const SECTION_RE=/^\s*[\[(]?\s*(verse|chorus|bridge|intro|outro|pre-?chorus|refrain|solo|instrumental|interlude|coda|tag|hook|ending|break)\b[^a-z]*$/i;
 function lyricText(s){return s.replace(/\{[^}]*\}/g,'').replace(/\[[^\]]*\]/g,'').replace(/\s+/g,' ');}
 function lyricLines(rows,cb){const out=[];
@@ -806,7 +852,7 @@ function parseMidi(bytes){
   const hlen=dv.getUint32(0+4);const ntr=dv.getUint16(10);const div=dv.getUint16(12);
   if(div&0x8000)throw new Error('This MIDI file uses SMPTE timing, which is not supported.');
   let p=8+hlen;let tempo=null;const tsList=[];
-  const raw=[];const tnames=[];const progs={};
+  const raw=[];const tnames=[];const progs={};const lyr=[];
   let t=0;
   while(t<ntr&&p+8<=bytes.length){
     const len=dv.getUint32(p+4);
@@ -822,6 +868,7 @@ function parseMidi(bytes){
         if(type===0x51&&tempo==null&&l>=3)tempo=(data[0]<<16)|(data[1]<<8)|data[2];
         else if(type===0x58&&l>=2){tsList.push({tick,n:data[0],d:Math.pow(2,data[1])});}
         else if(type===0x03&&!tname){tname=String.fromCharCode(...data).replace(/[^\x20-\x7e]/g,'').trim();}
+        else if(type===0x05||type===0x01)lyr.push({type,tick,text:String.fromCharCode(...data)});
         else if(type===0x2f)break;
         status=0;continue;}
       if(status===0xf0||status===0xf7){const l=vlq();q+=l;status=0;continue;}
@@ -852,9 +899,17 @@ function parseMidi(bytes){
     if(inst&&tnames[tr]&&tnames[tr].toLowerCase()!==inst.toLowerCase())label+=' ('+inst+')';
     parts.push({label,notes,isGuitar:isGuitar||/guit|gtr/i.test(tnames[tr]||''),hasTab:false,count:notes.length});
   }
+  // sung words: lyric events, or karaoke (.kar) text events ("/" starts a line, "\\" a verse, "@" is a header)
+  let le=lyr.filter(x=>x.type===5);if(le.length<8){const tx=lyr.filter(x=>x.type===1&&!/^@/.test(x.text));le=tx.length>=16?tx:[];}
+  const words=[];let nl=false;
+  for(const x of le.sort((a,b)=>a.tick-b.tick)){let s=x.text.replace(/[^\x20-\x7e\r\n\/\\]/g,'');if(/^[\/\\]/.test(s)){nl=true;s=s.slice(1);}
+    const endNl=/[\r\n]\s*$/.test(s);s=s.replace(/[\r\n]+/g,'');if(/-$/.test(s))s=s.slice(0,-1);
+    if(s.trim())words.push({beat:x.tick/div,text:s,nl});nl=endNl;}
+  const vp=vocalPart(parts,words.length>=8?words:null);
+  const vocal=vp?{label:vp.label,notes:monoLine(vp.notes),words:words.length>=8?words:null}:null;
   parts.sort((a,b)=>(b.isGuitar-a.isGuitar)||(b.count-a.count));
   if(!parts.length)throw new Error('No notes found in this MIDI file (drum tracks are skipped).');
-  return {bpm,bpb,parts,title:''};
+  return {bpm,bpb,parts,title:'',vocal};
 }
 const MXL_KIND={major:'',minor:'m',augmented:'aug',diminished:'dim',dominant:'7','major-seventh':'maj7','minor-seventh':'m7','diminished-seventh':'dim7','half-diminished':'m7b5','major-sixth':'6','minor-sixth':'m6','suspended-second':'sus2','suspended-fourth':'sus4',power:'5','dominant-ninth':'9','major-ninth':'maj9','minor-ninth':'m9'};
 function parseMusicXML(text){
@@ -871,7 +926,7 @@ function parseMusicXML(text){
   let bpm=null,bpb=null;const parts=[];
   for(const part of root.children){
     if(part.nodeName!=='part')continue;
-    let div=1,cursor=0,lastStart=0;const notes=[];const harm=[];const lastByPitch={};let hasTab=false;
+    let div=1,cursor=0,lastStart=0;const notes=[];const harm=[];const lastByPitch={};let hasTab=false;const lyr=[];
     for(const m of part.children){
       if(m.nodeName!=='measure')continue;
       const mStart=cursor;let mEnd=cursor;
@@ -891,6 +946,7 @@ function parseMusicXML(text){
           if(!isChord){lastStart=cursor;cursor+=d;}
           if(kid(el,'rest'))continue;
           const pe=kid(el,'pitch');if(!pe)continue;
+          {const L=kid(el,'lyric');const lt=L&&txt(L,'text');if(lt&&!isChord){const sy=txt(L,'syllabic')||'single';lyr.push({beat:start,text:lt+(sy==='begin'||sy==='middle'?'':' ')});}}
           const midi=(+txt(pe,'octave')+1)*12+STEP[txt(pe,'step')]+Math.round(+(txt(pe,'alter')||0));
           const ties=[...el.children].filter(c=>c.nodeName==='tie').map(c=>c.getAttribute('type'));
           if(ties.includes('stop')&&lastByPitch[midi]){lastByPitch[midi].dur+=d;continue;}
@@ -904,12 +960,14 @@ function parseMusicXML(text){
       cursor=Math.max(cursor,mEnd);
     }
     const pid=part.getAttribute('id');const label=names[pid]||pid||('Part '+(parts.length+1));
-    if(notes.length)parts.push({label,notes,harm,isGuitar:hasTab||/guit|gtr/i.test(label),hasTab,count:notes.length});
+    if(notes.length)parts.push({label,notes,harm,lyr,isGuitar:hasTab||/guit|gtr/i.test(label),hasTab,count:notes.length});
     if(harm.length)parts.push({label:label+' – chord symbols',chords:harm,isGuitar:false,count:harm.length});
   }
   if(!parts.length)throw new Error('No notes or chord symbols found in this file.');
+  let vocal=null;{const wp=parts.filter(p=>p.lyr&&p.lyr.length>=8).sort((a,b)=>b.lyr.length-a.lyr.length)[0];
+    if(wp)vocal={label:wp.label,notes:monoLine(wp.notes),words:wp.lyr};else{const vp=vocalPart(parts.filter(p=>p.notes),null);if(vp)vocal={label:vp.label,notes:monoLine(vp.notes),words:null};}}
   parts.sort((a,b)=>(b.isGuitar-a.isGuitar));
-  return {bpm:bpm||100,bpb:bpb||4,parts,title};
+  return {bpm:bpm||100,bpb:bpb||4,parts,title,vocal};
 }
 function chordEventsFromSymbols(harm,bpb){
   const hs=harm.slice().sort((a,b)=>a.beat-b.beat);if(!hs.length)return [];
@@ -1145,7 +1203,7 @@ function detectPattern(events,bpb){
 }
 function tempoPattern(bpm,bpb){if(bpb===3)return 'D-DUDU';if(bpm<=100)return 'D-DU-UDU';if(bpm<=130)return 'D-DUD-DU';return 'D-D-D-DU';}
 function labelByBar(ev,prog,bars){for(const e of ev){if(e.chord)continue;const b=Math.min(bars-1,Math.floor(e.t/4+1e-9));e.label=prog[b].name;}return ev;}
-if(typeof module!=='undefined')module.exports={simplifyEvents,simplifyPlan,SIMP_SETS,strumify,detectPattern,normPattern,tempoPattern,chordChart,bestCapo,transposeName,genStrum,genDrill,genChordDrill,genPower,genMix,STRUM_PATTERNS,inferChords,parseMidi,eventsFromNotes,assignStrings,chordProMeta,parseMelody,parseFretSeq,parseChordSeq,parseChordSheet,parseTab,genTrack,chordShape,chordPCs,midiToName,fingerFor,songLength,SCALES};
+if(typeof module!=='undefined')module.exports={parseTune,wordsToLyrics,monoLine,vocalPart,simplifyEvents,simplifyPlan,SIMP_SETS,strumify,detectPattern,normPattern,tempoPattern,chordChart,bestCapo,transposeName,genStrum,genDrill,genChordDrill,genPower,genMix,STRUM_PATTERNS,inferChords,parseMidi,eventsFromNotes,assignStrings,chordProMeta,parseMelody,parseFretSeq,parseChordSeq,parseChordSheet,parseTab,genTrack,chordShape,chordPCs,midiToName,fingerFor,songLength,SCALES};
 </script>
 
 <script>
@@ -1220,14 +1278,16 @@ function buildSong(def){
     else events=parseChordSheet(def.src,def.cb||4);
   }
   if(!def.noChords)inferChords(events,def.bpb||4);
-  const song={id:def.id,title:def.title,cat:def.cat,bpm:def.bpm||90,bpb:def.bpb||4,events,length:songLength(events),gen:def.gen||null,key:def.key||null,lyrics:(events&&events.lyrics)||def.lyrics||null};
+  const song={id:def.id,title:def.title,cat:def.cat,bpm:def.bpm||90,bpb:def.bpb||4,events,length:songLength(events),gen:def.gen||null,key:def.key||null,lyrics:(events&&events.lyrics)||def.lyrics||null,
+    lyricsSrc:events&&events.lyrics?'sheet':def.lyrics?'file':null,sheetLyrics:(events&&events.lyrics)||null,vocal:def.vocal||null,vocalSrc:def.vocal?'file':null};
+  if(def.tune&&def.tune.notes){try{const tu=parseTune(def.tune.notes,def.tune.pickup);if(tu.vocal.length){song.vocal=tu.vocal;song.vocalSrc='tune';if(tu.lyrics.length){song.lyrics=tu.lyrics;song.lyricsSrc='tune';}}}catch(e){}}
   if(def.cat!=='gen')Object.defineProperty(def,'_built',{value:song,writable:true,configurable:true,enumerable:false});
   return song;
 }
 
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
-const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,micId:'',backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1,sing:true},store.get('settings',{}));
+const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,micId:'',backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1,sing:true,vocalGuide:true,vocalVol:0.7,vocalLibrary:true,vocalFiles:true,vocalMadeUp:true},store.get('settings',{}));
 function saveSettings(){store.set('settings',settings);}
 // The level below which sound is treated as silence. The sensitivity setting sets the most it can be; in a quiet room
 // it drops to just above the room's own noise (measured between notes), so soft notes on a quiet phone mic still count.
@@ -1672,6 +1732,80 @@ function barRole(evs){
   const ms=evs.map(e=>e.notes[0].midi);
   return ms.filter(m=>m<50).length>=ms.length*0.7&&Math.max(...ms)<57?'riff':'lead';
 }
+/* ---- singing ---- */
+// lyrics and melody to use for a song, following Settings › Singing
+function songLyrics(S){if(!S)return null;
+  if(S.lyricsSrc==='tune'&&settings.vocalLibrary===false)return S.sheetLyrics||null;
+  if(S.lyricsSrc==='file'&&settings.vocalFiles===false)return null;
+  return S.lyrics&&S.lyrics.length?S.lyrics:null;}
+// {notes,abs}: abs = written at the song's real pitch (tunes, files); otherwise made up from the chord shapes
+function songVocal(S){if(!S)return null;
+  if(S.vocal&&S.vocalSrc==='tune'&&settings.vocalLibrary!==false)return {notes:S.vocal,abs:true,src:'tune'};
+  if(S.vocal&&S.vocalSrc==='file'&&settings.vocalFiles!==false)return {notes:S.vocal,abs:true,src:'file'};
+  const L=songLyrics(S);if(!L||settings.vocalMadeUp===false)return null;
+  if(!S._madeUp||S._madeUp.L!==L||S._madeUp.ev!==S.events)S._madeUp={L,ev:S.events,notes:makeUpMelody(S,L)};
+  return {notes:S._madeUp.notes,abs:false,src:'made up'};}
+// syllables: one per vowel group in each word (a final silent "e" doesn't count); returns their positions in the text
+function syllableSpots(text){const out=[];for(const m of text.matchAll(/[A-Za-z']+/g)){const w=m[0];const g=[...w.matchAll(/[aeiouy]+/gi)];
+    if(g.length>1&&/[^aeiouy]e$/i.test(w)&&!/[^aeiouy]le$/i.test(w))g.pop();if(!g.length)g.push({index:0});for(const v of g)out.push(m.index+v.index);}return out;}
+/* A melody for a chord sheet that has words but no tune: one note per syllable, in the rhythm the words fit in each
+   chord, chord tones on the first syllable of each chord, steps in between, rising then falling over each line and
+   ending on a chord tone. It's not the song's real tune, just something singable that fits. */
+function makeUpMelody(S,lines){
+  const segs=chordSegments(S);const key=S.key||bandKey(segs,0);if(!key)return [];
+  const chordAt=t=>{let c=null;for(const g of segs){if(g.t<=t+1e-6)c=g;else break;}return c;};
+  const pool=[];for(let m=57;m<=76;m++)if(key.scale.includes(m%12))pool.push(m);
+  let seed=11;for(const ch of (S.id||'')+(S.title||''))seed=(seed*31+ch.charCodeAt(0))>>>0;const r=rng(seed);
+  const near=(m,pcs)=>{let best=pool[0],bd=99;for(const x of pool)if(pcs.includes(x%12)&&Math.abs(x-m)<bd){bd=Math.abs(x-m);best=x;}return best;};
+  let cur=pool.reduce((a,b)=>Math.abs(b-65)<Math.abs(a-65)?b:a);const out=[];
+  for(const L of lines){
+    // syllables per chord (pieces of the line that share a chord's time are counted together)
+    const full=L.segs.map(s=>s.text).join('');const spots=syllableSpots(full);const groups=new Map();let pos=0;
+    L.segs.forEach(s=>{const n=spots.filter(i=>i>=pos&&i<pos+s.text.length).length;pos+=s.text.length;const g=groups.get(s.t)||{t:s.t,d:s.d,n:0};g.n+=n;g.d=Math.max(g.d,s.d);groups.set(s.t,g);});
+    const gs=[...groups.values()].filter(g=>g.n>0).sort((a,b)=>a.t-b.t);const total=gs.reduce((a,g)=>a+g.n,0);let k=0;
+    gs.forEach((g,gi)=>{const step=g.n<=g.d?1:g.n<=2*g.d?0.5:Math.max(0.25,Math.floor(g.d/g.n*4)/4);
+      for(let i=0;i<g.n;i++){const t=g.t+i*step;const c=chordAt(t);const cp=c&&chordPcsOf(c.name,0);const lastOfLine=gi===gs.length-1&&i===g.n-1;
+        const dir=k<total*0.55?1:-1;
+        if(lastOfLine&&cp)cur=near(cur-1,[cp.root,cp.pcs[1]]);
+        // a new chord: leap to one of its notes in the direction the line is heading
+        else if(i===0&&cp){const want=cur+dir*(2+Math.floor(r()*3));const c2=near(want,cp.pcs);cur=c2===cur?near(want+dir*3,cp.pcs):c2;}
+        // otherwise step through the scale (a beat prefers a chord note next door)
+        else{let j=pool.indexOf(cur);if(j<0)j=pool.findIndex(x=>x>=cur);const st=r()<0.7?1:r()<0.85?2:0;let jj=j+dir*st;if(jj<0||jj>=pool.length)jj=j-dir*st;jj=Math.max(0,Math.min(pool.length-1,jj));
+          let m=pool[jj];if(t%1===0&&cp&&!cp.pcs.includes(m%12)){const alt=[pool[jj+dir],pool[jj-dir]].find(x=>x!=null&&x!==cur&&cp.pcs.includes(x%12));if(alt!=null)m=alt;}cur=m;}
+        const d=lastOfLine?Math.max(step,g.t+g.d-t)*0.9:i===g.n-1?Math.max(step,g.t+g.d-t)*0.85:step*0.95;
+        out.push({t,d,midi:cur});k++;}});
+  }
+  return out;
+}
+// the vocal guide: a flute plays the melody (its own volume, plays with or without the band)
+const VOICE_FONT={id:'FluidR3_GM/flute',lo:60,hi:96};let voxBus=null,voxLoading=null;
+function voxOut(){if(!voxBus){voxBus=actx.createGain();voxBus.connect(masterOut());}voxBus.gain.value=settings.vocalVol==null?0.7:settings.vocalVol;return voxBus;}
+function loadVoiceFont(){if(!voxLoading)voxLoading=loadFont(VOICE_FONT.id,VOICE_FONT.lo,VOICE_FONT.hi).catch(()=>{voxLoading=null;return null;});return voxLoading;}
+function voxNote(midi,t,dur){
+  const F=FONTS[VOICE_FONT.id];let b=null,rate=1,gm=1;
+  if(F){b=F.bufs[midi];let key=midi;if(!b)for(let d=1;d<=12&&!b;d++){if(F.bufs[midi-d]){key=midi-d;b=F.bufs[key];rate=Math.pow(2,d/12);}else if(F.bufs[midi+d]){key=midi+d;b=F.bufs[key];rate=Math.pow(2,-d/12);}}if(b)gm=(F.norm&&F.norm[key])||1.5;}
+  if(!b){const o=actx.createOscillator(),g=actx.createGain();o.type='triangle';o.frequency.value=midiToFreq(midi);
+    g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(0.16,t+0.03);g.gain.setValueAtTime(0.16,t+Math.max(0.05,dur-0.05));g.gain.linearRampToValueAtTime(0.0001,t+dur);
+    o.connect(g);g.connect(voxOut());o.start(t);o.stop(t+dur+0.05);return;}
+  const src=actx.createBufferSource();src.buffer=b;src.playbackRate.value=rate;if(F)src.loop=b.duration/rate<dur;const g=actx.createGain();const vv=0.5*gm;
+  g.gain.setValueAtTime(vv,t);g.gain.setValueAtTime(vv,t+Math.max(0.05,dur-0.06));g.gain.linearRampToValueAtTime(0.0001,t+dur);
+  src.connect(g);g.connect(voxOut());src.start(t);src.stop(t+dur+0.05);
+}
+function voxActive(){return settings.sing&&settings.vocalGuide!==false&&!!(G.vox&&G.vox.length);}
+function setupVox(){const V=settings.vocalGuide!==false?songVocal(G.song):null;
+  if(!V||!V.notes.length){G.vox=null;G.voxIdx=0;return;}
+  // made-up tunes follow the chord shapes plus capo; real tunes move only if you choose a different capo
+  const sh=V.abs?(G.origCapo||0)-((G.def&&G.def.capo)||0):(G.capo||0);
+  let ns=V.notes.map(n=>({t:n.t,d:n.d,midi:n.midi+sh}));const med=ns.map(n=>n.midi).sort((a,b)=>a-b)[ns.length>>1];if(med<64)ns=ns.map(n=>({...n,midi:n.midi+12}));
+  G.vox=ns;G.voxSrc=V.src;voxSeek();if(settings.sing)loadVoiceFont();}
+function voxSeek(){const E=G.vox||[];let i=0;while(i<E.length&&E[i].t<G.clock-1e-6)i++;G.voxIdx=i;}
+function voxTick(){
+  if(!voxActive()||!actx||G.waiting||G.mode==='wait')return;
+  const b=bps();const D=soundDelay();const ahead=G.clock+(0.2+D)*b;const E=G.vox;
+  while(G.voxIdx<E.length&&E[G.voxIdx].t<=ahead){const n=E[G.voxIdx++];if(n.t<G.clock+(D-0.05)*b)continue;
+    const when=actx.currentTime+Math.max(0,(n.t-G.clock)/b-D);voxNote(n.midi,when,Math.max(0.12,n.d/b));
+    const at=performance.now()+(when-actx.currentTime+D)*1000;bandHits.push(at);if(bandHits.length>64)bandHits.shift();}
+}
 function buildBand(S,shift){
   const ev=S.events,bpb=S.bpb||4,bpm=S.bpm||90;const L=songLength(ev);const nBars=Math.max(1,Math.ceil(L/bpb-1e-6));
   const segs=chordSegments(S);const chordAt=t=>{let c=null;for(const g of segs){if(g.t<=t+1e-6)c=g;else break;}return c&&t<c.end+bpb?c:null;};
@@ -1722,7 +1856,7 @@ function buildBand(S,shift){
         // voice the chord between G3 and A4, as close as possible to the last chord so it moves smoothly
         const centre=prevV?prevV.reduce((x,y)=>x+y,0)/prevV.length:62;const v=cp.pcs.slice(0,4).map(pc=>{let m=55+((pc-55)%12+12)%12;while(m<centre-6)m+=12;while(m>centre+6)m-=12;return m;}).sort((x,y)=>x-y);
         prevV=v;v.forEach((m,i)=>add(a+p+i*0.01,'keys',0.06,m,d*0.95*(lastBar?1.5:1)));}
-    } else if(role==='chords'&&key){
+    } else if(role==='chords'&&key&&!(S.noPianoTune)){
       // a phrase every 2 bars: A A' B A, with room to breathe at the end of each phrase
       const ph=Math.floor(b/2)%4;if(b%2===0)motif=ph===2||!motif?rhy[Math.floor(r()*rhy.length)]:motif;
       const pat=lastBar?[bpb]:b%2===1?motif.slice(0,Math.max(1,motif.length-1)):motif;let bt=0;
@@ -1747,9 +1881,9 @@ function bandTick(){
     const at=performance.now()+(when-actx.currentTime+D)*1000;bandHits.push(at);if(bandHits.length>64)bandHits.shift();}
 }
 const bandHits=[];
-function bandSound(now){if(settings.headphones||!settings.backing||!G.band||!G.playing)return false;for(let i=bandHits.length-1;i>=0;i--){const d=now-bandHits[i];if(d>=-25&&d<=110)return true;}return false;}
-function bandSeek(){const E=G.band?G.band.events:[];let i=0;while(i<E.length&&E[i].t<G.clock-1e-6)i++;G.bandIdx=i;}
-function setupBand(){G.band=G.song?buildBand(G.song,G.capo||0):null;bandSeek();}
+function bandSound(now){if(settings.headphones||!(settings.backing&&G.band||voxActive())||!G.playing)return false;for(let i=bandHits.length-1;i>=0;i--){const d=now-bandHits[i];if(d>=-25&&d<=110)return true;}return false;}
+function bandSeek(){const E=G.band?G.band.events:[];let i=0;while(i<E.length&&E[i].t<G.clock-1e-6)i++;G.bandIdx=i;voxSeek();}
+function setupBand(){setupVox();if(G.song)G.song.noPianoTune=voxActive();G.band=G.song?buildBand(G.song,G.capo||0):null;bandSeek();}
 /* ---- hit / miss feedback sounds ---- */
 function fxHit(e,now){
   if(settings.fx!=='all'||!actx)return;
@@ -1899,9 +2033,11 @@ function renderLibrary(){
 }
 async function getLibSong(x){
   let d=mySongs.find(m=>m.lib===x.id);
+  // songs saved before the library had their tune get it now
+  if(d&&x.tune&&JSON.stringify(d.tune||null)!==JSON.stringify(x.tune)){d.tune=x.tune;delete d._built;store.set('songs',mySongs);}
   if(!d){
     const base={id:'m-'+x.id,cat:'mine',lib:x.id,title:x.title,bpm:x.bpm,capo:0,credit:x.credit+' · '+x.license};
-    if(x.kind==='chords')d={...base,kind:'chords',bpb:x.bpb,cb:x.cb,src:x.src,strum:'auto'};
+    if(x.kind==='chords')d={...base,kind:'chords',bpb:x.bpb,cb:x.cb,src:x.src,strum:'auto',tune:x.tune||null};
     else{d={...base,kind:'file',fmt:'Library',bpb:4,libFile:x.file,strum:''};
       try{await loadLibEvents(d);}catch(e){showMsg('Download failed','<p>Check your internet connection and try again.</p>');return;}}
     mySongs.unshift(d);store.set('songs',mySongs);
@@ -1976,9 +2112,9 @@ async function prepBand(){
   if(!store.get('bandTip',false)){store.set('bandTip',true);showHint('🥁 Backing band on. Use headphones (and tick “I\'m using headphones” in Settings) so the mic only hears your guitar. Tap 🥁 Band to turn it off.',8000);}
   if(G.band.key){const t=setTimeout(()=>showHint('Loading the backing band (first time only)…',20000),400);try{await loadBandFonts();}catch(e){}clearTimeout(t);if(G.notice&&G.notice.startsWith('Loading the backing band'))showHint('');}
 }
-function hasLyrics(){return !!(G.song&&G.song.lyrics&&G.song.lyrics.length);}
+function hasLyrics(){return !!songLyrics(G.song);}
 function syncSingBtn(){const b=$('#singBtn');if(!b)return;b.style.display=hasLyrics()?'':'none';b.classList.toggle('on',!!settings.sing);b.textContent=settings.sing?'🎤 Sing on':'🎤 Sing off';}
-$('#singBtn').onclick=()=>{settings.sing=!settings.sing;saveSettings();syncSingBtn();};
+$('#singBtn').onclick=()=>{settings.sing=!settings.sing;saveSettings();syncSingBtn();setupBand();};
 function syncBandBtn(){const b=$('#bandBtn');if(b){b.classList.toggle('on',!!settings.backing);b.textContent=settings.backing?'🥁 Band on':'🥁 Band off';}}
 $('#bandBtn').onclick=()=>{settings.backing=!settings.backing;saveSettings();syncBandBtn();bandSeek();if(settings.backing&&G.playing)prepBand();};
 syncBandBtn();
@@ -2174,7 +2310,7 @@ function update(dt,now){
   const D=soundDelay();const fbA=Math.floor(target+D*b+1e-6);
   if(fbA>G.lastClickBeat&&!G.waiting){G.lastClickBeat=fbA;if(fbA<0||(settings.metronome&&!G.listen))click(((fbA%S.bpb)+S.bpb)%S.bpb===0,now,(fbA-target)/b-D);}
   G.clock=target;
-  bandTick();
+  bandTick();voxTick();
   if(G.listen){
     while(G.playedIdx<ev.length&&ev[G.playedIdx].t<=G.clock+D*b){const e=ev[G.playedIdx];playEvent(e,(e.t-G.clock)/b-D);st[G.playedIdx]=3;G.playedIdx++;}
     if(G.clock>S.length+1){resetRun();}
@@ -2341,7 +2477,7 @@ function draw(now){
   const fbH=settings.fretboard?Math.max(64,Math.min(120,H*0.26)):0;const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?72:44)*k);let laneBot=H-(settings.fretboard?fbH+18:14);
   // lyric strip under the strings: two lines, or just the current one when there isn't room
   // (if even one line would squeeze the strings below their minimum, it's laid over the bottom of the highway instead)
-  let lyrH=0,lyrOver=0;if(settings.sing&&S.lyrics&&S.lyrics.length){const room=laneBot-laneTop;
+  let lyrH=0,lyrOver=0;const LY=settings.sing&&songLyrics(S);if(LY){const room=laneBot-laneTop;
     if(room-Math.round(44*k)>=110)lyrH=Math.round(44*k);else if(room-Math.round(24*k)>=6*14)lyrH=Math.round(24*k);else lyrOver=Math.round(24*k);if(lyrH)lyrH+=6;laneBot-=lyrH;}const laneH=Math.max(12,(laneBot-laneTop)/6);
   const hitX=Math.max(54,Math.min(W*0.2,140));const ppb=Math.max(70,Math.min(170,W/7))*settings.zoom*Math.sqrt(k);
   const Y=s=>laneTop+(5-s+0.5)*laneH;hitX0=hitX;ppb0=ppb;
@@ -2481,7 +2617,7 @@ function draw(now){
   // count-in
   if(G.playing&&G.clock<0){cx.fillStyle='rgba(255,255,255,.9)';cx.font='bold 56px -apple-system,sans-serif';cx.fillText(String(Math.ceil(-G.clock)),W/2,laneTop+laneH*3);}
   if(!G.playing&&!G.finished&&G.clock<0){cx.fillStyle='rgba(255,255,255,.55)';cx.font='15px -apple-system,sans-serif';cx.fillText(G.mode==='wait'?'Wait mode: the track pauses until you play each note':'Press Play, then play the notes as they reach the glowing line',W/2,laneTop+laneH*3);}
-  if(lyrH)drawLyrics(S.lyrics,laneBot+4,W,lyrH-6,k);else if(lyrOver)drawLyrics(S.lyrics,laneBot-lyrOver+2,W,lyrOver,k,0.62);
+  if(lyrH)drawLyrics(LY,laneBot+4,W,lyrH-6,k);else if(lyrOver)drawLyrics(LY,laneBot-lyrOver+2,W,lyrOver,k,0.62);
   if(settings.fretboard)drawFretboard(laneBot+14+lyrH,fbH,W);
 }
 // technique marks: h / p arcs and slide lines from the previous note on the string, bend arrows, vibrato waves
@@ -2561,7 +2697,8 @@ function tunerUpdate(){
 
 /* ---- settings ---- */
 let settingsOpen=false;
-function syncSettingsUI(){$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+function syncSettingsUI(){$('#sVoxOn').checked=settings.vocalGuide!==false;$('#sVoxLib').checked=settings.vocalLibrary!==false;$('#sVoxFile').checked=settings.vocalFiles!==false;$('#sVoxMade').checked=settings.vocalMadeUp!==false;
+  $('#sVoxVol').value=settings.vocalVol==null?0.7:settings.vocalVol;$('#sVoxV').textContent=Math.round((settings.vocalVol==null?0.7:settings.vocalVol)*100)+'%';$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();fillMicList();};
@@ -2595,6 +2732,9 @@ $('#sBand').onchange=e=>{settings.band=e.target.checked;saveSettings();};
 $('#sPhones').onchange=e=>{settings.headphones=e.target.checked;saveSettings();};
 $('#sDel').oninput=e=>{const v=+e.target.value;settings.soundDelay=v<0?-1:v;saveSettings();syncSettingsUI();};
 $('#sDead').onchange=e=>{settings.deadStrings=e.target.checked;saveSettings();};
+for(const [id,k] of [['#sVoxOn','vocalGuide'],['#sVoxLib','vocalLibrary'],['#sVoxFile','vocalFiles'],['#sVoxMade','vocalMadeUp']])
+  $(id).onchange=e=>{settings[k]=e.target.checked;saveSettings();if(G.song){setupBand();syncSingBtn();}};
+$('#sVoxVol').oninput=e=>{settings.vocalVol=+e.target.value;saveSettings();$('#sVoxV').textContent=Math.round(settings.vocalVol*100)+'%';if(voxBus)voxBus.gain.value=settings.vocalVol;};
 $('#sBandVol').oninput=e=>{settings.bandVol=+e.target.value;saveSettings();$('#sBandV').textContent=Math.round(settings.bandVol*100)+'%';if(bandBus)bandBus.gain.value=settings.bandVol;};
 $('#sMetro').onchange=e=>{settings.metronome=e.target.checked;saveSettings();};
 /* ---- colours & theme settings ---- */
@@ -2708,6 +2848,14 @@ function fileEvents(){
 }
 // chord files counted at double speed (Chordify: 143 for a 72 BPM song) are shown at half the tempo
 function setImpHalf(h){if(!impFile||!!impFile.halved===!!h)return;impFile.halved=!!h;$('#impBpm').value=h?Math.round(impFile.bpm/2):impFile.bpm;}
+// the file's melody and words, lined up with the part you'll play (which starts at its first bar)
+function importVocal(r){const V=impFile&&impFile.vocal;if(!V)return {};
+  const bpb=impFile.bpb||4;const part=impFile.parts[+$('#impPart').value]||impFile.parts[0];
+  const first=part.chords?Math.min(...part.chords.map(x=>x.beat)):Math.min(...part.notes.map(n=>n.beat));const shift=isFinite(first)?Math.floor(first/bpb)*bpb:0;
+  const k=r.half?0.5:1;const T=b=>(b-shift)*k;
+  const vocal=V.notes.map(n=>({t:T(n.beat),d:n.dur*k,midi:n.midi})).filter(n=>n.t>=-bpb);
+  const lyrics=V.words?wordsToLyrics(V.words.map(w=>({...w,beat:T(w.beat)})).filter(w=>w.beat>=-bpb)):null;
+  return {vocal:vocal.length?vocal:null,lyrics:lyrics&&lyrics.length?lyrics:null};}
 function analyzeImport(){
   if(impFile){const r=fileEvents();if(!r.events.length)return {err:'That part has no playable notes. Try another part.'};return r;}
   const text=$('#impText').value;const type=$('#impType').value;const cb=Math.max(1,+$('#impCb').value||4);
@@ -2866,7 +3014,8 @@ $('#impSave').onclick=()=>{
   const r=analyzeImport();if(r.err){$('#impPreview').textContent=r.err;$('#impPreview').className='preview err';return;}
   const title=$('#impTitle').value.trim()||'Untitled song';const bpm=Math.max(30,Math.min(240,+$('#impBpm').value||90));
   let d;
-  if(impFile)d={id:'m-'+Date.now(),cat:'mine',kind:'file',fmt:impFile.fmt,title,bpm,bpb:impFile.bpb||4,events:r.events,capo:r.capo||0,strum:impStrumValue(),strumAuto:r.strumAuto||detectPattern(r.events,impFile.bpb||4)||null};
+  if(impFile){d={id:'m-'+Date.now(),cat:'mine',kind:'file',fmt:impFile.fmt,title,bpm,bpb:impFile.bpb||4,events:r.events,capo:r.capo||0,strum:impStrumValue(),strumAuto:r.strumAuto||detectPattern(r.events,impFile.bpb||4)||null};
+    Object.assign(d,importVocal(r));}
   else d={id:'m-'+Date.now(),cat:'mine',title,bpm,bpb:4,kind:r.kind,cb:r.cb,src:$('#impText').value,capo:capoFromText($('#impText').value),strum:r.kind==='chords'?impStrumValue():''};
   mySongs.unshift(d);
   try{localStorage.setItem('fretline:songs',JSON.stringify(mySongs));}catch(e){showMsg('Not saved','<p>This song is too large to store on your phone, but you can still play it now.</p>');mySongs.shift();}
@@ -3335,7 +3484,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.54';
+const APP_VERSION='1.55';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

@@ -25,6 +25,9 @@ The scripts route the app's sample downloads (jsdelivr/unpkg) to these local fil
 | `test_native_mic.py` | The Android app's native-mic path with a fake `NativeMic` plugin (bursty 10 ms chunks of a 220 Hz tone): analyser gets the sound, pitch reads 220, no gaps; and that a failing app mic falls back to the web mic | `python3 test_native_mic.py <repo dir>` |
 | `test_wrong_wait_grades.py` | v1.52 logic: a suspected wrong note is cancelled by a hit or a new pick within 250 ms, reported otherwise; Perfect/Good/Okay thresholds | `python3 test_wrong_wait_grades.py <repo dir>` |
 | `test_mic_options.py` | v1.53 Microphone list with a fake plugin (new app with `listInputs`, old app without); choosing Bluetooth starts the native mic with `type:'bluetooth'`. Serve the repo first: `python3 -m http.server 8766 -d <repo>` | `python3 test_mic_options.py <repo dir>` |
+| `test_singing_e2e.py` | v1.55 singing: library tune (Amazing Grace) → guide + words; chord sheet → made-up melody (one note per syllable); each Settings › Singing tick; `twinkle.mid` (lyric events) and `song.musicxml` (lyrics on notes) → melody + words lined up with the guitar part. Copy the two test files into the repo root and serve it on port 8768 first | `python3 test_singing_e2e.py` |
+| `test_made_up_melody.py` | Shape of the made-up melody for two sheets: range, repeats, leaps, chord tones on downbeats | `python3 test_made_up_melody.py` (server on 8768) |
+| `check_library_tunes.js` | Library tunes (`tunes.json` = what's in `library/index.json`): bar lengths, length vs chords, chord tones on downbeats | `node check_library_tunes.js <repo>/index.html <repo>/library/index.json` (run from this folder) |
 | `chord_strings_static.py` | Per-string chord analysis on single snapshots of 9 open/barre chords, each string removed in turn | `python3 chord_strings_static.py <repo dir>` |
 
 Last results (v1.49): sweeps 108/108 at normal and quiet volume, 0/108 wrong notes counted, chord test

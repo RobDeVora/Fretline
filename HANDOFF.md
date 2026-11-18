@@ -1,4 +1,4 @@
-# Fretline: session handoff (17 Nov 2026, v1.54)
+# Fretline: session handoff (17 Nov 2026, v1.55)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -180,6 +180,34 @@ then a vocal guide (band plays the melody while they strum).
 - **Vocal guide needs a melody**, which chord sheets don't have. Asked the owner whether to (a) make up a melody from
   the chords and syllables, (b) add real tunes + words to the public-domain library songs, (c) read melody + lyrics
   from MIDI/MusicXML files that have them. Real sung words (vocal synthesis) isn't feasible in the browser now.
+
+## v1.55: vocal guide and Settings › Singing
+
+Owner chose all three melody sources as Settings ticks (no "ooh/aah" voice). Settings › Singing (above Colours):
+`vocalGuide` on/off, `vocalVol`, `vocalLibrary` (real tunes in library songs), `vocalFiles` (melody + words from
+MIDI/MusicXML), `vocalMadeUp` (made-up melody for chord sheets). 🎤 Sing stays the per-song switch.
+- `songLyrics(S)` / `songVocal(S)` pick what to use. Priority: library tune > file melody > made-up.
+- Library tunes: `tune:{pickup,notes}` in `library/index.json`, format in `parseTune` (note/beats/syllable, `_` tie,
+  `//` new line). Done: Amazing Grace, Jingle Bells (chorus); checked with `check_library_tunes.js`. Saved copies
+  pick the tune up in `getLibSong`. More tunes can be added the same way (only add ones known note-for-note).
+- Files: `parseMidi` reads lyric (0x05) or karaoke text (0x01) events; `parseMusicXML` reads `<lyric>` (+syllabic).
+  `vocalPart` picks the part whose notes start with the words (else a part named vocal/voice/melody); `monoLine`
+  takes its top line. `importVocal` shifts it like the played part (`def.vocal`, `def.lyrics`). GP not done.
+- `makeUpMelody`: syllables per chord (`syllableSpots`), 1 note per syllable, chord tone on each chord change,
+  scale steps between, rising then falling per line, ends on root/3rd. Range ~F#4-E5.
+- Playback: flute soundfont (`VOICE_FONT`, own `voxBus`), `voxTick` alongside `bandTick` (works with band off and in
+  Listen), not in Wait mode. Real tunes shift only if the capo differs from the song's; made-up ones follow chord
+  shapes + capo. With the guide on, the piano stops improvising its own melody (`S.noPianoTune`).
+- Not tested on the phone yet. Owner asked about MP3 + chord sheet play-along (see below).
+
+## Idea: play along with an MP3
+
+Owner asked whether an MP3 + chord sheet could be combined so they play the guitar part. Answer given: chords and
+rhythm yes (play the MP3 as the backing, line the chord sheet up to it — a "tap along on first listen" step to
+mark each chord change is the reliable way, auto beat-finding as a helper; then score strums against it). Melody/
+solo parts need a tab or MIDI of that part; pulling the guitar notes out of a mixed recording isn't reliable.
+Headphones needed (the mic would hear the MP3's guitar). Use the owner's own files only; nothing added to the
+library. Not started — waiting for the go-ahead.
 
 ## Other open ideas mentioned but not done
 - Same-pitch-different-string detection (timbre/inharmonicity), labelled beta.

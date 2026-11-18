@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1"><part-list><score-part id="P1"><part-name>Voice</part-name></score-part><score-part id="P2"><part-name>Guitar</part-name></score-part></part-list>
+<part id="P1"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><lyric><syllabic>begin</syllabic><text>Hap</text></lyric></note>
+<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><lyric><syllabic>end</syllabic><text>py</text></lyric></note>
+<note><pitch><step>D</step><octave>4</octave></pitch><duration>2</duration><lyric><syllabic>single</syllabic><text>day</text></lyric></note></measure>
+<measure number="2"><note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><lyric><text>to</text></lyric></note>
+<note><pitch><step>F</step><octave>4</octave></pitch><duration>1</duration><lyric><text>you</text></lyric></note>
+<note><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><lyric><text>all</text></lyric></note></measure>
+<measure number="3"><note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><lyric><text>and</text></lyric></note><note><pitch><step>D</step><octave>4</octave></pitch><duration>2</duration><lyric><text>more</text></lyric></note></measure></part>
+<part id="P2"><measure number="1"><attributes><divisions>1</divisions></attributes><note><pitch><step>C</step><octave>3</octave></pitch><duration>4</duration></note></measure>
+<measure number="2"><note><pitch><step>F</step><octave>3</octave></pitch><duration>4</duration></note></measure><measure number="3"><note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration></note></measure></part>
+</score-partwise>
