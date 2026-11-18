@@ -1,5 +1,11 @@
 package com.robdevora.fretline;
 
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.util.Base64;
 
 import com.getcapacitor.JSObject;
@@ -10,7 +16,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileInputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.ByteBuffer;
@@ -238,6 +246,63 @@ public class NativeSeparatorPlugin extends Plugin {
             try { session.close(); } catch (OrtException ignored) { }
             session = null;
         }
+    }
+
+    /* ---- saving a file to the phone's Downloads folder (web download links do nothing inside the app) ----
+       saveChunk({name, data: base64, first}) appends to a staging file in the cache; saveFinish({name, mime}) copies it
+       into Downloads (MediaStore on Android 10+, the app's own Downloads folder before that) → {path} */
+    @PluginMethod
+    public void saveChunk(PluginCall call) {
+        final String name = safeName(call.getString("name", "file.bin"));
+        final String data = call.getString("data", "");
+        final boolean first = Boolean.TRUE.equals(call.getBoolean("first", false));
+        worker.execute(() -> {
+            try (FileOutputStream out = new FileOutputStream(new File(getContext().getCacheDir(), "save-" + name), !first)) {
+                out.write(Base64.decode(data, Base64.DEFAULT));
+                call.resolve();
+            } catch (Exception e) { call.reject("could not save: " + e.getMessage()); }
+        });
+    }
+
+    @PluginMethod
+    public void saveFinish(PluginCall call) {
+        final String name = safeName(call.getString("name", "file.bin"));
+        final String mime = call.getString("mime", "application/octet-stream");
+        worker.execute(() -> {
+            File tmp = new File(getContext().getCacheDir(), "save-" + name);
+            try {
+                String where;
+                if (Build.VERSION.SDK_INT >= 29) {
+                    ContentResolver cr = getContext().getContentResolver();
+                    ContentValues v = new ContentValues();
+                    v.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+                    v.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+                    v.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Fretline");
+                    Uri uri = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+                    if (uri == null) throw new Exception("Downloads isn't available");
+                    try (InputStream in = new FileInputStream(tmp); OutputStream out = cr.openOutputStream(uri)) { copy(in, out); }
+                    where = "Downloads/Fretline/" + name;
+                } else {
+                    File dir = new File(getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "");
+                    if (!dir.exists()) dir.mkdirs();
+                    File dst = new File(dir, name);
+                    try (InputStream in = new FileInputStream(tmp); OutputStream out = new FileOutputStream(dst)) { copy(in, out); }
+                    where = dst.getAbsolutePath();
+                }
+                JSObject r = new JSObject(); r.put("path", where); call.resolve(r);
+            } catch (Exception e) {
+                call.reject("could not save: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+            } finally { tmp.delete(); }
+        });
+    }
+
+    private static void copy(InputStream in, OutputStream out) throws Exception {
+        byte[] b = new byte[1 << 16]; int n; while ((n = in.read(b)) > 0) out.write(b, 0, n);
+    }
+
+    private static String safeName(String n) {
+        String s = n.replaceAll("[^A-Za-z0-9._ ()-]", "_");
+        return s.isEmpty() ? "file.bin" : s;
     }
 
     @Override

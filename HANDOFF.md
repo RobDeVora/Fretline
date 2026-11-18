@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.79, Android app rebuilt for v1.79 with the native separator)
+# Fretline: session handoff (18 Nov 2026, web v1.80, Android app rebuilt for v1.80 (native separator + save to Downloads))
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -376,6 +376,28 @@ Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
 
+## v1.80: recordings use the real guitar as the guide; Lab downloads work in the app
+
+Owner (v1.79): the native separator works on the phone, 0.53× song length (vs 2.4× on one thread in the WebView;
+30 s clip in 21 s total). A song made from the 30 s "Thought You Should Know" clip "sounds very very sped up" while the
+backing is fine; Lab download links did nothing in the app.
+- **Diagnosis** (reproduced here with the real model, mirrored through the manual `Mirror Lab model` workflow into
+  the `lab-model` release because Hugging Face is blocked in the workspace; same result as the phone, 329 vs 333
+  notes, 139.75 BPM): the clock and backing are right (video's countdown is real time). The guitar stem is a
+  fingerpicked 8th-note part, ~5.3 attacks/s; the transcription has 176 onsets, 118 on a real attack. Played back as
+  short, even synthesized plucks it sounds frantic.
+- **Fix:** the Lab now also saves the separated guitar (`<id>-gtr.wav`, `def.recGuitar`). In the app (`RECB.gbuf`,
+  `RECB.gsrc`, `RECB.ggain`, `recGtrOn()`, `recGuide()`), the real guitar starts with the backing from the same
+  position and rate; Listen plays it (no synthesized plucks); Play with headphones and "play the right note" fades it
+  in while you hit and out after a miss (`G.fxOn`), instead of plucks. The recording loads even with the backing off
+  (band gain 0 then). Deleting the song deletes both files. Older recordings (no `recGuitar`) behave as before.
+- **Downloads in the app:** `NativeSeparator.saveChunk({name,data,first})` (3 MB base64 chunks to a cache file) +
+  `saveFinish({name,mime})` → MediaStore `Downloads/Fretline/` (Android 10+). Lab links use it when present.
+- Tests: e2e.py now also checks guitar track loaded, 0 plucks in Listen, guitar gain 0.6 while hitting / 0 after a
+  miss / 0 with the effect off; 64/64 notes, sync 6 ms. Boogie sim 95/96.
+- **Still open:** transcription of fingerpicked parts (a third of onsets spurious; bass bleed F2-G#2 below a capo'd
+  guitar). Ideas: drop notes without a real attack in the stem's spectral flux; a "chords" version of recording songs.
+
 ## v1.79: native Demucs in the APK (all cores)
 
 Phase 2 of the owner's request ("build it into the browser and then create the new APK ... get full use of those
@@ -397,7 +419,7 @@ has its own separator.
   results for tests.
 - Tests: `tools/lab-tests/native.py <audio> [fail]` (fake plugin: guitar = 0.3×, band = 0.7× input; exact to 5e-8;
   `fail` checks the fallback). mt.py and e2e.py unchanged (64/64 notes, sync 5 ms).
-- **Open (reported on v1.78/1.79, not yet fixed):** a song made from the 30 s "Thought You Should Know" clip plays
+- **Was open, see v1.80:** a song made from the 30 s "Thought You Should Know" clip plays
   "very very sped up" in the main app while the backing band sounds right. Tempo detection gives ~140 BPM for that
   clip (176 steps in 30 s). Investigate next.
 

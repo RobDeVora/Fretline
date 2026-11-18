@@ -78,6 +78,13 @@ function b64ToF32(b){const s=atob(b),u=new Uint8Array(s.length);for(let i=0;i<s.
 const CON=[];['log','warn','error'].forEach(k=>{const o=console[k].bind(console);console[k]=(...a)=>{try{CON.push(k+': '+a.map(x=>String(x&&x.message||x)).join(' ').slice(0,200));if(CON.length>12)CON.shift();}catch(e){}o(...a);};});
 window.addEventListener('error',e=>{CON.push('page error: '+(e.message||e));});window.addEventListener('unhandledrejection',e=>{CON.push('rejection: '+String(e.reason&&e.reason.message||e.reason).slice(0,200));});
 logEl.onclick=()=>{try{navigator.clipboard.writeText(R.join('\n'));status('Report copied.');}catch(e){}};
+/* web download links do nothing inside the Android app: save through the app instead (APK from v1.80) */
+async function nativeSave(a,name){const blob=await (await fetch(a.href)).blob();const buf=new Uint8Array(await blob.arrayBuffer());const CH=3<<20;
+  status('Saving '+name+'…');for(let i=0;i<buf.length||i===0;i+=CH){const u=buf.subarray(i,i+CH);let s='';for(let k=0;k<u.length;k+=0x8000)s+=String.fromCharCode.apply(null,u.subarray(k,k+0x8000));
+    await NS.saveChunk({name,data:btoa(s),first:i===0});if(!buf.length)break;}
+  const r=await NS.saveFinish({name,mime:blob.type||'audio/wav'});status('Saved to '+r.path);log('saved: '+r.path);}
+['dGtr','dRest'].forEach(id=>$(id).addEventListener('click',ev=>{if(!NS||!NS.saveChunk)return;ev.preventDefault();
+  const base=($('ttl').value||'song').trim().replace(/[^A-Za-z0-9 ()-]+/g,'_');nativeSave($(id),base+(id==='dGtr'?' - guitar.wav':' - band.wav')).catch(e=>{status('Could not save: '+(e.message||e));log('save: '+(e.message||e));});}));
 $('file').onchange=()=>{const f=$('file').files[0];if(f&&!$('ttl').value)$('ttl').value=f.name.replace(/\.[^.]+$/,'').replace(/[_]+/g,' ');$('go').disabled=!$('file').files.length;status($('file').files.length?'Ready.':'Choose a file.');};
 
 /* reads the names and types of the model's top-level nodes straight from the ONNX file (protobuf: ModelProto.graph=7,
@@ -172,8 +179,9 @@ async function makeSong(gL,gR,L,Rc,rL,rR,N){
   const recNotes=notes.map(n=>({midi:n.midi,beat:Math.round((n.t-b0)/bt.spb*4)/4,dur:Math.max(0.25,Math.round(n.d/bt.spb*4)/4),v:Math.round(n.a*100)/100})).filter(n=>n.beat>=0);
   const id='m-rec-'+Date.now(),key=location.origin+'/__fretline/rec/'+id+'.wav';
   status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
+  const gkey=location.origin+'/__fretline/rec/'+id+'-gtr.wav';await c.put(gkey,new Response(wav(gL,gR),{headers:{'content-type':'audio/wav'}})); /* v1.80: the real guitar is the guide */
   const title=($('ttl').value||'Recording').trim()+(+$('secs').value?' (first '+$('secs').value+' s)':'');
-  const def={id,cat:'mine',kind:'rec',title,bpm:bt.bpm,bpb:4,recNotes,recAudio:key,recOffset:b0,credit:'Made from a recording in Fretline Lab'};
+  const def={id,cat:'mine',kind:'rec',title,bpm:bt.bpm,bpb:4,recNotes,recAudio:key,recGuitar:gkey,recOffset:b0,credit:'Made from a recording in Fretline Lab'};
   const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');songs.unshift(def);localStorage.setItem('fretline:songs',JSON.stringify(songs));
   log('song: "'+title+'" saved to My songs ('+recNotes.length+' notes, '+Math.ceil((recNotes.length?Math.max(...recNotes.map(n=>n.beat)):0)/4)+' bars)');
   $('songMsg').textContent='"'+title+'" is in My songs.';$('songOut').style.display='';window.__labSong=def;}

@@ -15,5 +15,11 @@ with sync_playwright() as p:
     const ev=G.song.events;await $('#btnListen').onclick();await new Promise(r=>setTimeout(r,3500));
     const ok=!!RECB.src&&!!RECB.buf;const pos=RECB.off+(actx.currentTime-RECB.t0)*RECB.rate;const want=(d.recOffset||0)+G.clock*60/G.song.bpm+soundDelay();
     const out={list:document.body.innerText.includes('From a recording'),events:ev.length,first:ev.slice(0,6).map(e=>e.t+':'+e.notes.map(n=>'s'+n.s+'f'+n.f).join('+')),band:!!G.band,backingPlaying:ok,syncErrorMs:Math.round((pos-want)*1000)};
-    $('#btnListen').onclick();await new Promise(r=>setTimeout(r,300));out.stopped=!RECB.src;return JSON.stringify(out);}""")
+    out.guitarTrack=!!RECB.gbuf&&!!RECB.gsrc;out.guitarGain=RECB.ggain&&+RECB.ggain.gain.value.toFixed(2);let plucks=0;const pe=window.playEvent;window.playEvent=(...a)=>{plucks++;return pe(...a);};
+    await new Promise(r=>setTimeout(r,1500));out.syntheticPlucksInListen=plucks;out.guitarSync=Math.round((RECB.gsrc?RECB.off:0)*1000-RECB.off*1000);
+    $('#btnListen').onclick();await new Promise(r=>setTimeout(r,300));out.stopped=!RECB.src&&!RECB.gsrc;
+    // Play with headphones + "play the right note": real guitar up while hitting, down after a miss
+    settings.fx='all';settings.headphones=true;G.listen=false;resetRun();G.playing=true;G.mode='play';await new Promise(r=>setTimeout(r,1200));
+    out.playGtrHitting=RECB.ggain&&+RECB.ggain.gain.value.toFixed(2);G.fxOn=false;await new Promise(r=>setTimeout(r,400));out.playGtrAfterMiss=RECB.ggain&&+RECB.ggain.gain.value.toFixed(2);
+    settings.fx='none';await new Promise(r=>setTimeout(r,300));out.playGtrFxOff=RECB.ggain&&+RECB.ggain.gain.value.toFixed(2);G.playing=false;window.playEvent=pe;return JSON.stringify(out);}""")
   print(r);print('errors',errs);b.close()

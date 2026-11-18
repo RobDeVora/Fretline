@@ -1992,21 +1992,33 @@ function setupBand(){setupVox();if(G.song)G.song.noPianoTune=voxActive();G.band=
 /* v1.78 recordings (Lab › split a song): the original track without its guitar is the backing band. Played at the
    song's position (sound delay ahead, like the band), follows the practice speed (pitch changes with it), stops on
    pause/restart/leaving; re-synced if it drifts more than 80 ms from the highway. */
-const RECB={buf:null,key:null,src:null,gain:null,t0:0,off:0,rate:1,loading:null};
+/* v1.80: songs made since 1.80 also keep the separated guitar (def.recGuitar). It is the guide: Listen plays the real
+   guitar instead of synthesized plucks (a transcription played note by note sounded frantic, "sped up"), and Play's
+   "also play the right note" (headphones) turns the real guitar up while you're hitting notes and down after a miss.
+   Both tracks start together from the same position, so they stay in step with each other. */
+const RECB={buf:null,gbuf:null,key:null,src:null,gsrc:null,gain:null,ggain:null,t0:0,off:0,rate:1,loading:null};
+function recGtrOn(){return !!(RECB.gbuf&&(G.listen||(fxInTime()&&G.fxOn)));}
 async function recLoad(def){if(!def||!def.recAudio)return null;if(RECB.key===def.recAudio&&RECB.buf)return RECB.buf;
   if(RECB.loading&&RECB.key===def.recAudio)return RECB.loading;recStop();RECB.key=def.recAudio;RECB.buf=null;
   RECB.loading=(async()=>{await ensureAudio();const c=await caches.open('fretline-audio');const r=await c.match(def.recAudio);if(!r)throw new Error('missing');
-    const b=await actx.decodeAudioData(await r.arrayBuffer());RECB.buf=b;return b;})();
+    const b=await actx.decodeAudioData(await r.arrayBuffer());RECB.buf=b;RECB.gbuf=null;
+    if(def.recGuitar){try{const rg=await c.match(def.recGuitar);if(rg)RECB.gbuf=await actx.decodeAudioData(await rg.arrayBuffer());}catch(e){}}return b;})();
   try{return await RECB.loading;}catch(e){RECB.key=null;showHint('The recording for this song is no longer on this device; it plays with the built-in band instead.',6000);return null;}finally{RECB.loading=null;}}
-function recStop(){if(RECB.src){try{RECB.src.stop();}catch(e){}RECB.src=null;}}
+function recStop(){if(RECB.src){try{RECB.src.stop();}catch(e){}RECB.src=null;}if(RECB.gsrc){try{RECB.gsrc.stop();}catch(e){}RECB.gsrc=null;}}
 function recTick(){const d=G.def;if(!d||!d.recAudio||!actx)return;
-  const want=settings.backing&&RECB.buf&&RECB.key===d.recAudio&&G.playing&&!G.waiting&&G.mode!=='wait';if(!want){recStop();return;}
+  const want=(settings.backing||recGtrOn())&&RECB.buf&&RECB.key===d.recAudio&&G.playing&&!G.waiting&&G.mode!=='wait';if(!want){recStop();return;}
+  const vol=settings.bandVol==null?0.6:settings.bandVol;
+  if(RECB.gain)RECB.gain.gain.value=settings.backing?vol:0;
+  if(RECB.ggain){const gv=recGtrOn()?vol:0;if(Math.abs(RECB.ggain.gain.value-gv)>1e-3)RECB.ggain.gain.setTargetAtTime(gv,actx.currentTime,0.015);}
   const rate=G.speed,pos=(d.recOffset||0)+G.clock*60/G.song.bpm+soundDelay()*rate;
   if(RECB.src){const cur=RECB.off+(actx.currentTime-RECB.t0)*rate;if(Math.abs(cur-pos)<=0.08&&RECB.rate===rate)return;recStop();}
   if(pos>=RECB.buf.duration)return;
-  if(!RECB.gain){RECB.gain=actx.createGain();RECB.gain.connect(actx.destination);}RECB.gain.gain.value=settings.bandVol==null?0.6:settings.bandVol;
+  if(!RECB.gain){RECB.gain=actx.createGain();RECB.gain.connect(actx.destination);}RECB.gain.gain.value=settings.backing?vol:0;
   const sn=actx.createBufferSource();sn.buffer=RECB.buf;sn.playbackRate.value=rate;sn.connect(RECB.gain);
-  const when=actx.currentTime+(pos<0?-pos/rate:0),off=Math.max(0,pos);sn.start(when,off);RECB.src=sn;RECB.t0=when;RECB.off=off;RECB.rate=rate;}
+  const when=actx.currentTime+(pos<0?-pos/rate:0),off=Math.max(0,pos);sn.start(when,off);RECB.src=sn;RECB.t0=when;RECB.off=off;RECB.rate=rate;
+  if(RECB.gbuf){if(!RECB.ggain){RECB.ggain=actx.createGain();RECB.ggain.connect(actx.destination);}RECB.ggain.gain.cancelScheduledValues(0);RECB.ggain.gain.value=recGtrOn()?vol:0;
+    const gs=actx.createBufferSource();gs.buffer=RECB.gbuf;gs.playbackRate.value=rate;gs.connect(RECB.ggain);gs.start(when,Math.min(off,RECB.gbuf.duration));RECB.gsrc=gs;}}
+function recGuide(){return !!(G.def&&G.def.recGuitar&&RECB.gbuf&&RECB.key===G.def.recAudio);} /* the real guitar replaces the synthesized notes */
 /* ---- hit / miss feedback sounds ---- */
 function fxInTime(){return settings.fx==='all'&&settings.headphones&&G.mode==='play'&&!G.listen&&!!actx;}
 function fxCut(e,i){G.fxOn=false;if(!fxInTime()||!G.fxSched||G.fxSched[i]==null)return;delete G.fxSched[i];
@@ -2127,7 +2139,7 @@ function renderList(){
   L.querySelectorAll('.del').forEach(b=>b.onclick=ev=>{
     ev.stopPropagation();
     if(!b.classList.contains('armed')){b.classList.add('armed');b.textContent='Delete';setTimeout(()=>{b.classList.remove('armed');b.textContent='✕';},2500);return;}
-    {const gone=mySongs.find(x=>x.id===b.dataset.del);if(gone&&gone.recAudio)caches.open('fretline-audio').then(c=>c.delete(gone.recAudio)).catch(()=>{});}
+    {const gone=mySongs.find(x=>x.id===b.dataset.del);if(gone&&gone.recAudio)caches.open('fretline-audio').then(c=>{c.delete(gone.recAudio);if(gone.recGuitar)c.delete(gone.recGuitar);}).catch(()=>{});}
     mySongs=mySongs.filter(x=>x.id!==b.dataset.del);store.set('songs',mySongs);renderList();
   });
   const a=$('#btnAdd');if(a)a.onclick=()=>openImport();
@@ -2265,7 +2277,7 @@ $('#btnListen').onclick=async()=>{
   G.listen=true;G.playing=true;updateButtons();
 };
 async function prepBand(){
-  if(G.def&&G.def.recAudio&&settings.backing){const t=setTimeout(()=>showHint('Loading the recording…',20000),400);const b=await recLoad(G.def);clearTimeout(t);if(G.notice&&G.notice.startsWith('Loading the recording'))showHint('');if(!b&&G.song){G.band=buildBand(G.song,G.capo||0);bandSeek();}}
+  if(G.def&&G.def.recAudio){const t=setTimeout(()=>showHint('Loading the recording…',20000),400);const b=await recLoad(G.def);clearTimeout(t);if(G.notice&&G.notice.startsWith('Loading the recording'))showHint('');if(!b&&G.song){G.band=buildBand(G.song,G.capo||0);bandSeek();}}
   if(!settings.backing||!G.band||!G.band.events.length)return;
   if(!store.get('bandTip',false)){store.set('bandTip',true);showHint('🥁 Backing band on. Use headphones (and tick “I\'m using headphones” in Settings) so the mic only hears your guitar. Tap 🥁 Band to turn it off.',8000);}
   if(G.band.key){const t=setTimeout(()=>showHint('Loading the backing band (first time only)…',20000),400);try{await loadBandFonts();}catch(e){}clearTimeout(t);if(G.notice&&G.notice.startsWith('Loading the backing band'))showHint('');}
@@ -2589,7 +2601,7 @@ function update(dt,now){
   G.clock=target;
   bandTick();voxTick();recTick();
   if(G.listen){
-    while(G.playedIdx<ev.length&&ev[G.playedIdx].t<=G.clock+D*b){const e=ev[G.playedIdx];playEvent(e,(e.t-G.clock)/b-D);st[G.playedIdx]=3;G.playedIdx++;}
+    while(G.playedIdx<ev.length&&ev[G.playedIdx].t<=G.clock+D*b){const e=ev[G.playedIdx];if(!recGuide())playEvent(e,(e.t-G.clock)/b-D);st[G.playedIdx]=3;G.playedIdx++;}
     if(G.clock>S.length+1){resetRun();}
     return;
   }
@@ -2600,6 +2612,7 @@ function update(dt,now){
      like a sloppy player. Without headphones it stays on credit (the mic would hear an on-time note as your own). */
   if(fxInTime()){const D=soundDelay();if(G.fxIdx==null)G.fxIdx=0;
     while(G.fxIdx<ev.length&&ev[G.fxIdx].t<=G.clock+(D+0.05)*b){const j=G.fxIdx++;const e=ev[j];if(e.rest||st[j]===2)continue;
+      if(recGuide())continue; /* the real guitar is faded in and out instead (recTick) */
       if(G.fxOn||st[j]===1){const off=Math.max(0,(e.t-G.clock)/b-D);playEvent(e,off);(G.fxSched||(G.fxSched={}))[j]=actx.currentTime+off;}}}
   for(let i=G.scan;i<ev.length;i++){
     if(st[i]){if(i===G.scan)G.scan++;continue;}
@@ -3950,7 +3963,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.79';
+const APP_VERSION='1.80';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
