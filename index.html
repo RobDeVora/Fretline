@@ -67,6 +67,10 @@ header h1 span{color:var(--accent)}
 .hint:empty{display:none}
 #player .bottom{display:flex;align-items:center;justify-content:center;gap:10px;padding:6px 10px 8px}
 #player .bottom button{min-width:52px;padding:10px 14px}
+/* landscape with the finger guide (fretboard off): the highway runs to the bottom edge, the hand stands in the
+   bottom-left corner and the buttons float at the bottom beside it */
+#player.guideBottom .bottom{position:absolute;left:0;right:0;bottom:0;z-index:3;pointer-events:none}
+#player.guideBottom .bottom>*{pointer-events:auto}
 #btnPlay{min-width:110px!important}
 .overlay{position:absolute;inset:0;background:rgba(10,12,16,.82);display:none;align-items:center;align-items:safe center;justify-content:center;z-index:5;padding:20px;overflow-y:auto}
 .overlay.show{display:flex}
@@ -2523,7 +2527,13 @@ function timingAdvice(){
 
 /* ---- rendering ---- */
 const cv=$('#cv'),cx=cv.getContext('2d');let CW=300,CH=150;
-function resizeCanvas(){const r=cv.getBoundingClientRect();if(!r.width)return;const dpr=Math.min(2,window.devicePixelRatio||1);cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr);cx.setTransform(dpr,0,0,dpr,0,0);CW=r.width;CH=r.height;}
+function resizeCanvas(){
+  const pl=$('#player'),bt=pl&&pl.querySelector('.bottom');const k=settings.big||1;
+  const gb=settings.fingerGuide!==false&&!settings.fretboard&&innerWidth>innerHeight;
+  if(pl){pl.classList.toggle('guideBottom',gb);if(bt)bt.style.paddingLeft='';}
+  G._gb=gb;G._ctrlH=gb&&bt?bt.getBoundingClientRect().height:0;
+  if(gb){G._Z=Math.round(G._ctrlH+Math.max(34,32*k));const hh=G._Z-4;if(bt)bt.style.paddingLeft=Math.round(hh*1.3+hh*0.22+16)+'px';}
+  const r=cv.getBoundingClientRect();if(!r.width)return;const dpr=Math.min(2,window.devicePixelRatio||1);cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr);cx.setTransform(dpr,0,0,dpr,0,0);CW=r.width;CH=r.height;}
 window.addEventListener('resize',()=>{if(curScreen==='player')resizeCanvas();});
 const SCOL=['#ff6b81','#ffa94d','#ffd43b','#69db7c','#4dabf7','#b197fc'];
 // finger colours: open string, index, middle, ring, pinky
@@ -2597,6 +2607,32 @@ function drawHand(x,y,w,h,use){
     cx.fillStyle=on?ink(FCOL[f]):hexA('#ffffff',0.6);cx.font='800 '+Math.round(fw*0.78)+'px -apple-system,sans-serif';cx.fillText(String(f),tip[0],tip[1]+1);});
   cx.restore();
 }
+// which strings each finger presses for an event: {finger: ['E3', ...]}
+function guideUse(e){const use={};const fr=e.shape?e.shape.map((f,s)=>({s,f,fg:e.fgs?e.fgs[s]:null})):(e.notes||[]).map(n=>({s:n.s,f:n.f,fg:n.fg}));
+  for(const x of fr){if(x.f==null||x.f<0||x.fg==null||x.fg<0)continue;(use[x.fg]=use[x.fg]||[]).push(STRING_LABELS[x.s]+(x.f>0?x.f:''));}return use;}
+/* landscape bottom layout: the hand stands in the bottom-left corner (its base on the screen edge); one line above
+   the buttons: hand position, what to press, then what's coming */
+function drawGuideBottom(W,H,Z,ctrlH,k){
+  const ev=G.song.events;let i=firstPending();if(i<0)return;while(i<ev.length&&ev[i].rest)i++;const e=ev[i];if(!e)return;
+  const y0=H-Z;cx.fillStyle='rgba(0,0,0,.3)';cx.fillRect(0,y0,W,Z);
+  const use=guideUse(e),hand=e.hand||1;const hh=Z-4,hw=hh*1.3,hx=hh*0.22+4;drawHand(hx,H-hh-1,hw,hh,use);
+  const ty=y0+Math.max(14,(Z-ctrlH)/2);let x=hx+hw+14;const ta=cx.textAlign,tb=cx.textBaseline;cx.textBaseline='middle';
+  const fs=Math.round(Math.max(12,13*k)),br=Math.round(Math.max(10,12*k)),bf=Math.round(br*1.15);
+  cx.textAlign='left';cx.font='600 '+fs+'px -apple-system,sans-serif';cx.fillStyle='rgba(255,255,255,.65)';const lab=hand<=1?'1st pos.':'Fret '+hand;cx.fillText(lab,x,ty);x+=cx.measureText(lab).width+12;
+  const items=[];for(let f=1;f<=4;f++)if(use[f])for(const sf of use[f])items.push([f,sf]);if(use[0])for(const sf of use[0])items.push([0,sf]);
+  for(const [f,sf] of items){cx.beginPath();cx.arc(x+br,ty,br,0,7);cx.fillStyle=FCOL[f];cx.fill();cx.fillStyle=ink(FCOL[f]);cx.textAlign='center';cx.font='800 '+bf+'px -apple-system,sans-serif';cx.fillText(f?String(f):'0',x+br,ty+1);
+    cx.textAlign='left';cx.fillStyle='#fff';cx.font='bold '+bf+'px -apple-system,sans-serif';const t=f?sf:sf+' open';cx.fillText(t,x+br*2+4,ty+1);x+=br*2+8+cx.measureText(t).width+10;}
+  // what's coming
+  x+=10;cx.fillStyle='rgba(255,255,255,.5)';cx.font=fs+'px -apple-system,sans-serif';if(x+80<W){cx.fillText('then',x,ty);x+=cx.measureText('then').width+8;}
+  let ph=hand,shown=0;const r2=Math.round(br*0.85);let lastChip=e.shape||(e.notes&&e.notes.length>1)?(e.label||e.chord||null):null;
+  for(let j=i+1;j<ev.length&&x<W-r2*2-6&&shown<8;j++){const n=ev[j];if(n.rest)continue;
+    if(n.hand&&n.hand!==ph){const t=(n.hand>ph?'↗':'↘')+n.hand;cx.fillStyle='#fff';cx.font='bold '+fs+'px -apple-system,sans-serif';cx.textAlign='left';const tw=cx.measureText(t).width;if(x+tw>W-6)break;cx.fillText(t,x,ty);x+=tw+6;ph=n.hand;}
+    if(n.shape||(n.notes&&n.notes.length>1)){const t=n.label||n.chord||'chord';if(t===lastChip)continue;lastChip=t;cx.font='bold '+Math.round(r2*1.25)+'px -apple-system,sans-serif';const tw=cx.measureText(t).width+10;if(x+tw>W-6)break;
+      cx.fillStyle='rgba(255,255,255,.14)';rr(x,ty-r2,tw,r2*2,r2);cx.fill();cx.fillStyle='#fff';cx.textAlign='center';cx.fillText(t,x+tw/2,ty+1);x+=tw+5;shown++;continue;}
+    lastChip=null;const fg=(n.notes||[]).map(m=>m.fg).find(v=>v!=null);if(fg==null)continue;
+    cx.beginPath();cx.arc(x+r2,ty,r2,0,7);cx.fillStyle=FCOL[fg];cx.fill();cx.fillStyle=ink(FCOL[fg]);cx.textAlign='center';cx.font='bold '+Math.round(r2*1.1)+'px -apple-system,sans-serif';cx.fillText(String(fg),x+r2,ty+1);x+=r2*2+5;shown++;}
+  cx.textAlign=ta;cx.textBaseline=tb;
+}
 function drawFingerGuide(y,W,h,k,shade){
   const ev=G.song.events;let i=firstPending();if(i<0)return;while(i<ev.length&&ev[i].rest)i++;const e=ev[i];if(!e)return;
   cx.fillStyle='rgba(0,0,0,'+(shade||0.3)+')';cx.fillRect(0,y,W,h);
@@ -2663,14 +2699,15 @@ function drawLyrics(lines,y,W,h,k,shade){
 function draw(now){
   const W=CW,H=CH,S=G.song,ev=S.events;cx.clearRect(0,0,W,H);
   syncFocus();const k=settings.big||1;const F=px=>Math.round(px*k)+'px';
-  const tightFb=settings.fingerGuide!==false&&H<440;const fbH=settings.fretboard?Math.max(tightFb?46:64,Math.min(120,H*(tightFb?0.17:0.26))):0;const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?46:30)*k);let laneBot=H-(settings.fretboard?fbH+18:14);
+  const tightFb=settings.fingerGuide!==false&&H<440;const fbH=settings.fretboard?Math.max(tightFb?46:64,Math.min(120,H*(tightFb?0.17:0.26))):0;const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?(W<560?66:46):30)*k); /* narrow screens: chord names go under the score panel */let laneBot=H-(settings.fretboard?fbH+18:14);
   // lyric strip under the strings: two lines, or just the current one when there isn't room
   // (if even one line would squeeze the strings below their minimum, it's laid over the bottom of the highway instead)
   if(G._fgFor!==S.events){planFingers(S.events);G._fgFor=S.events;
     // how close notes typically get (15th percentile of the gaps between notes)
     const ts=S.events.filter(e=>!e.rest).map(e=>e.t);const gs=[];for(let j=1;j<ts.length;j++){const g=ts[j]-ts[j-1];if(g>0.06)gs.push(g);}gs.sort((a,b)=>a-b);G._gapQ=gs.length?Math.max(0.125,gs[Math.floor(gs.length*0.15)]):1;}
   // finger guide strip (and lyrics) under the strings; on short screens they get smaller, then lie over the highway
-  let fgH=0,fgOver=0;if(settings.fingerGuide!==false){const room=laneBot-laneTop;const full=Math.round(88*k),small=Math.max(48,Math.round(40*k));
+  let fgH=0,fgOver=0,gbZ=0;if(G._gb&&settings.fingerGuide!==false&&!settings.fretboard){gbZ=G._Z;laneBot=H-gbZ-Math.round(16*k);}
+  else if(settings.fingerGuide!==false){const room=laneBot-laneTop;const full=Math.round(88*k),small=Math.max(48,Math.round(40*k));
     const fbx=settings.fretboard?10*k:0;if(room-small-fbx>=6*16)fgH=Math.round(Math.max(small,Math.min(full,room-fbx-6*21)));else fgOver=small;const gapG=Math.round(16*k);if(fgH){fgH+=gapG;if(settings.fretboard)fgH+=Math.round(10*k);else laneBot+=14;}laneBot-=fgH;}
   let lyrH=0,lyrOver=0;const LY=settings.sing&&songLyrics(S);if(LY){const room=laneBot-laneTop;
     if(room-Math.round(44*k)>=110)lyrH=Math.round(44*k);else if(room-Math.round(24*k)>=6*14)lyrH=Math.round(24*k);else lyrOver=Math.round(24*k);if(lyrH)lyrH+=6;laneBot-=lyrH;}const laneH=Math.max(12,(laneBot-laneTop)/6);
@@ -2818,7 +2855,8 @@ function draw(now){
   // count-in
   if(G.playing&&G.clock<0){cx.fillStyle='rgba(255,255,255,.9)';cx.font='bold 56px -apple-system,sans-serif';cx.fillText(String(Math.ceil(-G.clock)),W/2,laneTop+laneH*3);}
   if(!G.playing&&!G.finished&&G.clock<0){cx.fillStyle='rgba(255,255,255,.55)';cx.font='15px -apple-system,sans-serif';cx.fillText(G.mode==='wait'?'Wait mode: the track pauses until you play each note':'Press Play, then play the notes as they reach the glowing line',W/2,laneTop+laneH*3);}
-  if(lyrH)drawLyrics(LY,laneBot+4,W,lyrH-6,k);else if(lyrOver)drawLyrics(LY,laneBot-lyrOver+2,W,lyrOver,k,0.62);
+  if(lyrH)drawLyrics(LY,gbZ?H-gbZ-(lyrH-6)-2:laneBot+4,W,lyrH-6,k);else if(lyrOver)drawLyrics(LY,laneBot-lyrOver+2,W,lyrOver,k,0.62);
+  if(gbZ)drawGuideBottom(W,H,gbZ,G._ctrlH||0,k);
   // the strip sits at the bottom (above the fretboard if that's on), clear of the hit line's arrows
   if(fgH){const gapG=Math.round(16*k);drawFingerGuide(laneBot+lyrH+gapG,W,fgH-gapG-(settings.fretboard?Math.round(10*k):0),k);}else if(fgOver)drawFingerGuide(laneBot-fgOver-(lyrOver||0),W,fgOver,k,0.7);
   if(settings.fretboard)drawFretboard(laneBot+14+lyrH+fgH,fbH,W);
@@ -2932,8 +2970,8 @@ $('#sBig').onchange=e=>{settings.big=+e.target.value;saveSettings();};
 $('#sZoom').oninput=e=>{settings.zoom=+e.target.value;saveSettings();syncSettingsUI();};
 $('#sOct').onchange=e=>{settings.anyOctave=e.target.checked;saveSettings();};
 $('#sNames').onchange=e=>{settings.names=e.target.checked;saveSettings();};
-$('#sFretboard').onchange=e=>{settings.fretboard=e.target.checked;saveSettings();};
-$('#sFingerGuide').onchange=e=>{settings.fingerGuide=e.target.checked;saveSettings();};
+$('#sFretboard').onchange=e=>{settings.fretboard=e.target.checked;saveSettings();resizeCanvas();};
+$('#sFingerGuide').onchange=e=>{settings.fingerGuide=e.target.checked;saveSettings();resizeCanvas();};
 $('#cNoteBy').onchange=e=>{settings.noteBy=e.target.value;saveSettings();};
 $('#sStrumView').onchange=e=>{settings.strumView=e.target.value;saveSettings();};
 $('#sTiming').onchange=e=>{settings.timing=+e.target.value;saveSettings();};
@@ -3726,7 +3764,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.63';
+const APP_VERSION='1.64';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

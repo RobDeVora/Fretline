@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, v1.63 + new APK)
+# Fretline: session handoff (18 Nov 2026, v1.64 + APK from v1.63)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -301,6 +301,17 @@ fretboard) that anticipates the following notes, and said notes move too fast to
 - Owner on web v1.62 still saw the status bar: probably the old APK. Settings › App now says whether the installed
   app is the latest build (`#appBuild`, checks `NativeMic.outputRoute`). `hideSystemBars` made sturdier: platform
   WindowInsetsController on 30+, legacy immersive flags below, re-run after the decor view attaches.
+
+## v1.64: hand on the bottom edge (landscape)
+
+Owner (full screen now working) wanted the hand's base on the very bottom of the screen and the highway filling
+the rest, leaving room for lyrics. In landscape with the finger guide on and the fretboard off, `resizeCanvas` adds
+`#player.guideBottom`: the button bar floats over the canvas bottom (absolute, padded left past the hand), so the
+canvas runs to the screen edge. `G._Z` = button bar height + one text row; `drawGuideBottom` draws the hand in the
+bottom-left corner (base on the edge) and one line above the buttons: position, finger badges, then the queue.
+Lanes end 16k above the zone; lyrics sit just above the zone. Portrait keeps the strip layout; narrow screens put
+chord names below the score panel (`laneTop` 66k when W<560). Lesson: an inline `//` comment in a one-line
+statement commented out `let laneBot` and broke drawing — caught by screenshot test, use /* */ in single-line code.
 
 ## Idea: play along with an MP3
 
