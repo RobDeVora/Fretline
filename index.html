@@ -1344,6 +1344,7 @@ function buildSong(def){
   if(def.events)events=def.events;
   else if(def.melody)events=parseMelody(def.melody);
   else if(def.fret)events=parseFretSeq(def.fret);
+  else if(def.kind==='rec'&&def.recNotes)events=eventsFromNotes(def.recNotes,{bpb:def.bpb||4,shift:0}); /* v1.78: from Lab › split a song */
   else if(def.chords)events=parseChordSeq(def.chords,def.cb||4);
   else if(def.src!=null){
     if(def.kind==='tab')events=parseTab(def.src).events;
@@ -1729,7 +1730,7 @@ async function loadSound(id,status){
 }
 let master=null;const voices={};const diag={sample:0,basic:0,missing:new Set(),where:'',sound:''};
 function masterOut(){if(!master){const c=actx.createDynamicsCompressor();c.threshold.value=-12;c.knee.value=8;c.ratio.value=8;c.attack.value=0.003;c.release.value=0.2;const g=actx.createGain();g.gain.value=0.9;c.connect(g);g.connect(actx.destination);master=c;}return master;}
-function stopVoices(){if(!actx)return;const t=actx.currentTime;for(const k in voices){const v=voices[k];try{v.g.gain.cancelScheduledValues(t);v.g.gain.setValueAtTime(v.g.gain.value,t);v.g.gain.linearRampToValueAtTime(0.0001,t+0.08);v.src.stop(t+0.1);}catch(e){}delete voices[k];}}
+function stopVoices(){recStop();if(!actx)return;const t=actx.currentTime;for(const k in voices){const v=voices[k];try{v.g.gain.cancelScheduledValues(t);v.g.gain.setValueAtTime(v.g.gain.value,t);v.g.gain.linearRampToValueAtTime(0.0001,t+0.08);v.src.stop(t+0.1);}catch(e){}delete voices[k];}}
 // s = string index: a new note on a string cuts off the note already ringing there, like a real guitar
 function pluck(midi,when,vol,dur,cents,lp,s,fx){
   const det$=cents?Math.pow(2,cents/1200):1;const dest=masterOut();
@@ -1987,7 +1988,25 @@ function bandTick(){
 const bandHits=[];
 function bandSound(now){if(settings.headphones||!(settings.backing&&G.band||voxActive())||!G.playing)return false;for(let i=bandHits.length-1;i>=0;i--){const d=now-bandHits[i];if(d>=-25&&d<=110)return true;}return false;}
 function bandSeek(){const E=G.band?G.band.events:[];let i=0;while(i<E.length&&E[i].t<G.clock-1e-6)i++;G.bandIdx=i;voxSeek();}
-function setupBand(){setupVox();if(G.song)G.song.noPianoTune=voxActive();G.band=G.song?buildBand(G.song,G.capo||0):null;bandSeek();}
+function setupBand(){setupVox();if(G.song)G.song.noPianoTune=voxActive();G.band=G.song&&!(G.def&&G.def.recAudio)?buildBand(G.song,G.capo||0):null;bandSeek();} /* a recording brings its own band */
+/* v1.78 recordings (Lab › split a song): the original track without its guitar is the backing band. Played at the
+   song's position (sound delay ahead, like the band), follows the practice speed (pitch changes with it), stops on
+   pause/restart/leaving; re-synced if it drifts more than 80 ms from the highway. */
+const RECB={buf:null,key:null,src:null,gain:null,t0:0,off:0,rate:1,loading:null};
+async function recLoad(def){if(!def||!def.recAudio)return null;if(RECB.key===def.recAudio&&RECB.buf)return RECB.buf;
+  if(RECB.loading&&RECB.key===def.recAudio)return RECB.loading;recStop();RECB.key=def.recAudio;RECB.buf=null;
+  RECB.loading=(async()=>{await ensureAudio();const c=await caches.open('fretline-audio');const r=await c.match(def.recAudio);if(!r)throw new Error('missing');
+    const b=await actx.decodeAudioData(await r.arrayBuffer());RECB.buf=b;return b;})();
+  try{return await RECB.loading;}catch(e){RECB.key=null;showHint('The recording for this song is no longer on this device; it plays with the built-in band instead.',6000);return null;}finally{RECB.loading=null;}}
+function recStop(){if(RECB.src){try{RECB.src.stop();}catch(e){}RECB.src=null;}}
+function recTick(){const d=G.def;if(!d||!d.recAudio||!actx)return;
+  const want=settings.backing&&RECB.buf&&RECB.key===d.recAudio&&G.playing&&!G.waiting&&G.mode!=='wait';if(!want){recStop();return;}
+  const rate=G.speed,pos=(d.recOffset||0)+G.clock*60/G.song.bpm+soundDelay()*rate;
+  if(RECB.src){const cur=RECB.off+(actx.currentTime-RECB.t0)*rate;if(Math.abs(cur-pos)<=0.08&&RECB.rate===rate)return;recStop();}
+  if(pos>=RECB.buf.duration)return;
+  if(!RECB.gain){RECB.gain=actx.createGain();RECB.gain.connect(actx.destination);}RECB.gain.gain.value=settings.bandVol==null?0.6:settings.bandVol;
+  const sn=actx.createBufferSource();sn.buffer=RECB.buf;sn.playbackRate.value=rate;sn.connect(RECB.gain);
+  const when=actx.currentTime+(pos<0?-pos/rate:0),off=Math.max(0,pos);sn.start(when,off);RECB.src=sn;RECB.t0=when;RECB.off=off;RECB.rate=rate;}
 /* ---- hit / miss feedback sounds ---- */
 function fxInTime(){return settings.fx==='all'&&settings.headphones&&G.mode==='play'&&!G.listen&&!!actx;}
 function fxCut(e,i){G.fxOn=false;if(!fxInTime()||!G.fxSched||G.fxSched[i]==null)return;delete G.fxSched[i];
@@ -2088,7 +2107,7 @@ function renderList(){
         <a href="https://imslp.org/" target="_blank" rel="noopener">IMSLP <span>(huge library; use pieces that offer MIDI or MusicXML, as most PDFs are scans)</span></a>
       </div></div>`;
     if(!mySongs.length)h+=`<div class="note-txt">Load a Guitar Pro, MIDI, MusicXML, ChordPro or PDF file, or paste a tab or chord sheet, for a song you're learning, and it becomes a scrolling track. Saved songs are stored on this device.</div>`;
-    for(const d of mySongs)h+=itemHTML({...d,cat:'mine',sub:d.kind==='tab'?'Tab':d.kind==='gen'?'Generated':d.kind==='file'?(d.fmt||'File'):'Chords'},d.kind==='tab'?'T':d.kind==='gen'?'G':d.kind==='file'?'F':'♪',`<button class="del" data-del="${esc(d.id)}">✕</button>`);
+    for(const d of mySongs)h+=itemHTML({...d,cat:'mine',sub:d.kind==='rec'?'From a recording':d.kind==='tab'?'Tab':d.kind==='gen'?'Generated':d.kind==='file'?(d.fmt||'File'):'Chords'},d.kind==='rec'?'🎙':d.kind==='tab'?'T':d.kind==='gen'?'G':d.kind==='file'?'F':'♪',`<button class="del" data-del="${esc(d.id)}">✕</button>`);
   }else{
     if(curCat==='song')h+=`<button class="addbtn" data-lib="1">📚 Browse the free song library (300+ songs)</button>`;
     for(const d of LIB.filter(x=>x.cat===curCat))h+=itemHTML(d,d.cat==='lesson'?'L':d.cat==='song'?'♫':'#');
@@ -2108,6 +2127,7 @@ function renderList(){
   L.querySelectorAll('.del').forEach(b=>b.onclick=ev=>{
     ev.stopPropagation();
     if(!b.classList.contains('armed')){b.classList.add('armed');b.textContent='Delete';setTimeout(()=>{b.classList.remove('armed');b.textContent='✕';},2500);return;}
+    {const gone=mySongs.find(x=>x.id===b.dataset.del);if(gone&&gone.recAudio)caches.open('fretline-audio').then(c=>c.delete(gone.recAudio)).catch(()=>{});}
     mySongs=mySongs.filter(x=>x.id!==b.dataset.del);store.set('songs',mySongs);renderList();
   });
   const a=$('#btnAdd');if(a)a.onclick=()=>openImport();
@@ -2227,7 +2247,7 @@ function syncFocus(){const on=!!(G.playing&&curScreen==='player');const pl=$('#p
 let wakeLock=null;
 async function keepAwake(on){try{if(on&&navigator.wakeLock&&!wakeLock){wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>wakeLock=null);}else if(!on&&wakeLock){await wakeLock.release();wakeLock=null;}}catch(e){}}
 $('#btnPlay').onclick=async()=>{
-  if(G.playing&&!G.listen){G.playing=false;keepAwake(false);updateButtons();return;}
+  if(G.playing&&!G.listen){G.playing=false;recStop();keepAwake(false);updateButtons();return;}
   if(G.listen){resetRun();}
   const ok=await enableMic();if(!ok)return;
   if(settings.fx!=='off'&&settings.sound!=='basic'&&sampler.id!==settings.sound)await loadForPlayer();
@@ -2245,6 +2265,7 @@ $('#btnListen').onclick=async()=>{
   G.listen=true;G.playing=true;updateButtons();
 };
 async function prepBand(){
+  if(G.def&&G.def.recAudio&&settings.backing){const t=setTimeout(()=>showHint('Loading the recording…',20000),400);const b=await recLoad(G.def);clearTimeout(t);if(G.notice&&G.notice.startsWith('Loading the recording'))showHint('');if(!b&&G.song){G.band=buildBand(G.song,G.capo||0);bandSeek();}}
   if(!settings.backing||!G.band||!G.band.events.length)return;
   if(!store.get('bandTip',false)){store.set('bandTip',true);showHint('🥁 Backing band on. Use headphones (and tick “I\'m using headphones” in Settings) so the mic only hears your guitar. Tap 🥁 Band to turn it off.',8000);}
   if(G.band.key){const t=setTimeout(()=>showHint('Loading the backing band (first time only)…',20000),400);try{await loadBandFonts();}catch(e){}clearTimeout(t);if(G.notice&&G.notice.startsWith('Loading the backing band'))showHint('');}
@@ -2566,7 +2587,7 @@ function update(dt,now){
   const D=soundDelay();const fbA=Math.floor(target+D*b+1e-6);
   if(fbA>G.lastClickBeat&&!G.waiting){G.lastClickBeat=fbA;if(fbA<0||(settings.metronome&&!G.listen))click(((fbA%S.bpb)+S.bpb)%S.bpb===0,now,(fbA-target)/b-D);}
   G.clock=target;
-  bandTick();voxTick();
+  bandTick();voxTick();recTick();
   if(G.listen){
     while(G.playedIdx<ev.length&&ev[G.playedIdx].t<=G.clock+D*b){const e=ev[G.playedIdx];playEvent(e,(e.t-G.clock)/b-D);st[G.playedIdx]=3;G.playedIdx++;}
     if(G.clock>S.length+1){resetRun();}
@@ -2638,7 +2659,7 @@ function wrongSettle(now){const w=G.wp;if(!w)return;
   G.wrongAt=now;diagNote(w.i,w.txt);fxMiss(w.e,now);addPop(w.pop,'#ff5d73');}
 function finish(){
   $('#rNext').style.display='none';
-  G.playing=false;G.finished=true;keepAwake(false);updateButtons();
+  G.playing=false;G.finished=true;recStop();keepAwake(false);updateButtons();
   const total=G.song.events.length||1;const pct=Math.round(G.hits/total*100);
   const stars=pct>=95?3:pct>=80?2:pct>=60?1:0;
   $('#rStars').textContent='★'.repeat(stars)+'☆'.repeat(3-stars);
@@ -3929,7 +3950,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.77';
+const APP_VERSION='1.78';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

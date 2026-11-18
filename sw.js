@@ -1,6 +1,6 @@
 // Fretline service worker: always tries the network first so updates you
 // upload to GitHub show up on the next launch; falls back to the saved copy offline.
-const CACHE = 'fretline-v65';
+const CACHE = 'fretline-v66';
 const SHARE = 'fretline-share'; // holds a song shared from another app until the page picks it up
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', e => {
@@ -8,7 +8,7 @@ self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(CORE.map(u => c.add(u).catch(() => {})))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && k !== SHARE && k !== 'fretline-models').map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && k !== SHARE && k !== 'fretline-models' && k !== 'fretline-audio').map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', e => {
   const req = e.request;

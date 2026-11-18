@@ -36,6 +36,9 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
   <label for="mdl">Model</label>
   <select id="mdl"><option value="sonic">SonicDemixer build (try this first)</option><option value="fp32">StemSplit build, full (258 MB)</option><option value="fp16">StemSplit build, half-size (136 MB)</option></select>
   <div class="small">The StemSplit builds use a number type (64-bit "double") the web runtime can't run, so they stop with "Could not find an implementation". The SonicDemixer build is the same model exported differently.</div>
+  <label style="display:flex;gap:8px;align-items:center;font-weight:600"><input type="checkbox" id="mk" checked style="width:auto"> Also make a highway song from the guitar</label>
+  <input type="text" id="ttl" placeholder="Song title (from the file name if empty)" style="width:100%;font-size:15px;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text);margin-top:6px">
+  <div class="small">The song is saved to Fretline's My songs with the band (without the guitar) as its backing track.</div>
   <button id="go" disabled>Split it</button>
   <div class="bar"><div id="prog"></div></div>
   <div id="status" class="small">Choose a file.</div>
@@ -46,6 +49,7 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
   <p></p><b>Band without guitar</b><audio id="aRest" controls></audio><a id="dRest" download="band-no-guitar.wav">Download band-no-guitar.wav</a>
 </div>
 
+<div class="card" id="songOut" style="display:none"><b id="songMsg"></b><p><a href="../index.html">Open Fretline › My songs</a></p></div>
 <div class="card"><b>Report</b> <span class="small">(📋 tap to copy and send it)</span><div id="log"></div></div>
 
 <script>
@@ -69,7 +73,7 @@ function prog(f){$('prog').style.width=Math.round(f*100)+'%';}
 const CON=[];['log','warn','error'].forEach(k=>{const o=console[k].bind(console);console[k]=(...a)=>{try{CON.push(k+': '+a.map(x=>String(x&&x.message||x)).join(' ').slice(0,200));if(CON.length>12)CON.shift();}catch(e){}o(...a);};});
 window.addEventListener('error',e=>{CON.push('page error: '+(e.message||e));});window.addEventListener('unhandledrejection',e=>{CON.push('rejection: '+String(e.reason&&e.reason.message||e.reason).slice(0,200));});
 logEl.onclick=()=>{try{navigator.clipboard.writeText(R.join('\n'));status('Report copied.');}catch(e){}};
-$('file').onchange=()=>{$('go').disabled=!$('file').files.length;status($('file').files.length?'Ready.':'Choose a file.');};
+$('file').onchange=()=>{const f=$('file').files[0];if(f&&!$('ttl').value)$('ttl').value=f.name.replace(/\.[^.]+$/,'').replace(/[_]+/g,' ');$('go').disabled=!$('file').files.length;status($('file').files.length?'Ready.':'Choose a file.');};
 
 /* reads the names and types of the model's top-level nodes straight from the ONNX file (protobuf: ModelProto.graph=7,
    GraphProto.node=1, NodeProto.name=3, op_type=4); big fields like weights are skipped by length */
@@ -126,6 +130,48 @@ function wav(L,Rc){const n=L.length,buf=new ArrayBuffer(44+n*4),v=new DataView(b
   w(0,'RIFF');v.setUint32(4,36+n*4,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,2,true);v.setUint32(24,SR,true);v.setUint32(28,SR*4,true);v.setUint16(32,4,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*4,true);
   let o=44;for(let i=0;i<n;i++){for(const x of [L[i],Rc[i]]){const c=Math.max(-1,Math.min(1,x));v.setInt16(o,c<0?c*0x8000:c*0x7fff,true);o+=2;}}return new Blob([buf],{type:'audio/wav'});}
 
+/* ---- guitar track → highway song ---- */
+async function toRate(chs,rate){const n=chs[0].length,ab=new AudioBuffer({numberOfChannels:chs.length,length:n,sampleRate:SR});chs.forEach((c,i)=>ab.copyToChannel(c,i));
+  const off=new OfflineAudioContext(1,Math.ceil(n*rate/SR),rate);const s=off.createBufferSource();s.buffer=ab;s.connect(off.destination);s.start();return (await off.startRendering()).getChannelData(0);}
+// Basic Pitch (Spotify, Apache-2.0) on the guitar; drops its typical ghost notes (an octave / octave+5th / two octaves
+// above a louder note starting together, much quieter and shorter) and very quiet blips
+async function transcribe(mono22){
+  if(!window.BP)await loadScript('basic-pitch/basic-pitch.bundle.js');
+  try{await BP.tf.setBackend('webgl');}catch(e){}await BP.tf.ready();log('notes: Basic Pitch on '+BP.tf.getBackend());
+  const bp=new BP.BasicPitch('basic-pitch/model.json');const fr=[],on=[],co=[];const t0=performance.now();
+  await bp.evaluateModel(mono22,(f,o,c)=>{fr.push(...f);on.push(...o);co.push(...c);},p=>{prog(0.7+0.2*p);status('Finding the notes… '+Math.round(p*100)+'%');});
+  let notes=BP.noteFramesToTime(BP.addPitchBendsToNoteEvents(co,BP.outputToNotesPoly(fr,on,0.5,0.3,5)));
+  const n0=notes.length;
+  notes=notes.filter(n=>!(n.amplitude<0.35&&n.durationSeconds<0.12)&&n.pitchMidi>=38&&n.pitchMidi<=90); /* guitar range */
+  notes=notes.filter(n=>!notes.some(l=>[12,19,24].includes(n.pitchMidi-l.pitchMidi)&&Math.abs(l.startTimeSeconds-n.startTimeSeconds)<0.08&&((n.amplitude<0.65*l.amplitude&&n.durationSeconds<Math.max(0.3,0.6*l.durationSeconds))||(n.amplitude<0.85*l.amplitude&&n.durationSeconds<0.6*l.durationSeconds)||n.amplitude<0.75*l.amplitude)));
+  log('notes: '+notes.length+' (of '+n0+' found; ghosts dropped) in '+((performance.now()-t0)/1000).toFixed(1)+' s');
+  return notes.map(n=>({midi:n.pitchMidi,t:n.startTimeSeconds,d:n.durationSeconds,a:n.amplitude}));}
+// tempo and beat positions from the full mix: onset strength (rise in loudness, ~11.6 ms frames), autocorrelation
+// for 60-180 BPM (preferring ~110), then the beat phase and the bar start with the strongest accents
+function findBeats(mono22){const H=256,F=22050/H,n=Math.floor(mono22.length/H);const e=new Float32Array(n),d=new Float32Array(n);
+  for(let i=0;i<n;i++){let q=0;for(let j=0;j<H;j++){const v=mono22[i*H+j];q+=v*v;}e[i]=Math.log(1+100*Math.sqrt(q/H));}
+  for(let i=1;i<n;i++)d[i]=Math.max(0,e[i]-e[i-1]);let mu=0;for(let i=0;i<n;i++)mu+=d[i];mu/=n;for(let i=0;i<n;i++)d[i]=Math.max(0,d[i]-mu);
+  let best=null;for(let bpm=60;bpm<=180;bpm+=0.25){const L=60*F/bpm,Li=Math.floor(L),fr2=L-Li;let sc=0;for(let i=0;i+Li+1<n;i++)sc+=d[i]*(d[i+Li]*(1-fr2)+d[i+Li+1]*fr2);
+    sc*=Math.exp(-0.5*Math.pow(Math.log2(bpm/110)/0.9,2));if(!best||sc>best.sc)best={bpm,sc,L};}
+  const L=best.L;let ph=0,bs=-1;for(let p=0;p<L;p+=0.5){let sc=0;for(let x=p;x<n;x+=L)sc+=d[Math.round(x)]||0;if(sc>bs){bs=sc;ph=p;}}
+  let bar=0,bb=-1;for(let k=0;k<4;k++){let sc=0;for(let x=ph+k*L;x<n;x+=4*L)sc+=d[Math.round(x)]||0;if(sc>bb){bb=sc;bar=k;}}
+  return {bpm:Math.round(best.bpm*4)/4,first:(ph+bar*L)/F,spb:60/best.bpm};}
+async function makeSong(gL,gR,L,Rc,rL,rR,N){
+  status('Finding the notes…');const g22=await toRate([gL,gR],22050),m22=await toRate([L,Rc],22050);
+  const notes=await transcribe(g22);if(!notes.length)throw new Error('no guitar notes were found');
+  const bt=findBeats(m22);let b0=bt.first;const firstNote=Math.min(...notes.map(n=>n.t));while(b0+4*bt.spb<=firstNote-0.05)b0+=4*bt.spb;while(b0>firstNote+0.05)b0-=bt.spb; /* first note in bar 1 (whole beats keep the grid) */
+  log('tempo: '+bt.bpm+' BPM, bar 1 at '+b0.toFixed(2)+' s');
+  // Basic Pitch places onsets a little late: measure the common lag against the 8th-note grid (circular mean) and remove it
+  {let cx=0,sx=0;for(const n of notes){const ph=2*Math.PI*((n.t-b0)/bt.spb)*2;cx+=Math.cos(ph)*n.a;sx+=Math.sin(ph)*n.a;}
+   const lag=Math.atan2(sx,cx)/(2*Math.PI)/2*bt.spb;if(Math.abs(lag)<0.2*bt.spb){b0+=lag;log('timing: notes shifted '+Math.round(-lag*1000)+' ms to the beat');}}
+  const recNotes=notes.map(n=>({midi:n.midi,beat:Math.round((n.t-b0)/bt.spb*4)/4,dur:Math.max(0.25,Math.round(n.d/bt.spb*4)/4),v:Math.round(n.a*100)/100})).filter(n=>n.beat>=0);
+  const id='m-rec-'+Date.now(),key=location.origin+'/__fretline/rec/'+id+'.wav';
+  status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
+  const title=($('ttl').value||'Recording').trim()+(+$('secs').value?' (first '+$('secs').value+' s)':'');
+  const def={id,cat:'mine',kind:'rec',title,bpm:bt.bpm,bpb:4,recNotes,recAudio:key,recOffset:b0,credit:'Made from a recording in Fretline Lab'};
+  const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');songs.unshift(def);localStorage.setItem('fretline:songs',JSON.stringify(songs));
+  log('song: "'+title+'" saved to My songs ('+recNotes.length+' notes, '+Math.ceil((recNotes.length?Math.max(...recNotes.map(n=>n.beat)):0)/4)+' bars)');
+  $('songMsg').textContent='"'+title+'" is in My songs.';$('songOut').style.display='';window.__labSong=def;}
 $('go').onclick=async()=>{
   $('go').disabled=true;R.length=0;prog(0);$('out').style.display='none';
   const t0=performance.now();
@@ -177,7 +223,7 @@ $('go').onclick=async()=>{
         for(let ch=0;ch<2;ch++){let rest=0;for(let k=0;k<6;k++){const v=S[(k*2+ch)*SEG+i];if(k===GTR){if(ch===0)gL[st+i]+=w*v;else gR[st+i]+=w*v;}else rest+=v;}
           if(ch===0)rL[st+i]+=w*rest;else rR[st+i]+=w*rest;}}
       if(ot.dispose)ot.dispose();
-      prog(0.3+0.7*(c+1)/nCh);status('Splitting… part '+(c+1)+' of '+nCh+' ('+(dt/1000).toFixed(1)+' s for 7.8 s of audio)');
+      prog(0.3+0.4*(c+1)/nCh);status('Splitting… part '+(c+1)+' of '+nCh+' ('+(dt/1000).toFixed(1)+' s for 7.8 s of audio)');
       log('part '+(c+1)+'/'+nCh+': '+(dt/1000).toFixed(1)+' s'+(used==='webgpu'?' (graphics chip)':' (processor)'));}
     for(let i=0;i<N;i++){const w=ws[i]||1;gL[i]=gL[i]/w*sd+mean;gR[i]=gR[i]/w*sd+mean;rL[i]=rL[i]/w*sd+5*mean;rR[i]=rR[i]/w*sd+5*mean;}
     const tot=times.reduce((a,b)=>a+b,0)/1000;
@@ -185,7 +231,9 @@ $('go').onclick=async()=>{
     let eg=0,er=0;for(let i=0;i<N;i++){eg+=gL[i]*gL[i]+gR[i]*gR[i];er+=rL[i]*rL[i]+rR[i]*rR[i];}
     log('guitar share of the sound: '+(100*eg/(eg+er||1)).toFixed(0)+'%');
     const bg=wav(gL,gR),br=wav(rL,rR);$('aGtr').src=URL.createObjectURL(bg);$('dGtr').href=$('aGtr').src;$('aRest').src=URL.createObjectURL(br);$('dRest').href=$('aRest').src;
-    $('out').style.display='';status('Done. Listen below, then tap the report to copy it.');window.__labDone={used,tot,N,parts:nCh};
+    $('out').style.display='';
+    if($('mk').checked){try{await makeSong(gL,gR,L,Rc,rL,rR,N);}catch(e){log('song: could not make one ('+(e.message||e)+')');}}
+    prog(1);status('Done. Listen below, then tap the report to copy it.');window.__labDone={used,tot,N,parts:nCh};
   }catch(e){log('ERROR: '+(e&&e.message||e));if(CON.length)log('runtime messages:\n  '+CON.join('\n  '));if(/Could not find an implementation/.test(String(e&&e.message||e))&&$('mdl').value==='fp16')log('tip: the half-size model needs "Fully optimised" loading (which may run out of memory); use the Full model with Lean loading');log('(after an error like this, reload the page before trying another setting)');status('Something went wrong: '+(e&&e.message||e));window.__labDone={error:String(e&&e.message||e)};}
   $('go').disabled=false;};
 </script>

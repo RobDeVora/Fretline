@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.77, Android app from the v1.63 build)
+# Fretline: session handoff (18 Nov 2026, web v1.78, Android app from the v1.63 build)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,28 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.78: songs from a recording (Lab) with the band as backing
+
+Owner: guitar stem from the phone run "sounds amazing", no bleed. Asked to build it into the app, then the APK for
+multi-core. Phase 1 (this version):
+- **Lab** (`lab/stems.html`): after splitting, "Also make a highway song" (default on, title field). Guitar stem →
+  22.05 kHz mono → **Basic Pitch** (`lab/basic-pitch/`: esbuild bundle of @spotify/basic-pitch 1.0.1 + tfjs 3, 1.2 MB,
+  WebGL backend; model files from the npm package; Apache-2.0) → filters: quiet blips, out-of-range (<D2, >F#6),
+  ghosts an octave / 12+7 / two octaves above a note starting together (quieter+shorter, or <0.75× as loud).
+  **Tempo** from the full mix (log-energy onset envelope, 11.6 ms frames, autocorrelation 60-180 BPM with a prior at
+  110, beat phase, bar accent); first note forced into bar 1 by whole beats; Basic Pitch's onset lag removed (circular
+  mean against the 8th grid); notes quantised to 16ths. Saves the band-without-guitar WAV to Cache `fretline-audio`
+  (key `<origin>/__fretline/rec/<id>.wav`) and a song `{kind:'rec', recNotes:[{midi,beat,dur,v}], recAudio,
+  recOffset (s of beat 0), bpm, bpb:4}` into `localStorage['fretline:songs']`.
+- **Main app**: `buildSong` builds `kind:'rec'` with `eventsFromNotes`; My songs shows "From a recording" 🎙;
+  `recLoad`/`recTick`/`recStop` (state `RECB`; `REC` was taken) play the recording as the backing: position =
+  recOffset + clock·60/bpm + soundDelay·speed, playbackRate = practice speed, re-sync if > 80 ms off, stopped on
+  pause/finish/reset; the synthesized band is off for these songs (falls back to it if the audio is missing); deleting
+  the song deletes its audio; SW keeps `fretline-audio`.
+- Tests: `tools/lab-tests/` (synthetic 100 BPM riff: 99.5 BPM, 64/64 notes on the right beat, 8 extras; backing sync
+  1-6 ms). Main regressions unchanged.
+Phase 2 next: native Demucs in the APK.
 
 ## v1.77: Lab page: split a song with Demucs (on device)
 
