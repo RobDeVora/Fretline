@@ -382,7 +382,7 @@ Phase 2 of the owner's request ("build it into the browser and then create the n
 cores"). The WebView can never be cross-origin isolated, so onnxruntime-web is stuck on one thread there; the APK now
 has its own separator.
 - **`NativeSeparatorPlugin.java`** (`@CapacitorPlugin(name="NativeSeparator")`, registered in MainActivity;
-  `com.microsoft.onnxruntime:onnxruntime-android:1.22.0` in app/build.gradle; `ndk.abiFilters arm64-v8a, armeabi-v7a`
+  `com.microsoft.onnxruntime:onnxruntime-android:1.22.0` in app/build.gradle; `ndk.abiFilters arm64-v8a, armeabi-v7a`; minSdk raised 23 → 24 (ORT requires it)
   to keep the APK small). Methods: `status()` → {available, cores, modelBytes, loaded, threads};
   `prepareModel({url,name,expectBytes})` downloads to **`filesDir/models/`** (app storage: survives "Clear cache";
   `.part` file, HTTP Range resume, 6 tries, never kept if < 97% of expected; "progress" events {got,total,note});
