@@ -299,7 +299,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <h2>Settings</h2>
     <div class="field"><label>Mic sensitivity: <span id="sSensV"></span></label><input type="range" id="sSens" min="1" max="10" step="1">
       <div class="meter"><i id="sMeter"></i></div><span class="small">Play a note. The bar should turn green while you play and stay low when you're quiet.</span></div>
-    <div class="field"><label>Latency compensation: <span id="sLatV"></span> ms</label><input type="range" id="sLat" min="0" max="300" step="10"><span class="small">Raise this if you play on time but notes count as late.</span></div>
+    <div class="field"><label>Latency compensation: <span id="sLatV"></span> ms</label><input type="range" id="sLat" min="0" max="600" step="10"><span class="small">Raise this if you play on time but notes count as late.</span></div>
     <div class="field"><label>Highway size</label><select id="sBig"><option value="1">Normal</option><option value="1.3">Large</option><option value="1.6">Extra large</option></select><div class="small">Makes notes, fret numbers, chord names and strum arrows bigger.</div></div>
     <div class="field"><label>Timing window</label><select id="sTiming"><option value="1">Normal</option><option value="1.5">Relaxed</option><option value="2">Very relaxed</option></select><span class="small">How early or late a note can be and still count.</span></div>
     <div class="field inline"><label>Show the timing window as a shaded band</label><input type="checkbox" id="sBand"></div>
@@ -1257,7 +1257,7 @@ function detectFrame(now){
   if(m===det.midi)det.count++;else{det.midi=m;det.count=1;}
   det.stableMidi=det.count>=2?m:null;
   // a change to a new steady pitch is a pick too, even when the volume barely rises (the last note still ringing)
-  if(det.stableMidi!=null&&det.stableMidi!==det.lastStable){det.lastStable=det.stableMidi;det.pitchOnsetAt=now;}
+  if(det.stableMidi!=null&&det.stableMidi!==det.lastStable){det.lastStable=det.stableMidi;det.pitchOnsetAt=now;det.pitchOnsetMidi=det.stableMidi;}
 }
 /* ---- targeted note detection ----
    Instead of asking "what single pitch is sounding?" (which a grazed second string can confuse), ask "is the note
@@ -1969,14 +1969,14 @@ function matchEvent(e,i,now){
   //    previous note still ringing). It must have just been played: its strength has to jump compared with the
   //    moment before (a note that was already ringing, or an open string humming along, doesn't jump).
   if(!analyser)return false;
-  if(G.tcIdx!==i){G.tcIdx=i;G.tcf=0;G.tHist=[];}
+  if(G.tcIdx!==i){G.tcIdx=i;G.tcf=0;G.tHist=[];G.tRiseAt=null;}
   let ti={score:0,T:0};for(const n of e.notes){const x=targetInfo(n,cp);if(x.score>ti.score)ti=x;}
   const hist=G.tHist;hist.push({at:now,T:ti.T});while(hist.length&&hist[0].at<now-600)hist.shift();
-  if(det.rms<gate()){G.tcf=0;return false;}
+  if(det.rms<gate()){G.tcf=0;G.tRiseAt=null;return false;}
   const before=hist.filter(h=>h.at<=now-60&&h.at>=now-450).map(h=>h.T);
   const rose=before.length>=3&&ti.T>=2.5*Math.min(...before)+1e-9;
-  if(ti.score>=0.68&&(rose||legato)){G.tcf++;if(G.tcf>=2){G.tHist=[];return true;}return false;}
-  G.tcf=0;return false;
+  if(ti.score>=0.68&&(rose||legato)){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){G.tHist=[];return true;}return false;}
+  G.tcf=0;G.tRiseAt=null;return false;
 }
 // the right pitch (any octave if allowed); a bent note counts anywhere from the fretted pitch up to its target
 // is this pitch one of the last few notes, probably still ringing? (then it isn't a wrong note)
@@ -2040,7 +2040,8 @@ function update(dt,now){
       if(!e.notes.some(n=>noteOk(n,m,cp))&&!e.notes.some(n=>targetScore(n,cp)>=0.5)){G.wrongOnset=det.onsetAt;G.wrongAt=now;fxMiss(e,now);const pp=playedPos(m,e.notes[0]);addPop(pp&&pp.f===e.notes[0].f&&pp.s!==e.notes[0].s?'Wrong string':'Wrong note','#ff5d73');break;}
     }
     if(matchEvent(e,i,now)){
-      {const pk=Math.max(det.onsetAt,det.pitchOnsetAt||-1);if(G.mode==='play'&&now-pk<500&&pk>0){const clockAtPick=G.clock-(now-pk)/1000*b;(G.offs=G.offs||[]).push((clockAtPick-e.t)/b*1000);}}
+      {const po=det.pitchOnsetMidi!=null&&e.notes.some(n=>noteOk(n,det.pitchOnsetMidi,G.capo||0))?det.pitchOnsetAt:null;
+      const cands=[det.onsetAt,po,G.tRiseAt].filter(x=>x!=null&&x>G.lastHitAt&&now-x<600&&(G.clock-(now-x)/1000*b)>=e.t-wb);const pk=cands.length?Math.min(...cands):-1;G.tRiseAt=null;if(G.mode==='play'&&pk>0){const clockAtPick=G.clock-(now-pk)/1000*b;(G.offs=G.offs||[]).push((clockAtPick-e.t)/b*1000);}}
       fxHit(e,now);
       if(settings.deadStrings&&e.shape&&e.strum!=='x'&&analyser){const pv=ev[i-1];const first=e.chord||!(pv&&pv.label===e.label)||now-(G.ccAt||0)>650;
         if(first){const pk=Math.max(det.onsetAt,det.pitchOnsetAt||-1);G.cc={e,i,onset:now-pk<400?pk:now-60,best:null,prevShape:pv&&pv.shape};G.ccAt=now;}}
@@ -2079,7 +2080,7 @@ function finish(){
 // from the timing compensation setting, offer to set it, so early and late are judged fairly.
 function timingAdvice(){
   const box=$('#rTiming');if(!box)return;box.innerHTML='';const o=(G.offs||[]).slice().sort((a,b)=>a-b);if(G.mode!=='play'||o.length<6)return;
-  const med=o[Math.floor(o.length/2)];const sug=Math.max(0,Math.min(300,Math.round(med/10)*10));
+  const med=o[Math.floor(o.length/2)];const sug=Math.max(0,Math.min(600,Math.round(med/10)*10));
   if(Math.abs(sug-settings.latency)<40){box.textContent='Timing: your notes reached Fretline about '+Math.round(med)+' ms after the line, which matches your timing compensation.';return;}
   box.innerHTML='Timing: your notes reached Fretline about <b>'+Math.round(med)+' ms</b> after the line on average, but timing compensation is set to '+settings.latency+' ms. ';
   const b=document.createElement('button');b.textContent='Set it to '+sug+' ms';b.style.marginTop='6px';
@@ -3125,7 +3126,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.45';
+const APP_VERSION='1.46';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
