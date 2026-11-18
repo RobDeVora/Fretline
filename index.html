@@ -367,6 +367,8 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field"><label>Colour notes by</label><select id="cNoteBy"><option value="finger">Finger (1 blue, 2 green, 3 yellow, 4 red, open grey)</option><option value="string">String</option></select></div>
     <div class="field"><label>Note colours (by string)</label><select id="cNotes"></select>
       <div class="swrow" id="cCustom" style="display:none;margin-top:4px"></div></div>
+    <div class="field"><label>String colours</label><select id="cStr"><option value="match">Same as the note colours</option><option value="one">All one colour</option><option value="custom">Choose each string</option></select>
+      <div class="swrow" id="cStrRow" style="display:none;margin-top:4px"></div><div class="small">Plain strings let the coloured notes stand out.</div></div>
     <div class="field"><label>Hit line colour</label><div class="swrow" id="cZone"></div></div>
     <div class="field"><label>Highway background</label><select id="cHw"></select></div>
     <div class="field"><label>Fretboard</label><select id="cFb"></select></div>
@@ -2664,6 +2666,7 @@ function resizeCanvas(){
   const r=cv.getBoundingClientRect();if(!r.width)return;const dpr=Math.min(2,window.devicePixelRatio||1);cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr);cx.setTransform(dpr,0,0,dpr,0,0);CW=r.width;CH=r.height;}
 window.addEventListener('resize',()=>{if(curScreen==='player')resizeCanvas();});
 const SCOL=['#ff6b81','#ffa94d','#ffd43b','#69db7c','#4dabf7','#b197fc'];
+const STRC=SCOL.slice(); /* v1.75: colours of the strings themselves (lines, letters, lanes, target rings); notes keep SCOL */
 // finger colours: open string, index, middle, ring, pinky
 const FCOL=['#ced4da','#4dabf7','#69db7c','#ffd43b','#ff6b81'];
 const byFinger=()=>settings.noteBy!=='string';
@@ -2692,7 +2695,7 @@ const FRETBOARDS={
   rosewood:{name:'Rosewood',wood:'#3b2219',wire:'#b8b1a5',nut:'#efe6d2',inlay:'#e6dac2',str:'#d8d3c9'},
   maple:{name:'Maple',wood:'#d8b57a',wire:'#8a867f',nut:'#f7f1e1',inlay:'#2b2b2b',str:'#4f4f4f'},
   ebony:{name:'Ebony',wood:'#0b0a09',wire:'#9c9c9c',nut:'#f2eee4',inlay:'#e9e9e9',str:'#cfcfcf'}};
-const DEF_COLORS={theme:'dark',notes:'rainbow',custom:NOTE_PALETTES.rainbow.c.slice(),zone:'#5ce1a6',highway:'plain',fretboard:'dark'};
+const DEF_COLORS={theme:'dark',notes:'rainbow',custom:NOTE_PALETTES.rainbow.c.slice(),zone:'#5ce1a6',highway:'plain',fretboard:'dark',strings:'match',strOne:'#8a8f9a',strCustom:null};
 const COL={bg:'#0f1115',zone:'#5ce1a6',highway:'plain',fb:FRETBOARDS.dark};
 function colorPrefs(){return Object.assign({},DEF_COLORS,settings.colors||{});}
 function hexA(h,a){h=String(h||'#ffffff').replace('#','');if(h.length===3)h=h.split('').map(c=>c+c).join('');const n=parseInt(h.slice(0,6),16)||0;return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;}
@@ -2704,6 +2707,7 @@ function applyColors(){
   const meta=document.querySelector('meta[name="theme-color"]');if(meta)meta.setAttribute('content',t.bg);
   const pal=c.notes==='custom'&&Array.isArray(c.custom)&&c.custom.length===6?c.custom:(NOTE_PALETTES[c.notes]||NOTE_PALETTES.rainbow).c;
   SCOL.splice(0,6,...pal);
+  STRC.splice(0,6,...(c.strings==='one'?Array(6).fill(c.strOne||DEF_COLORS.strOne):c.strings==='custom'&&Array.isArray(c.strCustom)&&c.strCustom.length===6?c.strCustom:pal));
   COL.bg=t.bg;COL.zone=c.zone||DEF_COLORS.zone;COL.highway=HIGHWAYS[c.highway]?c.highway:'plain';COL.fb=FRETBOARDS[c.fretboard]||FRETBOARDS.dark;
 }
 applyColors();
@@ -2847,12 +2851,12 @@ function draw(now){
   // highway background
   if(COL.highway==='lighter'){cx.fillStyle='rgba(255,255,255,.05)';cx.fillRect(0,laneTop,W,laneH*6);}
   else if(COL.highway==='stripes'){cx.fillStyle='rgba(255,255,255,.035)';for(let s=0;s<6;s+=2)cx.fillRect(0,Y(s)-laneH/2,W,laneH);}
-  else if(COL.highway==='tinted'){for(let s=0;s<6;s++){cx.fillStyle=hexA(SCOL[s],0.07);cx.fillRect(0,Y(s)-laneH/2,W,laneH);}}
+  else if(COL.highway==='tinted'){for(let s=0;s<6;s++){cx.fillStyle=hexA(STRC[s],0.07);cx.fillRect(0,Y(s)-laneH/2,W,laneH);}}
   // beats
   const b0=Math.floor(G.clock-hitX/ppb)-1,b1=Math.ceil(G.clock+(W-hitX)/ppb)+1;
   for(let b=Math.max(0,b0);b<=b1;b++){const x=hitX+(b-G.clock)*ppb;cx.fillStyle=b%S.bpb===0?'rgba(255,255,255,.16)':'rgba(255,255,255,.05)';cx.fillRect(x,laneTop,1,laneH*6);}
   // strings
-  for(let s=0;s<6;s++){cx.fillStyle=SCOL[s]+'66';cx.fillRect(0,Y(s)-(s<3?1:0.5),W,s<3?2:1);}
+  for(let s=0;s<6;s++){cx.fillStyle=STRC[s]+'66';cx.fillRect(0,Y(s)-(s<3?1:0.5),W,s<3?2:1);}
   // events
   let r=Math.max(7,Math.min(laneH*0.44,19*k));
   // one note size for the whole song, small enough for its quick passages (no speed-up: quick notes may touch, as
@@ -2876,8 +2880,8 @@ function draw(now){
     const yb=laneTop+laneH*6;cx.beginPath();cx.moveTo(hitX-nt,yb+6+nt);cx.lineTo(hitX+nt,yb+6+nt);cx.lineTo(hitX,yb+4);cx.closePath();cx.fill();
     cx.restore();
     for(let s=0;s<6;s++){const on=tgt.has(s);cx.beginPath();cx.arc(hitX,Y(s),r+2,0,Math.PI*2);
-      cx.fillStyle=on?hexA(SCOL[s],0.12+0.3*a):COL.bg;cx.fill();
-      cx.lineWidth=on?2+2*a:2;cx.strokeStyle=on?SCOL[s]:hexA(zc,0.55);cx.stroke();}
+      cx.fillStyle=on?hexA(STRC[s],0.12+0.3*a):COL.bg;cx.fill();
+      cx.lineWidth=on?2+2*a:2;cx.strokeStyle=on?STRC[s]:hexA(zc,0.55);cx.stroke();}
   }
   cx.textAlign='center';cx.textBaseline='middle';
   let lastLabel=null;
@@ -2980,7 +2984,7 @@ function draw(now){
   }
   // string labels
   cx.font='bold '+F(12)+' -apple-system,sans-serif';const lb=18*k;
-  for(let s=0;s<6;s++){cx.fillStyle=hexA(COL.bg,0.85);cx.fillRect(0,Y(s)-lb/2,lb,lb);cx.fillStyle=SCOL[s];cx.fillText(STRING_LABELS[s],lb/2,Y(s)+1);}
+  for(let s=0;s<6;s++){cx.fillStyle=hexA(COL.bg,0.85);cx.fillRect(0,Y(s)-lb/2,lb,lb);cx.fillStyle=STRC[s];cx.fillText(STRING_LABELS[s],lb/2,Y(s)+1);}
   // pops
   for(const p of G.pops){const a=(now-p.t)/700;if(a>1)continue;cx.globalAlpha=1-a;cx.fillStyle=p.color;cx.font='bold '+F(16)+' -apple-system,sans-serif';cx.fillText(p.text,hitX,laneTop-14-a*14);cx.globalAlpha=1;}
   // count-in
@@ -3123,6 +3127,12 @@ function syncColorsUI(){
   const cu=$('#cCustom');cu.style.display=c.notes==='custom'?'':'none';
   if(c.notes==='custom')cu.innerHTML=[5,4,3,2,1,0].map(s=>`<label>${STRING_LABELS[s]}<input type="color" data-s="${s}" value="${c.custom[s]}"></label>`).join('');
   cu.querySelectorAll('input').forEach(el=>el.oninput=e=>{const cc=colorPrefs();cc.custom=cc.custom.slice();cc.custom[+e.target.dataset.s]=e.target.value;settings.colors=cc;saveSettings();applyColors();drawPreview();});
+  $('#cStr').value=c.strings||'match';const sr=$('#cStrRow');sr.style.display=c.strings==='one'||c.strings==='custom'?'':'none';
+  if(c.strings==='one')sr.innerHTML=STR_SWATCHES.map(h=>`<button class="sw${h===c.strOne?' on':''}" data-c="${h}" style="background:${h}" aria-label="${h}"></button>`).join('')+`<input type="color" id="cStrOne" value="${c.strOne||DEF_COLORS.strOne}" title="Pick any colour">`;
+  else if(c.strings==='custom')sr.innerHTML=[5,4,3,2,1,0].map(s=>`<label>${STRING_LABELS[s]}<input type="color" data-s="${s}" value="${STRC[s]}"></label>`).join('');
+  sr.querySelectorAll('.sw').forEach(b=>b.onclick=()=>setColor('strOne',b.dataset.c));
+  if($('#cStrOne'))$('#cStrOne').oninput=e=>{const cc=colorPrefs();cc.strOne=e.target.value;settings.colors=cc;saveSettings();applyColors();drawPreview();};
+  sr.querySelectorAll('input[data-s]').forEach(el=>el.oninput=e=>{const cc=colorPrefs();cc.strCustom=(cc.strCustom||STRC).slice();cc.strCustom[+e.target.dataset.s]=e.target.value;settings.colors=cc;saveSettings();applyColors();drawPreview();});
   const z=$('#cZone');const custom=!ZONE_SWATCHES.includes(c.zone);
   z.innerHTML=ZONE_SWATCHES.map(h=>`<button class="sw${h===c.zone?' on':''}" data-z="${h}" style="background:${h}" aria-label="${h}"></button>`).join('')+`<input type="color" id="cZoneC" value="${c.zone}" title="Pick any colour"${custom?' style="outline:3px solid var(--text)"':''}>`;
   z.querySelectorAll('.sw').forEach(b=>b.onclick=()=>setColor('zone',b.dataset.z));
@@ -3134,6 +3144,9 @@ $('#cNotes').onchange=e=>{const c=colorPrefs();const v=e.target.value;
   // custom starts from whatever palette was showing, unless you've already made your own
   if(v==='custom'&&JSON.stringify(c.custom)===JSON.stringify(DEF_COLORS.custom))c.custom=SCOL.slice();c.notes=v;saveColors(c);};
 $('#cHw').onchange=e=>setColor('highway',e.target.value);
+// each-string colours start from whatever the strings show now, unless you've already chosen your own
+$('#cStr').onchange=e=>{const c=colorPrefs();const v=e.target.value;if(v==='custom'&&!(Array.isArray(c.strCustom)&&c.strCustom.length===6))c.strCustom=STRC.slice();c.strings=v;saveColors(c);};
+const STR_SWATCHES=['#8a8f9a','#5c6270','#c9ced8','#ffffff','#d8b57a','#5ce1a6'];
 $('#cFb').onchange=e=>setColor('fretboard',e.target.value);
 $('#cReset').onclick=()=>saveColors(JSON.parse(JSON.stringify(DEF_COLORS)));
 function settingsTab(t){settings.sTab=t;document.querySelectorAll('#sTabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
@@ -3149,12 +3162,12 @@ function drawPreview(){
   const top=8,fbH=34,lh=(H-top-fbH-14)/6,Y=s=>top+(5-s+0.5)*lh,hx=Math.min(70,W*0.18);
   if(COL.highway==='lighter'){g.fillStyle='rgba(255,255,255,.05)';g.fillRect(0,top,W,lh*6);}
   else if(COL.highway==='stripes'){g.fillStyle='rgba(255,255,255,.035)';for(let s=0;s<6;s+=2)g.fillRect(0,Y(s)-lh/2,W,lh);}
-  else if(COL.highway==='tinted')for(let s=0;s<6;s++){g.fillStyle=hexA(SCOL[s],0.07);g.fillRect(0,Y(s)-lh/2,W,lh);}
-  for(let s=0;s<6;s++){g.fillStyle=SCOL[s]+'66';g.fillRect(0,Y(s)-0.5,W,s<3?2:1);}
+  else if(COL.highway==='tinted')for(let s=0;s<6;s++){g.fillStyle=hexA(STRC[s],0.07);g.fillRect(0,Y(s)-lh/2,W,lh);}
+  for(let s=0;s<6;s++){g.fillStyle=STRC[s]+'66';g.fillRect(0,Y(s)-0.5,W,s<3?2:1);}
   const rad=Math.max(5,lh*0.42);
   g.fillStyle=hexA(COL.zone,0.14);g.fillRect(hx-9,top,18,lh*6);
   g.save();g.shadowColor=COL.zone;g.shadowBlur=14;g.fillStyle=COL.zone;g.fillRect(hx-1.5,top-4,3,lh*6+8);g.restore();
-  for(let s=0;s<6;s++){const on=s===3;g.beginPath();g.arc(hx,Y(s),rad+2,0,7);g.fillStyle=on?hexA(SCOL[s],0.3):COL.bg;g.fill();g.lineWidth=on?3:2;g.strokeStyle=on?SCOL[s]:hexA(COL.zone,0.55);g.stroke();}
+  for(let s=0;s<6;s++){const on=s===3;g.beginPath();g.arc(hx,Y(s),rad+2,0,7);g.fillStyle=on?hexA(STRC[s],0.3):COL.bg;g.fill();g.lineWidth=on?3:2;g.strokeStyle=on?STRC[s]:hexA(COL.zone,0.55);g.stroke();}
   g.textAlign='center';g.textBaseline='middle';g.font='bold '+Math.round(rad)+'px -apple-system,sans-serif';
   [[3,2,hx+16],[1,3,hx+95],[4,1,hx+150],[0,3,hx+205],[5,0,hx+250],[2,2,hx+300]].forEach(([s,f,x])=>{if(x>W-rad)return;g.beginPath();g.arc(x,Y(s),rad,0,7);g.fillStyle=SCOL[s];g.fill();g.fillStyle=ink(SCOL[s]);g.fillText(String(f),x,Y(s)+1);});
   const FB=COL.fb,y0=H-fbH-4,x0=26,x1=W-8,fw=(x1-x0)/6.5,sh=fbH/6;
@@ -3894,7 +3907,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.74';
+const APP_VERSION='1.75';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

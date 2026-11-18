@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.74, Android app from the v1.63 build)
+# Fretline: session handoff (18 Nov 2026, web v1.75, Android app from the v1.63 build)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,14 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.75: string colours separate from note colours
+
+Owner asked to colour the strings freely (all one colour or each string) so the coloured notes are easier to read.
+Settings › Colours › "String colours": Same as the note colours (default, as before) / All one colour (swatches incl.
+grey `#8a8f9a`, or any colour) / Choose each string (6 pickers, start from what's showing). `settings.colors.strings`
+('match'|'one'|'custom'), `strOne`, `strCustom`; `applyColors` fills `STRC`, used for the string lines, string letters,
+tinted lanes and lit target rings (game and the Colours preview). Notes, hold tails, fretboard dots keep `SCOL`/`FCOL`.
 
 ## v1.74: strums must be the right chord, strummed in their own window
 
