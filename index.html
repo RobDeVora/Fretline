@@ -1194,7 +1194,10 @@ function buildSong(def){
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
 const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1},store.get('settings',{}));
 function saveSettings(){store.set('settings',settings);}
-function gate(){return 0.04*Math.pow(0.65,settings.sens-1);}
+// The level below which sound is treated as silence. The sensitivity setting sets the most it can be; in a quiet room
+// it drops to just above the room's own noise (measured between notes), so soft notes on a quiet phone mic still count.
+function gateMax(){return 0.04*Math.pow(0.65,settings.sens-1);}
+function gate(){const b=gateMax();const nf=typeof det!=='undefined'&&det.noise;return nf?Math.min(b,Math.max(nf*3,0.0012)):b;}
 let bests=store.get('best',{});
 let mySongs=store.get('songs',[]);
 
@@ -1241,6 +1244,8 @@ function yin(buf,sr){
 const det={midi:null,stableMidi:null,count:0,freq:0,cents:0,rms:0,onsetAt:-1,hist:[]};
 function detectFrame(now){
   analyser.getFloatTimeDomainData(timeBuf);det.frame=(det.frame||0)+1;
+  {const sub0=timeBuf.subarray(timeBuf.length-2048);let q=0;for(let i=0;i<sub0.length;i+=4)q+=sub0[i]*sub0[i];const lv=Math.sqrt(q/(sub0.length/4));
+    if(!det.nfAt||now-det.nfAt>100){det.nfAt=now;const L=det.nfL||(det.nfL=[]);L.push(lv);if(L.length>50)L.shift();if(L.length>=10){const so=L.slice().sort((a,b)=>a-b);det.noise=so[Math.floor(so.length*0.15)];}}}
   const sub=timeBuf.subarray(timeBuf.length-2048);
   let s=0;for(let i=0;i<sub.length;i++)s+=sub[i]*sub[i];const rms=Math.sqrt(s/sub.length);det.rms=rms;
   const g=gate();const minPrev=det.hist.length?Math.min(...det.hist):0;det.hist.push(rms);if(det.hist.length>6)det.hist.shift();
@@ -2023,17 +2028,18 @@ function chordCheck(now){
 /* ---- detection report (results › Copy detection report) ----
    For each note: what was expected, what the pitch tracker heard while waiting, how many picks registered, how
    strongly the expected note showed up, and how it ended. Lets problems on a real phone be seen exactly. */
-function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]={heard:[],picks:0,ts:0,t0:now,lastOn:det.onsetAt,lastPo:det.pitchOnsetAt,notes:[]};}
+function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]={heard:[],picks:0,ts:0,t0:now,lastOn:det.onsetAt,lastPo:det.pitchOnsetAt,notes:[],lv:0,gt:gate()};}
+  if(det.rms>d.lv){d.lv=det.rms;d.gt=gate();}
   const m=det.stableMidi;if(m!=null&&d.heard[d.heard.length-1]!==m&&d.heard.length<8)d.heard.push(m);
   if(det.onsetAt!==d.lastOn){d.picks++;d.lastOn=det.onsetAt;}if(det.pitchOnsetAt!==d.lastPo){d.pp=(d.pp||0)+1;d.lastPo=det.pitchOnsetAt;}
   if(analyser&&!e.strum&&!e.chord&&e.notes.length){const x=targetScore(e.notes[0],G.capo||0);if(x>d.ts)d.ts=x;}}
 function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.notes.push(txt);}
 function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);}}
 function diagReport(){
-  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+' · band '+(settings.backing?'on':'off')+' · sensitivity '+settings.sens+' · '+G.hits+'/'+S.events.length];
+  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+' · band '+(settings.backing?'on':'off')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+') · '+G.hits+'/'+S.events.length];
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
-    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+(d.notes.length?' · '+d.notes.join(','):''));});
+    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.notes.length?' · '+d.notes.join(','):''));});
   return L.join('\n');}
 function techWords(n){return n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
 function noteOk(n,m,cp){const a=n.midi+cp;if(m===a||(settings.anyOctave&&(((a-m)%12)+12)%12===0))return true;
@@ -3159,7 +3165,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.47';
+const APP_VERSION='1.48';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
