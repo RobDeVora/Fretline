@@ -9,6 +9,9 @@ import android.util.Base64;
 import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.JSObject;
@@ -24,6 +27,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(IncomingPlugin.class);
         registerPlugin(NativeMicPlugin.class);
         super.onCreate(savedInstanceState);
+        hideSystemBars();
         handleIntent(getIntent());
         // Back button / back gesture: let the page close whatever is open (Settings, a song, a dialog...).
         // Only when it reports there's nothing left to close does the app go to the background.
@@ -37,6 +41,29 @@ public class MainActivity extends BridgeActivity {
                 });
             }
         });
+    }
+
+    /** Full screen: no status bar or navigation bar. Swiping in from the edge shows them for a moment. */
+    private void hideSystemBars() {
+        try {
+            WindowInsetsControllerCompat c = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+            if (c == null) return;
+            c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            c.hide(WindowInsetsCompat.Type.systemBars());
+        } catch (Exception ignored) { }
+    }
+
+    // put full screen back after a dialog, the keyboard, another app or the notification shade
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) hideSystemBars();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        hideSystemBars();
     }
 
     @Override

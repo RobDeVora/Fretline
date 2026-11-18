@@ -70,6 +70,11 @@ header h1 span{color:var(--accent)}
 #btnPlay{min-width:110px!important}
 .overlay{position:absolute;inset:0;background:rgba(10,12,16,.82);display:none;align-items:center;align-items:safe center;justify-content:center;z-index:5;padding:20px;overflow-y:auto}
 .overlay.show{display:flex}
+.stabs{display:flex;gap:4px;overflow-x:auto;position:sticky;top:-18px;margin:0 -18px 10px;padding:8px 18px;background:var(--panel);z-index:2;border-bottom:1px solid var(--line);scrollbar-width:none}
+.stabs::-webkit-scrollbar{display:none}
+.stabs button{flex:0 0 auto;padding:7px 11px;font-size:13px;border-radius:999px}
+.stabs button.on{background:var(--accent);color:#0b0d12;border-color:var(--accent)}
+.stab{display:none}.stab.on{display:block}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px;max-width:420px;width:100%;max-height:90%;overflow:auto}
 .card h2{margin:0 0 8px;font-size:20px}
 .card p{color:var(--muted);margin:6px 0}
@@ -302,28 +307,36 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
 <!-- SETTINGS / MESSAGES -->
 <div class="overlay" id="settings" style="position:fixed">
   <div class="card">
-    <h2>Settings</h2>
+    <h2 style="margin-bottom:8px">Settings</h2>
+    <div class="stabs" id="sTabs"><button data-t="mic">🎙 Mic & timing</button><button data-t="disp">👀 Display</button><button data-t="snd">🔊 Sound</button><button data-t="sing">🎤 Singing</button><button data-t="col">🎨 Colours</button><button data-t="app">⚙ App</button></div>
+    <div class="stab" data-t="mic">
     <div class="field"><label>Mic sensitivity: <span id="sSensV"></span></label><input type="range" id="sSens" min="1" max="10" step="1">
       <div class="meter"><i id="sMeter"></i></div><span class="small">Play a note. The bar should turn green while you play and stay low when you're quiet.</span></div>
     <div class="field"><label>Microphone</label><select id="sMic"><option value="">Automatic (phone's choice)</option></select>
       <span class="small" id="sMicHint">With Bluetooth headphones, phones often listen through the headset's own call microphone, which is far from the guitar and silences sounds that aren't a voice. If notes go missing, pick the phone's own microphone here (often called "Phone", "Built-in" or "Bottom").</span>
       <span class="small" id="sMicNow" style="color:var(--accent2)"></span></div>
     <div class="field"><label>Latency compensation: <span id="sLatV"></span> ms</label><input type="range" id="sLat" min="0" max="600" step="10"><span class="small">Raise this if you play on time but notes count as late.</span></div>
-    <div class="field"><label>Highway size</label><select id="sBig"><option value="1">Normal</option><option value="1.3">Large</option><option value="1.6">Extra large</option></select><div class="small">Makes notes, fret numbers, chord names and strum arrows bigger.</div></div>
     <div class="field"><label>Timing window</label><select id="sTiming"><option value="1">Normal</option><option value="1.5">Relaxed</option><option value="2">Very relaxed</option></select><span class="small">How early or late a note can be and still count.</span></div>
     <div class="field inline"><label>Show the timing window as a shaded band</label><input type="checkbox" id="sBand"></div>
     <div class="small" style="margin-top:-6px">Off: just aim for the rings on the hit line. The window still works the same.</div>
-    <div class="field"><label>Strums show</label><select id="sStrumView"><option value="fingers">Chord fingering (fret numbers on each string)</option><option value="arrows">Big D / U arrows</option></select></div>
     <div class="field"><label>Sound delay: <span id="sDelV"></span></label><input type="range" id="sDel" min="-10" max="400" step="10"><span class="small">How long the app's sound takes to reach your ears. Bluetooth headphones add 150–300 ms; slide left to the end for Auto. The band, Listen and the count-in play this much early so you hear them right on the line.</span>
       <button id="sDelTest" style="margin-top:6px">🎧 Measure with a tap test</button>
       <button id="sDelEar" style="margin-top:6px">👂 Line it up by ear (in a song)</button></div>
-    <div class="field"><label>Highway speed / note spacing: <span id="sZoomV"></span></label><input type="range" id="sZoom" min="0.6" max="2" step="0.1"></div>
     <div class="field inline"><label>Accept the right note in any octave</label><input type="checkbox" id="sOct"></div>
+    </div>
+    <div class="stab" data-t="disp">
+    <div class="field"><label>Highway size</label><select id="sBig"><option value="1">Normal</option><option value="1.3">Large</option><option value="1.6">Extra large</option></select><div class="small">Makes notes, fret numbers, chord names and strum arrows bigger.</div></div>
+    <div class="field"><label>Highway speed / note spacing: <span id="sZoomV"></span></label><input type="range" id="sZoom" min="0.6" max="2" step="0.1"></div>
+    <div class="field"><label>Strums show</label><select id="sStrumView"><option value="fingers">Chord fingering (fret numbers on each string)</option><option value="arrows">Big D / U arrows</option></select></div>
     <div class="field inline"><label>Show note names instead of fret numbers</label><input type="checkbox" id="sNames"></div>
     <div class="field inline"><label>Show fretboard below the highway</label><input type="checkbox" id="sFretboard"></div>
+    <div class="small" style="margin-top:-6px">Turn off to hide it and give the highway the extra room.</div>
     <div class="field inline"><label>Finger guide</label><input type="checkbox" id="sFingerGuide"></div>
     <div class="small" style="margin:-4px 0 10px">A strip under the strings: where your hand sits, which finger plays the next note and the fingers coming up (1 index, 2 middle, 3 ring, 4 pinky, 0 open string). Works with the fretboard on or off.</div>
-    <div class="small" style="margin-top:-6px">Turn off to hide it and give the highway the extra room.</div>
+    <div class="field inline"><label>Point out dead strings in chords</label><input type="checkbox" id="sDead"></div>
+    <div class="small" style="margin-top:-6px">After you strum a chord, ✓ and ✕ by each string show which rang, and an orange ! marks a muted string that rang. A string that can’t be heard apart from another one in the chord is left unmarked.</div>
+    </div>
+    <div class="stab" data-t="snd">
     <div class="field"><label>Guitar sound (used by Listen)</label>
       <div class="row" style="margin:0"><select id="sSound" style="flex:1"></select><button id="sPreview">▶ Test</button></div>
       <span class="small" id="sSoundStatus"></span>
@@ -332,12 +345,11 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
       <select id="sFx"><option value="off">Off</option><option value="miss">Sour sound on wrong or missed notes</option><option value="all">Also play the right note when you hit it (use headphones)</option></select>
       <span class="small">Uses the guitar sound above. Without headphones the phone's mic can hear the app, so “play the right note” works best with headphones.</span></div>
     <div class="field"><label>Backing band volume: <span id="sBandV"></span></label><input type="range" id="sBandVol" min="0" max="1" step="0.05"><span class="small">Drums, bass and piano that fit what you're playing. Turn the band on or off with 🥁 Band while playing a song. Use headphones so the mic only hears your guitar.</span></div>
-    <div class="field inline"><label>Point out dead strings in chords</label><input type="checkbox" id="sDead"></div>
-    <div class="small" style="margin-top:-6px">After you strum a chord, ✓ and ✕ by each string show which rang, and an orange ! marks a muted string that rang. A string that can’t be heard apart from another one in the chord is left unmarked.</div>
     <div class="field inline"><label>I'm using headphones</label><input type="checkbox" id="sPhones"></div>
     <div class="small" style="margin-top:-6px">Turn on when the app's sound goes to headphones. The mic then can't hear the band or the hit and miss sounds, so Fretline stops making allowances for them and reacts faster to your playing.</div>
     <div class="field inline"><label>Metronome click while playing</label><input type="checkbox" id="sMetro"></div>
-    <h3 style="margin:14px 0 4px">Singing</h3>
+    </div>
+    <div class="stab" data-t="sing">
     <div class="small" style="margin-bottom:6px">Turn lyrics on or off for each song with 🎤 Sing while playing.</div>
     <div class="field inline"><label>Vocal guide: play the singing melody</label><input type="checkbox" id="sVoxOn"></div>
     <div class="field"><label>Vocal guide volume: <span id="sVoxV"></span></label><input type="range" id="sVoxVol" min="0" max="1" step="0.05"><span class="small">A flute plays the tune you sing, with or without the band. Where the melody comes from:</span></div>
@@ -345,20 +357,23 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field inline"><label>Melody and words from MIDI and MusicXML files</label><input type="checkbox" id="sVoxFile"></div>
     <div class="field inline"><label>Make up a melody for chord sheets</label><input type="checkbox" id="sVoxMade"></div>
     <div class="small" style="margin-bottom:10px">Chord sheets only have chords and words, so the app writes a tune that fits them. It won't be the song's real tune. If a song has a real tune, that's used first.</div>
-    <details class="field colors" id="sColors"><summary>🎨 Colors &amp; theme</summary>
-      <canvas id="cPrev"></canvas>
-      <div class="field"><label>App theme</label><select id="cTheme"></select></div>
-      <div class="field"><label>Colour notes by</label><select id="cNoteBy"><option value="finger">Finger (1 blue, 2 green, 3 yellow, 4 red, open grey)</option><option value="string">String</option></select></div>
-      <div class="field"><label>Note colours (by string)</label><select id="cNotes"></select>
-        <div class="swrow" id="cCustom" style="display:none;margin-top:4px"></div></div>
-      <div class="field"><label>Hit line colour</label><div class="swrow" id="cZone"></div></div>
-      <div class="field"><label>Highway background</label><select id="cHw"></select></div>
-      <div class="field"><label>Fretboard</label><select id="cFb"></select></div>
-      <button id="cReset" style="margin-bottom:6px">Reset colours</button>
-    </details>
+    </div>
+    <div class="stab" data-t="col" id="sColors">
+    <canvas id="cPrev"></canvas>
+    <div class="field"><label>App theme</label><select id="cTheme"></select></div>
+    <div class="field"><label>Colour notes by</label><select id="cNoteBy"><option value="finger">Finger (1 blue, 2 green, 3 yellow, 4 red, open grey)</option><option value="string">String</option></select></div>
+    <div class="field"><label>Note colours (by string)</label><select id="cNotes"></select>
+      <div class="swrow" id="cCustom" style="display:none;margin-top:4px"></div></div>
+    <div class="field"><label>Hit line colour</label><div class="swrow" id="cZone"></div></div>
+    <div class="field"><label>Highway background</label><select id="cHw"></select></div>
+    <div class="field"><label>Fretboard</label><select id="cFb"></select></div>
+    <button id="cReset" style="margin-bottom:6px">Reset colours</button>
+    </div>
+    <div class="stab" data-t="app">
     <div class="field" id="sAndroid" style="display:none"><a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2);font-weight:600">📱 Get the Android app</a><div class="small">Adds “Open with Fretline” for song files and downloads from links. Your saved songs stay in this browser; the app starts fresh.</div></div>
     <div class="field"><div class="row" style="margin:0;align-items:center;gap:8px"><span class="small" id="appVer" style="flex:1"></span><button id="sUpd">Check for updates</button></div>
       <span class="small" id="sUpdMsg"></span></div>
+    </div>
     <div class="row end"><button class="primary" id="sClose">Done</button></div>
   </div>
 </div>
@@ -1341,7 +1356,10 @@ function buildSong(def){
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
 const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,micId:'',backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1,sing:true,fingerGuide:true,noteBy:'finger',vocalGuide:true,vocalVol:0.7,vocalLibrary:true,vocalFiles:true,vocalMadeUp:true},store.get('settings',{}));
-function saveSettings(){store.set('settings',settings);}
+// with the Android app, the sound delay and "I'm using headphones" are kept separately for each output
+// (phone speaker, Bluetooth, wired, USB) and swapped in when the sound moves (see outRoute below)
+let outRoute=null,outName='';
+function saveSettings(){if(outRoute){(settings.soundDelays=settings.soundDelays||{})[outRoute]=settings.soundDelay;(settings.phonesBy=settings.phonesBy||{})[outRoute]=!!settings.headphones;}store.set('settings',settings);}
 // The level below which sound is treated as silence. The sensitivity setting sets the most it can be; in a quiet room
 // it drops to just above the room's own noise (measured between notes), so soft notes on a quiet phone mic still count.
 function gateMax(){return 0.04*Math.pow(0.65,settings.sens-1);}
@@ -2382,7 +2400,7 @@ function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]
 function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.notes.push(txt);}
 function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);}}
 function diagReport(){
-  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+' · band '+(settings.backing?'on':'off')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+') · '+G.hits+'/'+S.events.length];
+  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+') · '+G.hits+'/'+S.events.length];
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
     L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.grade?' · '+d.grade:'')+(d.notes.length?' · '+d.notes.join(','):''));});
@@ -2652,7 +2670,7 @@ function draw(now){
     const ts=S.events.filter(e=>!e.rest).map(e=>e.t);const gs=[];for(let j=1;j<ts.length;j++){const g=ts[j]-ts[j-1];if(g>0.06)gs.push(g);}gs.sort((a,b)=>a-b);G._gapQ=gs.length?Math.max(0.125,gs[Math.floor(gs.length*0.15)]):1;}
   // finger guide strip (and lyrics) under the strings; on short screens they get smaller, then lie over the highway
   let fgH=0,fgOver=0;if(settings.fingerGuide!==false){const room=laneBot-laneTop;const full=Math.round(88*k),small=Math.max(48,Math.round(40*k));
-    if(room-full-(settings.fretboard?10*k:0)>=6*26)fgH=full;else if(room-small>=6*16)fgH=small;else fgOver=small;if(fgH&&settings.fretboard)fgH+=Math.round(10*k);laneBot-=fgH;}
+    const fbx=settings.fretboard?10*k:0;if(room-small-fbx>=6*16)fgH=Math.round(Math.max(small,Math.min(full,room-fbx-6*21)));else fgOver=small;if(fgH&&settings.fretboard)fgH+=Math.round(10*k);laneBot-=fgH;}
   let lyrH=0,lyrOver=0;const LY=settings.sing&&songLyrics(S);if(LY){const room=laneBot-laneTop;
     if(room-Math.round(44*k)>=110)lyrH=Math.round(44*k);else if(room-Math.round(24*k)>=6*14)lyrH=Math.round(24*k);else lyrOver=Math.round(24*k);if(lyrH)lyrH+=6;laneBot-=lyrH;}const laneH=Math.max(12,(laneBot-laneTop)/6);
   const hitX=Math.max(54,Math.min(W*0.2,140));let ppb=Math.max(70,Math.min(170,W/7))*settings.zoom*Math.sqrt(k);
@@ -2947,10 +2965,13 @@ $('#cNotes').onchange=e=>{const c=colorPrefs();const v=e.target.value;
 $('#cHw').onchange=e=>setColor('highway',e.target.value);
 $('#cFb').onchange=e=>setColor('fretboard',e.target.value);
 $('#cReset').onclick=()=>saveColors(JSON.parse(JSON.stringify(DEF_COLORS)));
-$('#sColors').addEventListener('toggle',()=>{if($('#sColors').open)syncColorsUI();});
+function settingsTab(t){settings.sTab=t;document.querySelectorAll('#sTabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+  document.querySelectorAll('#settings .stab').forEach(d=>d.classList.toggle('on',d.dataset.t===t));if(t==='col')syncColorsUI();}
+document.querySelectorAll('#sTabs button').forEach(b=>b.onclick=()=>settingsTab(b.dataset.t));
+settingsTab(settings.sTab||'mic');
 // a small still of the highway so colour changes can be judged without starting a song
 function drawPreview(){
-  const c=$('#cPrev');if(!c||!$('#sColors').open)return;const r0=c.getBoundingClientRect();if(!r0.width)return;
+  const c=$('#cPrev');if(!c||!$('#sColors').classList.contains('on'))return;const r0=c.getBoundingClientRect();if(!r0.width)return;
   const dpr=Math.min(3,window.devicePixelRatio||1);c.width=Math.round(r0.width*dpr);c.height=Math.round(r0.height*dpr);
   const g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);const W=r0.width,H=r0.height;
   g.fillStyle=COL.bg;g.fillRect(0,0,W,H);
@@ -3693,7 +3714,16 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.61';
+const ROUTE_NAMES={speaker:'the phone speaker',bluetooth:'Bluetooth',wired:'wired headphones',usb:'USB audio'};
+function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.route!==outRoute;outRoute=r.route;outName=r.name||'';
+  const D=settings.soundDelays||{},P=settings.phonesBy||{};
+  if(D[outRoute]!=null)settings.soundDelay=D[outRoute];else if(outRoute==='speaker'&&changed)settings.soundDelay=-1; // speaker: measure automatically until set
+  settings.headphones=P[outRoute]!=null?P[outRoute]:outRoute!=='speaker';
+  saveSettings();if(typeof syncSettingsUI==='function'&&settingsOpen)syncSettingsUI();if(typeof bandSeek==='function')bandSeek();if(typeof syncLsVal==='function')syncLsVal();
+  if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
+(async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
+  applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
+const APP_VERSION='1.62';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

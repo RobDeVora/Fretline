@@ -2,6 +2,8 @@ package com.robdevora.fretline;
 
 import android.Manifest;
 import android.content.Context;
+import android.media.AudioAttributes;
+import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
@@ -22,6 +24,7 @@ import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.nio.ByteOrder;
 
 /**
@@ -47,6 +50,68 @@ public class NativeMicPlugin extends Plugin {
     private String wantType = "builtin", wantName = null;
     private boolean commRoute = false; // we switched Bluetooth into headset (call) mode for its mic
     private JSObject info = new JSObject();
+
+    // ---- where the app's sound is going (speaker, Bluetooth, wired, USB), so the page can keep a sound delay for each
+    private AudioDeviceCallback routeCb;
+    private String lastRoute = null;
+
+    @Override
+    public void load() {
+        AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        routeCb = new AudioDeviceCallback() {
+            @Override public void onAudioDevicesAdded(AudioDeviceInfo[] d) { routeChanged(); }
+            @Override public void onAudioDevicesRemoved(AudioDeviceInfo[] d) { routeChanged(); }
+        };
+        try { am.registerAudioDeviceCallback(routeCb, new android.os.Handler(android.os.Looper.getMainLooper())); } catch (Exception ignored) { }
+    }
+
+    private void routeChanged() {
+        // the route settles a moment after a device connects or disconnects
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            JSObject r = outputInfo();
+            String k = r.getString("route") + "|" + r.getString("name");
+            if (!k.equals(lastRoute)) { lastRoute = k; notifyListeners("route", r); }
+        }, 600);
+    }
+
+    private static String outKind(AudioDeviceInfo d) {
+        switch (d.getType()) {
+            case AudioDeviceInfo.TYPE_BLUETOOTH_A2DP: case AudioDeviceInfo.TYPE_BLUETOOTH_SCO: return "bluetooth";
+            case 26: case 27: case 30: return "bluetooth"; // BLE headset / speaker / broadcast
+            case AudioDeviceInfo.TYPE_WIRED_HEADPHONES: case AudioDeviceInfo.TYPE_WIRED_HEADSET: return "wired";
+            case AudioDeviceInfo.TYPE_USB_HEADSET: case AudioDeviceInfo.TYPE_USB_DEVICE: case AudioDeviceInfo.TYPE_USB_ACCESSORY: return "usb";
+            case AudioDeviceInfo.TYPE_BUILTIN_SPEAKER: case AudioDeviceInfo.TYPE_BUILTIN_EARPIECE: return "speaker";
+            default: return null;
+        }
+    }
+
+    private JSObject outputInfo() {
+        AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        AudioDeviceInfo best = null;
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                AudioAttributes aa = new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build();
+                List<AudioDeviceInfo> ds = am.getAudioDevicesForAttributes(aa);
+                for (AudioDeviceInfo d : ds) if (outKind(d) != null) { best = d; break; }
+            }
+        } catch (Exception ignored) { }
+        if (best == null) {
+            // older Android: headphones win over the speaker (Bluetooth, then wired, then USB)
+            int rank = 99;
+            for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                String k = outKind(d); if (k == null) continue;
+                int rk = k.equals("bluetooth") ? 0 : k.equals("wired") ? 1 : k.equals("usb") ? 2 : 3;
+                if (rk < rank) { rank = rk; best = d; }
+            }
+        }
+        JSObject r = new JSObject();
+        r.put("route", best != null ? outKind(best) : "speaker");
+        r.put("name", best != null && best.getProductName() != null && best.getType() != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ? best.getProductName().toString() : "");
+        return r;
+    }
+
+    @PluginMethod
+    public void outputRoute(PluginCall call) { JSObject r = outputInfo(); lastRoute = r.getString("route") + "|" + r.getString("name"); call.resolve(r); }
 
     @PluginMethod
     public void start(PluginCall call) {

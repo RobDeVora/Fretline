@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, v1.61)
+# Fretline: session handoff (18 Nov 2026, v1.62 + new APK)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -278,6 +278,20 @@ fretboard) that anticipates the following notes, and said notes move too fast to
 - Finger guide strip up to 88k tall when the strings keep 26+ px each, so the hand is about twice the size in
   landscape with the fretboard off.
 - Possible next step: hide Android's status bar during play (immersive mode) in the app for a little more height.
+
+## v1.62 (needs the new APK for the last two)
+
+- Hand still small on the owner's phone: their app screen is ~838x381 CSS with bars, canvas ~310 tall, and the
+  strip only went full size if strings kept 26 px. Now the strip height is continuous: as tall as fits while each
+  string keeps 21 px (`room-fbx-6*21`, between slim and 88k).
+- Settings in tabs (`#sTabs`, `.stab`, `settingsTab()`, remembers `settings.sTab`): Mic & timing / Display /
+  Sound / Singing / Colours (the old <details> is now a tab, id `sColors` kept, `.on` instead of `.open`) / App.
+- APK: `MainActivity.hideSystemBars()` — immersive (status + nav bars hidden, swipe from an edge shows them for a
+  moment), re-applied on focus/resume. Cutout mode left at default (content avoids the camera hole).
+- APK: `NativeMicPlugin` reports the media output route (`outputRoute()`, `route` events via AudioDeviceCallback;
+  Android 13+ uses getAudioDevicesForAttributes, older picks Bluetooth > wired > USB > speaker). The page keeps
+  `settings.soundDelays[route]` and `settings.phonesBy[route]` (written in `saveSettings`), swaps them in
+  `applyRoute`, shows a hint on change; speaker starts on "auto" until set. Report shows `output …`.
 
 ## Idea: play along with an MP3
 
