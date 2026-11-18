@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, v1.66 + APK from v1.63)
+# Fretline: session handoff (18 Nov 2026, v1.67 + APK from v1.63)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -340,6 +340,19 @@ the raw `det.midi` right at a pick) really there (score >= 0.6):
 Sim: one-note runs G3 1/34, D5 4/34 (exact), D4 4/34 (2 false: first note of the song, one D5); correct 33/34;
 fretboard sweeps A/G/e 18/18; wrong-note sweep 0; song sim 17/17. Sympathetic strings aren't in the sim (samples
 are single notes), so the owner's phone is the real test for that case.
+
+## v1.67: two-note steps need both notes
+
+Owner played E0+A2 (E2+B2) through "Boogie shuffle in E" (all steps are two notes) and got 71/96: steps with 2
+notes go through the single-note matcher (`isChordEv` is 3+ notes or a chord), whose `e.notes.some(...)` accepted
+either note, and the low E is in every E step. Now `partnerOk(e, base)`: every other note must stand out on its own
+overtones that don't land on the base note's — all of them, or the lowest three (A2's 2nd at 220 Hz is what tells)
+— with at least 20% of the base note's strength. Used in path 1 (base = the note the tracker hears) and at the end
+of path 2 (base = best-scoring note; checked after the strength history is updated, or rises are never seen).
+Also in path 2: if the tracker clearly hears a note in neither, each note must stand out against it on its own.
+Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly the E+B steps (old code 56/64).
+Known leak: E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
+requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
 
 ## Idea: play along with an MP3
 

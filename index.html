@@ -2328,6 +2328,18 @@ function hitWindow(e,b,gap){
 }
 function evKey(e){return e.chord?'c:'+e.chord:'n:'+e.notes.map(n=>n.midi).join(',');}
 function firstPending(){for(let i=G.scan;i<G.song.events.length;i++)if(!G.state[i])return i;return -1;}
+/* Two notes at once (a double stop, a power chord's two strings): the note the tracker hears is one of them, and the
+   other must really sound too. Judged on the other note's overtones that don't land on the first one's (so a low E's
+   own overtones can't pass for the B or C# above it); it must stand out from its neighbours and be reasonably strong. */
+function partnerOk(e,base,cp){if(e.notes.length<2)return true;const sr=actx.sampleRate,bm=base.midi+cp,fb=midiToFreq(bm);const bT=targetInfo(base,cp).T||1e-9;
+  for(const n of e.notes){if(n===base)continue;const tm=n.midi+cp,ft=midiToFreq(tm);
+    const hs=[1,2,3,4,5,6,7,8].filter(x=>{const f=ft*x,k=Math.round(f/fb);return !(k>=1&&Math.abs(f-k*fb)/f<0.015);});
+    if(!hs.length){if(targetScore(n,cp)<0.55)return false;continue;}
+    // its lowest unshared overtones are the telling ones (A2's 2nd at 220 Hz is strong when it's played, absent if not)
+    // (either all of them or just the lowest three must clearly stand out)
+    const i1={},i2={};const s1=targetScoreBuf(timeBuf,sr,tm,hs,i1),s2=targetScoreBuf(timeBuf,sr,tm,hs.filter(x=>ft*x>=150).slice(0,3),i2);
+    if(!((s1>=0.6&&(i1.T||0)>=0.2*bT)||(s2>=0.6&&(i2.T||0)>=0.2*bT)))return false;}
+  return true;}
 function matchEvent(e,i,now){
   if(e.strum){if(det.onsetAt>G.usedOnset&&det.onsetAt>(G.ignoreOnsetUntil||0)&&now-det.onsetAt<300*(settings.timing||1)){G.usedOnset=det.onsetAt;return true;}return false;}
   const key=evKey(e);
@@ -2347,13 +2359,14 @@ function matchEvent(e,i,now){
   //    A reading is confirmed by the targeted check (the tracker can report a note that isn't there when two
   //    notes ring together). An octave reading only counts if it's confirmed more strongly: the expected note itself is clearly there, or the octave
   //    note really is (two notes ringing together can make the tracker report a phantom note an octave down)
-  if(m!=null&&fresh&&e.notes.some(n=>noteOk(n,m,cp)&&(((m===n.midi+cp||(n.bend&&m>n.midi+cp&&m<=n.midi+cp+n.bend))&&targetScore(n,cp)>=0.45)||targetScore(n,cp)>=0.55||targetScore({midi:m-cp},cp)>=0.7)))return true;
+  if(m!=null&&fresh&&e.notes.some(n=>noteOk(n,m,cp)&&(((m===n.midi+cp||(n.bend&&m>n.midi+cp&&m<=n.midi+cp+n.bend))&&targetScore(n,cp)>=0.45)||targetScore(n,cp)>=0.55||targetScore({midi:m-cp},cp)>=0.7)&&partnerOk(e,n,cp)))return true;
   // 2) or the note is clearly present even though something else rang too (e.g. a grazed second string, or the
   //    previous note still ringing). It must have just been played: its strength has to jump compared with the
   //    moment before (a note that was already ringing, or an open string humming along, doesn't jump).
   if(!analyser)return false;
   if(G.tcIdx!==i){G.tcIdx=i;G.tcf=0;G.tHist=[];G.tRiseAt=null;}
-  let ti={score:0,T:0},tm=null;for(const n of e.notes){const x=targetInfo(n,cp);if(x.score>ti.score){ti=x;tm=n.midi+cp;}}
+  let ti={score:0,T:0},tm=null,tn=null;for(const n of e.notes){const x=targetInfo(n,cp);if(x.score>ti.score){ti=x;tm=n.midi+cp;tn=n;}}
+
   // ...unless the pitch tracker hears a different note that's really there (its odd overtones stand out, so it
   // isn't a phantom), and the expected note is just one of its overtones (G3 rings at D5, its 3rd) or much weaker
   // than it (an open string humming in sympathy). A played note is at least half as strong as what's ringing.
@@ -2388,7 +2401,13 @@ function matchEvent(e,i,now){
   const before=hist.filter(h=>h.at<=now-60&&h.at>=now-450).map(h=>h.T);
   const repick=evKey(e)===G.lastHitKey&&det.onsetAt>G.lastHitAt&&now-det.onsetAt<350;
   const rose=(before.length>=3&&ti.T>=2.5*Math.min(...before)+1e-9)||repick;
-  if(ti.score>=0.63&&(rose||legato)){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){G.tHist=[];return true;}return false;}
+  // two notes at once, while the tracker clearly hears a note that's in neither: each of them has to stand out on its
+  // own against that note (E3 is only E2's octave, so it can't, and the step isn't credited)
+  if(e.notes.length>1&&mh!=null&&!e.notes.some(n=>noteOk(n,mh,cp))){const mi=targetInfo({midi:mh-cp},cp);
+    if(mi.score>=0.6){const fm=midiToFreq(mh);for(const n of e.notes){const t=n.midi+cp,ft=midiToFreq(t);
+      const hs=[1,2,3,4,5,6,7,8].filter(x=>{const f=ft*x,k=Math.round(f/fm);return ft*x>=150&&!(k>=1&&Math.abs(f-k*fm)/f<0.015);}).slice(0,4);
+      const inf={};const sc=hs.length?targetScoreBuf(timeBuf,actx.sampleRate,t,hs,inf):0;if(sc<0.6||(inf.T||0)<0.2*mi.T){G.tcf=0;G.tRiseAt=null;return false;}}}}
+  if(ti.score>=0.63&&(rose||legato)&&(!tn||e.notes.length<2||partnerOk(e,tn,cp))){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){G.tHist=[];return true;}return false;}
   G.tcf=0;G.tRiseAt=null;return false;
 }
 // the right pitch (any octave if allowed); a bent note counts anywhere from the fretted pitch up to its target
@@ -3794,7 +3813,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.66';
+const APP_VERSION='1.67';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
