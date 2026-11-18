@@ -1,0 +1,18 @@
+# Manual: copies the Demucs htdemucs_6s ONNX model (MIT, facebookresearch/demucs; SonicDemixer export) into the
+# "lab-model" release, so test sessions that can't reach Hugging Face can fetch it from GitHub.
+name: Mirror Lab model
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fL --retry 5 -o htdemucs_6s.onnx https://huggingface.co/smank/htdemucs-onnx/resolve/main/htdemucs_6s.onnx
+          ls -l htdemucs_6s.onnx
+          gh release delete lab-model -R "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create lab-model htdemucs_6s.onnx -R "$GITHUB_REPOSITORY" --prerelease --title "Lab model mirror (Demucs htdemucs_6s, MIT)" --notes "For tests only. The app downloads from Hugging Face."
