@@ -70,6 +70,11 @@ const $=id=>document.getElementById(id);const logEl=$('log');const R=[];
 function log(s){R.push(s);logEl.textContent=R.join('\n');logEl.scrollTop=1e9;}
 function status(s){$('status').textContent=s;}
 function prog(f){$('prog').style.width=Math.round(f*100)+'%';}
+/* the Android app (from v1.79's APK) has a native separator: same model, ONNX Runtime for Android on several cores */
+const NS=(()=>{try{const C=window.Capacitor;if(!C||!C.Plugins||!C.Plugins.NativeSeparator)return null;if(C.isPluginAvailable&&!C.isPluginAvailable('NativeSeparator'))return null;return C.Plugins.NativeSeparator;}catch(e){return null;}})();
+if(NS){const o=document.createElement('option');o.value='native';o.textContent='Phone app, all cores (fastest)';$('be').insertBefore(o,$('be').firstChild);$('be').value='native';}
+function f32ToB64(a){const u=new Uint8Array(a.buffer,a.byteOffset,a.byteLength);let s='';for(let i=0;i<u.length;i+=0x8000)s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(s);}
+function b64ToF32(b){const s=atob(b),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return new Float32Array(u.buffer);}
 const CON=[];['log','warn','error'].forEach(k=>{const o=console[k].bind(console);console[k]=(...a)=>{try{CON.push(k+': '+a.map(x=>String(x&&x.message||x)).join(' ').slice(0,200));if(CON.length>12)CON.shift();}catch(e){}o(...a);};});
 window.addEventListener('error',e=>{CON.push('page error: '+(e.message||e));});window.addEventListener('unhandledrejection',e=>{CON.push('rejection: '+String(e.reason&&e.reason.message||e.reason).slice(0,200));});
 logEl.onclick=()=>{try{navigator.clipboard.writeText(R.join('\n'));status('Report copied.');}catch(e){}};
@@ -180,6 +185,18 @@ $('go').onclick=async()=>{
     log('device: '+navigator.userAgent.replace(/\s+/g,' ').slice(0,160));
     log('cores '+(navigator.hardwareConcurrency||'?')+' · memory '+(navigator.deviceMemory?navigator.deviceMemory+' GB':'?')+' · WebGPU '+(('gpu' in navigator)?'present':'absent')+' · threads '+(self.crossOriginIsolated?'yes (cross-origin isolated)':'no (single thread)'));
     log('service worker: '+(navigator.serviceWorker&&navigator.serviceWorker.controller?'in charge':'not in charge')+' · reload done '+(sessionStorage.getItem('labReload')?'yes':'no'));
+    let native=null;
+    if($('be').value==='native'&&NS){try{
+      const st=await NS.status({});log('native: '+st.cores+' cores · model on the phone '+(st.modelBytes/1e6).toFixed(0)+' MB');
+      const want=EXPECT.sonic;let ls=null; /* the app always uses the SonicDemixer build */
+      if(!(st.modelBytes>=want*0.97)){log('native: downloading the model into the app\'s own storage (kept when the cache is cleared)');
+        ls=await NS.addListener('progress',e=>{prog(Math.min(0.3,e.got/(e.total||want)*0.3));status('Downloading the model… '+Math.round(e.got/1e6)+' / ~'+Math.round((e.total||want)/1e6)+' MB');if(e.note)log('native: '+e.note);});}
+      const pm=await NS.prepareModel({url:MODELS.sonic,name:'htdemucs_6s.onnx',expectBytes:want});try{ls&&ls.remove&&ls.remove();}catch(e){}
+      log('native: model '+(pm.downloaded?'downloaded':'ready')+' ('+(pm.bytes/1e6).toFixed(0)+' MB)');
+      status('Loading the model on all cores…');const ld=await NS.load({path:pm.path});
+      log('native: ready in '+(ld.ms/1000).toFixed(1)+' s on '+ld.threads+' threads · in '+ld.input+' → out '+ld.outputs);native=ld;
+    }catch(e){log('native: not usable ('+String(e&&e.message||e).slice(0,160)+'), using the web runtime');native=null;}}
+    if(!native){
     status('Loading the AI runtime…');
     if(!window.ort)await loadScript(ORT_BASE+'ort.webgpu.min.js');
     ort.env.wasm.wasmPaths=ORT_BASE;ort.env.wasm.numThreads=self.crossOriginIsolated?Math.min(6,navigator.hardwareConcurrency||2):1;log('processor threads: '+ort.env.wasm.numThreads);
@@ -188,12 +205,14 @@ $('go').onclick=async()=>{
     let model=await getModel(MODELS[$('mdl').value]);const lean=$('lean').value;const cpuNames=cpuNodeNames(model);log('model: '+cpuNames.length+' normalisation steps kept on the processor when using the graphics chip');
     log('loading: '+lean+' · runtime '+ORT_VER);ort.env.logLevel='warning';
     status('Starting the model…');
-    let session=null,used='';const want=$('be').value;
+    let session=null,used='';const want=$('be').value==='native'?'wasm':$('be').value;
     const opts=ep=>Object.assign({executionProviders:[ep==='webgpu'&&cpuNames.length?{name:'webgpu',forceCpuNodeNames:cpuNames}:ep],graphOptimizationLevel:lean==='lean'?'disabled':lean,executionMode:'sequential',logSeverityLevel:2},lean==='all'?{}:{enableCpuMemArena:false,enableMemPattern:false});
-    let gpuLost=0,gpuFresh=false;const tryEp=async(ep,mm)=>{const ts=performance.now();status('Loading the model into the '+(ep==='webgpu'?'graphics chip':'processor')+'…');const s=await ort.InferenceSession.create(mm||model||await getModel(MODELS[$('mdl').value]),opts(ep));log('runtime: '+ep+' ready in '+((performance.now()-ts)/1000).toFixed(1)+' s');return s;};
+    const tryEp=async(ep,mm)=>{const ts=performance.now();status('Loading the model into the '+(ep==='webgpu'?'graphics chip':'processor')+'…');const s=await ort.InferenceSession.create(mm||model||await getModel(MODELS[$('mdl').value]),opts(ep));log('runtime: '+ep+' ready in '+((performance.now()-ts)/1000).toFixed(1)+' s');return s;};
     if(want==='auto'&&('gpu' in navigator)){try{session=await tryEp('webgpu');used='webgpu';}catch(e){log('runtime: graphics chip not usable ('+String(e.message||e).slice(0,140)+'), using the processor');}}
     if(!session){session=await tryEp('wasm');used='wasm';}
     model=null; /* the runtime has its own copy now */
+    var S_=session,U_=used,T_=tryEp;}
+    let session=native?null:S_,used=native?'native':U_;const tryEp=native?null:T_;let gpuLost=0,gpuFresh=false;
     status('Reading the audio…');
     const secs=+$('secs').value;const [L,Rc]=await decode($('file').files[0],secs);const N=L.length;
     log('audio: '+(N/SR).toFixed(1)+' s'+(secs?' (first '+secs+' s)':' (whole file)'));
@@ -205,7 +224,10 @@ $('go').onclick=async()=>{
     const inp=new Float32Array(2*SEG);const times=[];
     for(let c=0;c<nCh;c++){
       const st=c*stride;inp.fill(0);for(let i=0;i<SEG&&st+i<N;i++){inp[i]=(L[st+i]-mean)/sd;inp[SEG+i]=(Rc[st+i]-mean)/sd;}
-      const tc=performance.now();let res=null,ot=null;
+      const tc=performance.now();let res=null,ot=null,G=null,B=null;
+      if(native){let r=null;for(let k=0;;k++){try{r=await NS.run({mix:f32ToB64(inp),n:SEG});break;}catch(e){if(k>=1)throw e;log('part '+(c+1)+': native run failed ('+String(e&&e.message||e).slice(0,120)+'), trying again');}}
+        G=b64ToF32(r.guitar);B=b64ToF32(r.band);if(c===0)log('model: native part took '+(r.ms/1000).toFixed(1)+' s inside the app');}
+      else{
       const rebuild=async ep=>{try{session.release&&await session.release();}catch(_){}const m2=await getModel(MODELS[$('mdl').value]);session=await tryEp(ep,m2);used=ep;};
       if(used==='webgpu'&&gpuFresh)await rebuild('webgpu');
       for(let tries=0;!ot;tries++){
@@ -217,19 +239,20 @@ $('go').onclick=async()=>{
           if(gpuLost>6||tries>=2){log('graphics chip keeps resetting: finishing on the processor');await rebuild('wasm');}
           else{gpuFresh=true;try{await rebuild('webgpu');}catch(e2){log('graphics chip unusable now, switching to the processor');await rebuild('wasm');}}
           await new Promise(z=>setTimeout(z,300));}}
-      const dt=performance.now()-tc;times.push(dt);
       if(c===0)log('model: in '+session.inputNames.join(',')+' → out '+session.outputNames.join(',')+' '+JSON.stringify(ot.dims));const S=ot.data;/* [1,6,2,SEG] */
-      for(let i=0;i<SEG&&st+i<N;i++){const w=W[i];ws[st+i]+=w;
-        for(let ch=0;ch<2;ch++){let rest=0;for(let k=0;k<6;k++){const v=S[(k*2+ch)*SEG+i];if(k===GTR){if(ch===0)gL[st+i]+=w*v;else gR[st+i]+=w*v;}else rest+=v;}
-          if(ch===0)rL[st+i]+=w*rest;else rR[st+i]+=w*rest;}}
-      if(ot.dispose)ot.dispose();
+      G=new Float32Array(2*SEG);B=new Float32Array(2*SEG);
+      for(let ch=0;ch<2;ch++)for(let k=0;k<6;k++){const o=(k*2+ch)*SEG,q=ch*SEG;if(k===GTR)for(let i=0;i<SEG;i++)G[q+i]=S[o+i];else for(let i=0;i<SEG;i++)B[q+i]+=S[o+i];}
+      if(ot.dispose)ot.dispose();}
+      const dt=performance.now()-tc;times.push(dt);
+      for(let i=0;i<SEG&&st+i<N;i++){const w=W[i];ws[st+i]+=w;gL[st+i]+=w*G[i];gR[st+i]+=w*G[SEG+i];rL[st+i]+=w*B[i];rR[st+i]+=w*B[SEG+i];}
       prog(0.3+0.4*(c+1)/nCh);status('Splitting… part '+(c+1)+' of '+nCh+' ('+(dt/1000).toFixed(1)+' s for 7.8 s of audio)');
-      log('part '+(c+1)+'/'+nCh+': '+(dt/1000).toFixed(1)+' s'+(used==='webgpu'?' (graphics chip)':' (processor)'));}
+      log('part '+(c+1)+'/'+nCh+': '+(dt/1000).toFixed(1)+' s'+(used==='webgpu'?' (graphics chip)':used==='native'?' (all cores)':' (processor)'));}
     for(let i=0;i<N;i++){const w=ws[i]||1;gL[i]=gL[i]/w*sd+mean;gR[i]=gR[i]/w*sd+mean;rL[i]=rL[i]/w*sd+5*mean;rR[i]=rR[i]/w*sd+5*mean;}
     const tot=times.reduce((a,b)=>a+b,0)/1000;
     log('done on '+used+(gpuLost?' (graphics chip reset '+gpuLost+'×)':'')+': '+tot.toFixed(1)+' s of model time for '+(N/SR).toFixed(1)+' s of audio ('+(tot/(N/SR)).toFixed(2)+'× the song length); whole run '+((performance.now()-t0)/1000).toFixed(1)+' s');
     let eg=0,er=0;for(let i=0;i<N;i++){eg+=gL[i]*gL[i]+gR[i]*gR[i];er+=rL[i]*rL[i]+rR[i]*rR[i];}
     log('guitar share of the sound: '+(100*eg/(eg+er||1)).toFixed(0)+'%');
+    window.__labBufs={gL,gR,rL,rR,L,Rc};
     const bg=wav(gL,gR),br=wav(rL,rR);$('aGtr').src=URL.createObjectURL(bg);$('dGtr').href=$('aGtr').src;$('aRest').src=URL.createObjectURL(br);$('dRest').href=$('aRest').src;
     $('out').style.display='';
     if($('mk').checked){try{await makeSong(gL,gR,L,Rc,rL,rR,N);}catch(e){log('song: could not make one ('+(e.message||e)+')');}}

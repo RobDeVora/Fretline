@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.78, Android app from the v1.63 build)
+# Fretline: session handoff (18 Nov 2026, web v1.79, Android app rebuilt for v1.79 with the native separator)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,31 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.79: native Demucs in the APK (all cores)
+
+Phase 2 of the owner's request ("build it into the browser and then create the new APK ... get full use of those
+cores"). The WebView can never be cross-origin isolated, so onnxruntime-web is stuck on one thread there; the APK now
+has its own separator.
+- **`NativeSeparatorPlugin.java`** (`@CapacitorPlugin(name="NativeSeparator")`, registered in MainActivity;
+  `com.microsoft.onnxruntime:onnxruntime-android:1.22.0` in app/build.gradle; `ndk.abiFilters arm64-v8a, armeabi-v7a`
+  to keep the APK small). Methods: `status()` → {available, cores, modelBytes, loaded, threads};
+  `prepareModel({url,name,expectBytes})` downloads to **`filesDir/models/`** (app storage: survives "Clear cache";
+  `.part` file, HTTP Range resume, 6 tries, never kept if < 97% of expected; "progress" events {got,total,note});
+  `load({path,threads})` (default min(6, cores-1) intra-op threads, EXTENDED_OPT); `run({mix: base64 LE float32 [2·n]
+  planar, n})` → {guitar, band (sum of the other 5 stems), ms}, both base64 [2·n]; `unload()`. All work on one
+  background thread. Compile-checked with javac against stub classes (Maven isn't reachable from the workspace); the
+  real build is CI.
+- **Lab**: when `Capacitor.Plugins.NativeSeparator` is present, "Run on" gains "Phone app, all cores (fastest)" as
+  the default; the web runtime isn't even loaded. Any native failure before the first part (status/download/load)
+  falls back to the web runtime; a run error is retried once. Chunk accumulation is now runner-agnostic (each runner
+  yields guitar G and band B as [2·SEG] planar). Report lines start with `native:`. `window.__labBufs` exposes the
+  results for tests.
+- Tests: `tools/lab-tests/native.py <audio> [fail]` (fake plugin: guitar = 0.3×, band = 0.7× input; exact to 5e-8;
+  `fail` checks the fallback). mt.py and e2e.py unchanged (64/64 notes, sync 5 ms).
+- **Open (reported on v1.78/1.79, not yet fixed):** a song made from the 30 s "Thought You Should Know" clip plays
+  "very very sped up" in the main app while the backing band sounds right. Tempo detection gives ~140 BPM for that
+  clip (176 steps in 30 s). Investigate next.
 
 ## v1.78: songs from a recording (Lab) with the band as backing
 

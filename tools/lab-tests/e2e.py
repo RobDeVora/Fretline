@@ -8,8 +8,6 @@ with sync_playwright() as p:
   d=pg.evaluate('window.__labSong');print('bpm',d['bpm'],'offset',round(d['recOffset'],3))
   riff=[40,40,52,40,45,45,47,50];truth={(m,b*4+k*0.5) for b in range(8) for k,m in enumerate(riff)}
   got={(n['midi'],n['beat']) for n in d['recNotes']}
-  ex=sorted([n for n in d['recNotes'] if (n['midi'],n['beat']) not in truth],key=lambda n:n['beat'])[:10];re_=sorted([n for n in d['recNotes'] if (n['midi'],n['beat']) in truth],key=lambda n:n['beat'])[:10]
-  print('extras',[(n['midi'],n['ts'],n['v'],n['dur']) for n in ex]);print('real',[(n['midi'],n['ts'],n['v'],n['dur']) for n in re_])
   print('riff notes found at the right beat:',len(truth&got),'/',len(truth),'· extra notes:',len(got-truth),'· examples of extras:',sorted(got-truth,key=lambda x:x[1])[:8])
   # open in the main app and Listen with the backing
   pg.goto('http://localhost:8769/index.html');pg.wait_for_timeout(1500)

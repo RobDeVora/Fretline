@@ -26,6 +26,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(IncomingPlugin.class);
         registerPlugin(NativeMicPlugin.class);
+        registerPlugin(NativeSeparatorPlugin.class);
         super.onCreate(savedInstanceState);
         hideSystemBars();
         getWindow().getDecorView().post(this::hideSystemBars); // again once the window is attached
