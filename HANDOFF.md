@@ -388,6 +388,12 @@ jsdelivr (WebGPU, falls back to WASM; single thread on GitHub Pages: no cross-or
 guitar, piano); mono mean/std normalisation, 25% overlap, triangular blend; outputs guitar and "band without guitar"
 as WAV players/downloads; report = per-chunk times, backend, guitar share. Tested in headless Chrome with a stand-in
 ONNX of the same shape (the workspace can't reach Hugging Face): blending exact (max error 0), GPU→WASM fallback works.
+Owner's first phone run (SM-S948U1, Android 17 WebView, 8 cores, 8 GB, WebGPU present, single thread): model from
+cache, then `Aborted()` while creating the session, with both models and both backends: almost certainly the wasm heap
+running out while loading (fp16 weights are expanded to fp32; 'all' optimisation folds the casts into a second full
+copy, plus memory arenas). Fix: runtime 1.31.1; "Loading" option, default **lean** = graphOptimizationLevel
+'disabled', no CPU arena / memory pattern, sequential; model copy released after load; ORT console messages and page
+errors captured into the report. An abort poisons the runtime: reload before trying another setting.
 **Needs:** owner to run it on the phone (30 s first) and send the report + say how the guitar track sounds. Then:
 Basic Pitch (`@spotify/basic-pitch`, model inside the npm package) on the guitar stem → draft song; backing track =
 band without guitar.

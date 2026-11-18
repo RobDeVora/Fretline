@@ -31,6 +31,8 @@ the phone. The model is downloaded once (about 136 MB, so use Wi-Fi) and kept fo
     <div><label for="secs">How much</label><select id="secs"><option value="30">First 30 s (quick test)</option><option value="60">First 60 s</option><option value="0">Whole song</option></select></div>
     <div><label for="be">Run on</label><select id="be"><option value="auto">Graphics chip if possible</option><option value="wasm">Processor only</option></select></div>
   </div>
+  <label for="lean">Loading</label>
+  <select id="lean"><option value="lean">Lean: least memory (try this first)</option><option value="basic">Some optimising</option><option value="all">Fully optimised (needs the most memory)</option></select>
   <label for="mdl">Model</label>
   <select id="mdl"><option value="fp16">Half-size download (136 MB)</option><option value="fp32">Full (258 MB)</option></select>
   <button id="go" disabled>Split it</button>
@@ -50,7 +52,7 @@ the phone. The model is downloaded once (about 136 MB, so use Wi-Fi) and kept fo
    Massa & Défossez, ICASSP 2023). Input "mix" [1,2,343980] (7.8 s stereo at 44.1 kHz), output "stems"
    [1,6,2,343980] in the order drums, bass, other, vocals, guitar, piano. Chunks overlap by a quarter and are blended
    with a triangular weight (as Demucs' own apply_model does); the mix is normalised by the mono mean/std first. */
-const ORT_VER='1.20.1';
+const ORT_VER='1.31.1';
 const ORT_BASE=`https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VER}/dist/`;
 const MODELS={fp16:'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx',
               fp32:'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s.onnx'};
@@ -59,6 +61,8 @@ const $=id=>document.getElementById(id);const logEl=$('log');const R=[];
 function log(s){R.push(s);logEl.textContent=R.join('\n');logEl.scrollTop=1e9;}
 function status(s){$('status').textContent=s;}
 function prog(f){$('prog').style.width=Math.round(f*100)+'%';}
+const CON=[];['log','warn','error'].forEach(k=>{const o=console[k].bind(console);console[k]=(...a)=>{try{CON.push(k+': '+a.map(x=>String(x&&x.message||x)).join(' ').slice(0,200));if(CON.length>12)CON.shift();}catch(e){}o(...a);};});
+window.addEventListener('error',e=>{CON.push('page error: '+(e.message||e));});window.addEventListener('unhandledrejection',e=>{CON.push('rejection: '+String(e.reason&&e.reason.message||e.reason).slice(0,200));});
 logEl.onclick=()=>{try{navigator.clipboard.writeText(R.join('\n'));status('Report copied.');}catch(e){}};
 $('file').onchange=()=>{$('go').disabled=!$('file').files.length;status($('file').files.length?'Ready.':'Choose a file.');};
 
@@ -92,12 +96,15 @@ $('go').onclick=async()=>{
     status('Loading the AI runtime…');
     if(!window.ort)await loadScript(ORT_BASE+'ort.webgpu.min.js');
     ort.env.wasm.wasmPaths=ORT_BASE;ort.env.wasm.numThreads=self.crossOriginIsolated?Math.min(4,navigator.hardwareConcurrency||2):1;
-    const model=await getModel(MODELS[$('mdl').value]);
+    let model=await getModel(MODELS[$('mdl').value]);const lean=$('lean').value;
+    log('loading: '+lean+' · runtime '+ORT_VER);ort.env.logLevel='warning';
     status('Starting the model…');
     let session=null,used='';const want=$('be').value;
-    const tryEp=async ep=>{const ts=performance.now();const s=await ort.InferenceSession.create(model,{executionProviders:[ep],graphOptimizationLevel:'all'});log('runtime: '+ep+' ready in '+((performance.now()-ts)/1000).toFixed(1)+' s');return s;};
+    const opts=ep=>Object.assign({executionProviders:[ep],graphOptimizationLevel:lean==='lean'?'disabled':lean,executionMode:'sequential',logSeverityLevel:2},lean==='all'?{}:{enableCpuMemArena:false,enableMemPattern:false});
+    const tryEp=async ep=>{const ts=performance.now();status('Loading the model into the '+(ep==='webgpu'?'graphics chip':'processor')+'…');const s=await ort.InferenceSession.create(model,opts(ep));log('runtime: '+ep+' ready in '+((performance.now()-ts)/1000).toFixed(1)+' s');return s;};
     if(want==='auto'&&('gpu' in navigator)){try{session=await tryEp('webgpu');used='webgpu';}catch(e){log('runtime: graphics chip not usable ('+String(e.message||e).slice(0,140)+'), using the processor');}}
     if(!session){session=await tryEp('wasm');used='wasm';}
+    model=null; /* the runtime has its own copy now */
     status('Reading the audio…');
     const secs=+$('secs').value;const [L,Rc]=await decode($('file').files[0],secs);const N=L.length;
     log('audio: '+(N/SR).toFixed(1)+' s'+(secs?' (first '+secs+' s)':' (whole file)'));
@@ -124,7 +131,7 @@ $('go').onclick=async()=>{
     log('guitar share of the sound: '+(100*eg/(eg+er||1)).toFixed(0)+'%');
     const bg=wav(gL,gR),br=wav(rL,rR);$('aGtr').src=URL.createObjectURL(bg);$('dGtr').href=$('aGtr').src;$('aRest').src=URL.createObjectURL(br);$('dRest').href=$('aRest').src;
     $('out').style.display='';status('Done. Listen below, then tap the report to copy it.');window.__labDone={used,tot,N,parts:nCh};
-  }catch(e){log('ERROR: '+(e&&e.message||e));status('Something went wrong: '+(e&&e.message||e));window.__labDone={error:String(e&&e.message||e)};}
+  }catch(e){log('ERROR: '+(e&&e.message||e));if(CON.length)log('runtime messages:\n  '+CON.join('\n  '));log('(after an error like this, reload the page before trying another setting)');status('Something went wrong: '+(e&&e.message||e));window.__labDone={error:String(e&&e.message||e)};}
   $('go').disabled=false;};
 </script>
 </body>
