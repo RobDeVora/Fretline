@@ -398,6 +398,13 @@ Second phone run (lean, fp16 model, WebGPU and processor): no abort any more, bu
 ConstantOfShape(9) node '/real_istft/ConstantOfShape'": in the fp16-weights export that node outputs fp16, which the
 web build's CPU kernel only gets past when constant folding removes it (i.e. optimised loading, which runs out of
 memory). Default model is now the fp32 export (258 MB) with lean loading; the page explains the error if it recurs.
+Third run (fp32 + lean): same ConstantOfShape error. Reproduced locally with one-node models: ConstantOfShape with a
+**double** (or bfloat16) value fails in onnxruntime-web at every optimisation level, all other types load. The
+StemSplit exports carry float64 in `real_istft`, so they can't run in the browser. Added the SonicDemixer export
+(`smank/htdemucs-onnx`, `htdemucs_6s.onnx`, STFT/iSTFT in graph, "no complex dtypes", output `sources`) as default;
+inputs/outputs now read by position and logged. Other route if that fails too: demucs-rs (Rust/Burn, WebGPU, Apache-2.0,
+6s = 84 MB, demo https://nikhilunni.github.io/demucs-rs/), or the 4-stem split build `monteslu/htdemucs-web-onnx`
+(needs our own STFT/iSTFT).
 **Needs:** owner to run it on the phone (30 s first) and send the report + say how the guitar track sounds. Then:
 Basic Pitch (`@spotify/basic-pitch`, model inside the npm package) on the guitar stem → draft song; backing track =
 band without guitar.

@@ -22,7 +22,7 @@ audio{width:100%;margin:6px 0}a{color:var(--accent)}
 <h1>🧪 Split a song</h1>
 <p class="small">Test of Demucs (Meta's open-source source-separation model, 6-stem version) running on this device: it pulls
 the guitar out of a recording, and leaves you the band without the guitar to practise over. Your audio never leaves
-the phone. The model is downloaded once (258 MB, so use Wi-Fi) and kept for next time.</p>
+the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kept for next time.</p>
 
 <div class="card">
   <label for="file">Audio file (MP3, WAV, M4A…)</label>
@@ -34,7 +34,8 @@ the phone. The model is downloaded once (258 MB, so use Wi-Fi) and kept for next
   <label for="lean">Loading</label>
   <select id="lean"><option value="lean">Lean: least memory (try this first)</option><option value="basic">Some optimising</option><option value="all">Fully optimised (needs the most memory)</option></select>
   <label for="mdl">Model</label>
-  <select id="mdl"><option value="fp32">Full (258 MB) — works with lean loading</option><option value="fp16">Half-size (136 MB) — needs fully optimised loading</option></select>
+  <select id="mdl"><option value="sonic">SonicDemixer build (try this first)</option><option value="fp32">StemSplit build, full (258 MB)</option><option value="fp16">StemSplit build, half-size (136 MB)</option></select>
+  <div class="small">The StemSplit builds use a number type (64-bit "double") the web runtime can't run, so they stop with "Could not find an implementation". The SonicDemixer build is the same model exported differently.</div>
   <button id="go" disabled>Split it</button>
   <div class="bar"><div id="prog"></div></div>
   <div id="status" class="small">Choose a file.</div>
@@ -54,7 +55,7 @@ the phone. The model is downloaded once (258 MB, so use Wi-Fi) and kept for next
    with a triangular weight (as Demucs' own apply_model does); the mix is normalised by the mono mean/std first. */
 const ORT_VER='1.31.1';
 const ORT_BASE=`https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VER}/dist/`;
-const MODELS={fp16:'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx',
+const MODELS={sonic:'https://huggingface.co/smank/htdemucs-onnx/resolve/main/htdemucs_6s.onnx',fp16:'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx',
               fp32:'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s.onnx'};
 const SEG=343980,SR=44100,OVERLAP=0.25,STEMS=['drums','bass','other','vocals','guitar','piano'],GTR=4;
 const $=id=>document.getElementById(id);const logEl=$('log');const R=[];
@@ -70,7 +71,7 @@ function loadScript(src){return new Promise((ok,bad)=>{const s=document.createEl
 async function getModel(url){
   let cache=null;try{cache=await caches.open('fretline-models');const hit=await cache.match(url);if(hit){log('model: from this phone\'s cache');return new Uint8Array(await hit.arrayBuffer());}}catch(e){}
   const r=await fetch(url);if(!r.ok)throw new Error('model download failed: HTTP '+r.status);
-  const total=+r.headers.get('content-length')||0;const rd=r.body.getReader();const parts=[];let got=0;
+  const total=+r.headers.get('content-length')||0;log('model: downloading '+(total?(total/1e6).toFixed(0)+' MB':'(size unknown)'));const rd=r.body.getReader();const parts=[];let got=0;
   for(;;){const {done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;if(total){prog(got/total*0.3);status('Downloading the model… '+Math.round(got/1e6)+' / '+Math.round(total/1e6)+' MB');}}
   const buf=new Uint8Array(got);let o=0;for(const p of parts){buf.set(p,o);o+=p.length;}
   log('model: downloaded '+(got/1e6).toFixed(0)+' MB');
@@ -116,12 +117,12 @@ $('go').onclick=async()=>{
     const inp=new Float32Array(2*SEG);const times=[];
     for(let c=0;c<nCh;c++){
       const st=c*stride;inp.fill(0);for(let i=0;i<SEG&&st+i<N;i++){inp[i]=(L[st+i]-mean)/sd;inp[SEG+i]=(Rc[st+i]-mean)/sd;}
-      const tc=performance.now();const out=await session.run({mix:new ort.Tensor('float32',inp,[1,2,SEG])});const dt=performance.now()-tc;times.push(dt);
-      const S=out.stems.data;/* [1,6,2,SEG] */
+      const tc=performance.now();const res=await session.run({[session.inputNames[0]]:new ort.Tensor('float32',inp,[1,2,SEG])});const dt=performance.now()-tc;times.push(dt);
+      const ot=res[session.outputNames[0]];if(c===0)log('model: in '+session.inputNames.join(',')+' → out '+session.outputNames.join(',')+' '+JSON.stringify(ot.dims));const S=ot.data;/* [1,6,2,SEG] */
       for(let i=0;i<SEG&&st+i<N;i++){const w=W[i];ws[st+i]+=w;
         for(let ch=0;ch<2;ch++){let rest=0;for(let k=0;k<6;k++){const v=S[(k*2+ch)*SEG+i];if(k===GTR){if(ch===0)gL[st+i]+=w*v;else gR[st+i]+=w*v;}else rest+=v;}
           if(ch===0)rL[st+i]+=w*rest;else rR[st+i]+=w*rest;}}
-      if(out.stems.dispose)out.stems.dispose();
+      if(ot.dispose)ot.dispose();
       prog(0.3+0.7*(c+1)/nCh);status('Splitting… part '+(c+1)+' of '+nCh+' ('+(dt/1000).toFixed(1)+' s for 7.8 s of audio)');
       log('part '+(c+1)+'/'+nCh+': '+(dt/1000).toFixed(1)+' s');}
     for(let i=0;i<N;i++){const w=ws[i]||1;gL[i]=gL[i]/w*sd+mean;gR[i]=gR[i]/w*sd+mean;rL[i]=rL[i]/w*sd+5*mean;rR[i]=rR[i]/w*sd+5*mean;}
