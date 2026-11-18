@@ -300,6 +300,9 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <h2>Settings</h2>
     <div class="field"><label>Mic sensitivity: <span id="sSensV"></span></label><input type="range" id="sSens" min="1" max="10" step="1">
       <div class="meter"><i id="sMeter"></i></div><span class="small">Play a note. The bar should turn green while you play and stay low when you're quiet.</span></div>
+    <div class="field"><label>Microphone</label><select id="sMic"><option value="">Automatic (phone's choice)</option></select>
+      <span class="small">With Bluetooth headphones, phones often listen through the headset's own call microphone, which is far from the guitar and silences sounds that aren't a voice. If notes go missing, pick the phone's own microphone here (often called "Phone", "Built-in" or "Bottom").</span>
+      <span class="small" id="sMicNow" style="color:var(--accent2)"></span></div>
     <div class="field"><label>Latency compensation: <span id="sLatV"></span> ms</label><input type="range" id="sLat" min="0" max="600" step="10"><span class="small">Raise this if you play on time but notes count as late.</span></div>
     <div class="field"><label>Highway size</label><select id="sBig"><option value="1">Normal</option><option value="1.3">Large</option><option value="1.6">Extra large</option></select><div class="small">Makes notes, fret numbers, chord names and strum arrows bigger.</div></div>
     <div class="field"><label>Timing window</label><select id="sTiming"><option value="1">Normal</option><option value="1.5">Relaxed</option><option value="2">Very relaxed</option></select><span class="small">How early or late a note can be and still count.</span></div>
@@ -1192,7 +1195,7 @@ function buildSong(def){
 
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
-const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1},store.get('settings',{}));
+const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,micId:'',backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1},store.get('settings',{}));
 function saveSettings(){store.set('settings',settings);}
 // The level below which sound is treated as silence. The sensitivity setting sets the most it can be; in a quiet room
 // it drops to just above the room's own noise (measured between notes), so soft notes on a quiet phone mic still count.
@@ -1202,18 +1205,34 @@ let bests=store.get('best',{});
 let mySongs=store.get('songs',[]);
 
 /* ================= Audio ================= */
+let micSrc=null;
 let actx=null,analyser=null,micStream=null,timeBuf=null,freqBuf=null,micState='off',muteUntil=0;
 async function ensureAudio(){
   if(!actx){const AC=window.AudioContext||window.webkitAudioContext;actx=new AC();}
   if(actx.state==='suspended'){try{await actx.resume();}catch(e){}}
 }
+// what microphone is actually in use and what processing the phone applied (for the detection report)
+function micInfo(){try{const t=micStream&&micStream.getAudioTracks()[0];if(!t)return 'mic: none';const st=t.getSettings?t.getSettings():{};
+  const on=k=>st[k]===undefined?'?':st[k]?'ON':'off';
+  return 'mic: '+(t.label||'unnamed')+' · noise suppression '+on('noiseSuppression')+' · echo cancel '+on('echoCancellation')+' · auto volume '+on('autoGainControl')+' · '+(st.sampleRate||actx&&actx.sampleRate||'?')+' Hz';}catch(e){return 'mic: ?';}}
+// switch to another microphone (Settings › Microphone)
+async function restartMic(){try{if(micStream)micStream.getTracks().forEach(t=>t.stop());}catch(e){}if(micSrc)try{micSrc.disconnect();}catch(e){}micStream=null;analyser=null;micSrc=null;return enableMic();}
+async function fillMicList(){const sel=$('#sMic');if(!sel||!navigator.mediaDevices||!navigator.mediaDevices.enumerateDevices)return;
+  try{const ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput');
+    sel.innerHTML='<option value="">Automatic (phone\'s choice)</option>'+ds.filter(d=>d.deviceId&&d.deviceId!=='default').map((d,i)=>`<option value="${esc(d.deviceId)}">${esc(d.label||'Microphone '+(i+1))}</option>`).join('');
+    sel.value=settings.micId||'';if(sel.value!==(settings.micId||''))sel.value='';
+    $('#sMicNow').textContent=micInfo();}catch(e){}}
 async function enableMic(){
   await ensureAudio();
   if(analyser)return true;
   try{
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('unsupported');
-    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
-    const src=actx.createMediaStreamSource(micStream);
+    // ask for the raw sound: no call-style processing (it silences anything that isn't a voice); use the chosen mic
+    const want={echoCancellation:false,noiseSuppression:false,autoGainControl:false,voiceIsolation:false,channelCount:1};
+    if(settings.micId)want.deviceId={exact:settings.micId};
+    try{micStream=await navigator.mediaDevices.getUserMedia({audio:want});}
+    catch(e){if(!settings.micId)throw e;delete want.deviceId;micStream=await navigator.mediaDevices.getUserMedia({audio:want});}
+    micSrc=actx.createMediaStreamSource(micStream);const src=micSrc;
     analyser=actx.createAnalyser();analyser.fftSize=4096;analyser.smoothingTimeConstant=0;
     src.connect(analyser);
     timeBuf=new Float32Array(analyser.fftSize);freqBuf=new Float32Array(analyser.frequencyBinCount);
@@ -2041,7 +2060,7 @@ function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]
 function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.notes.push(txt);}
 function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);}}
 function diagReport(){
-  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+' · band '+(settings.backing?'on':'off')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+') · '+G.hits+'/'+S.events.length];
+  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+' · band '+(settings.backing?'on':'off')+' · '+micInfo()+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+') · '+G.hits+'/'+S.events.length];
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
     L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.notes.length?' · '+d.notes.join(','):''));});
@@ -2408,7 +2427,8 @@ let settingsOpen=false;
 function syncSettingsUI(){$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
-$('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();};
+$('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();fillMicList();};
+$('#sMic').onchange=async e=>{settings.micId=e.target.value;saveSettings();await restartMic();fillMicList();};
 $('#sSound').innerHTML=SOUNDS.map(([v,n])=>`<option value="${v}">${esc(n)}</option>`).join('');
 function soundStatus(t){$('#sSoundStatus').textContent=t;}
 async function applySound(id,quiet){
@@ -3178,7 +3198,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.49';
+const APP_VERSION='1.50';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
