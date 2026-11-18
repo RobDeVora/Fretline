@@ -1,6 +1,6 @@
 // Fretline service worker: always tries the network first so updates you
 // upload to GitHub show up on the next launch; falls back to the saved copy offline.
-const CACHE = 'fretline-v63';
+const CACHE = 'fretline-v64';
 const SHARE = 'fretline-share'; // holds a song shared from another app until the page picks it up
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', e => {
@@ -33,8 +33,13 @@ self.addEventListener('fetch', e => {
   const isLib = /cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|unpkg\.com/.test(url.hostname);
   if (!sameOrigin && !isLib) return;
   if (url.searchParams.has('check')) return; // "Check for updates" always asks GitHub directly
+  // Lab pages run the AI model on several processor cores, which browsers only allow on "cross-origin isolated"
+  // pages; GitHub Pages can't send those headers, so they're added here (only for /lab/, nothing else changes)
+  const isLab = sameOrigin && req.mode === 'navigate' && url.pathname.includes('/lab/');
   e.respondWith(
     fetch(req, sameOrigin ? { cache: 'no-cache' } : {}).then(res => {
+      if (isLab && res && res.ok) { const h = new Headers(res.headers); h.set('Cross-Origin-Opener-Policy', 'same-origin'); h.set('Cross-Origin-Embedder-Policy', 'credentialless');
+        const out = new Response(res.body, { status: res.status, statusText: res.statusText, headers: h }); return out; }
       if (res && (res.ok || res.type === 'opaque')) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
       return res;
     }).catch(() => caches.match(req).then(r => r || (req.mode === 'navigate' ? caches.match('./index.html') : undefined)))

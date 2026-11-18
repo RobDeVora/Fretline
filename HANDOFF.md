@@ -410,7 +410,13 @@ inputs/outputs now read by position and logged. Other route if that fails too: d
 "network error" when the owner switched to Chrome (WebView backgrounded). Download is now in 16 MB Range pieces, each
 retried up to 5×, saved as `?fretline-piece=N` cache keys (not `#`: the Cache API ignores fragments, which made every
 piece "resume" piece 0 forever and crashed the tab in testing), so a reload resumes.
-**Needs:** owner to try the graphics chip (WebGPU), and say how the guitar track sounds and send the report + say how the guitar track sounds. Then:
+Owner on quality: **guitar stem "sounds amazing", no singing or bleed audible**; band-without-guitar has clear vocals
+(the song has few other instruments). WebGPU: first part 4.5-5 s (3× the processor) then "Device is lost" on part 2,
+twice. Now: on a lost device the session is rebuilt on the GPU (up to 2×, 300 ms pause), then the rest runs on the
+processor. Multi-core: `sw.js` adds COOP same-origin + COEP credentialless to navigations under `/lab/` only, the Lab
+page registers the SW and reloads once, ORT uses up to 6 threads (tested: isolated, threads work, CDN-origin runtime OK;
+main app not isolated). Test hooks: `?ortbase=` and `?modelurl=`.
+**Needs:** owner to run processor (now multi-core) and graphics chip again and send the report + say how the guitar track sounds. Then:
 Basic Pitch (`@spotify/basic-pitch`, model inside the npm package) on the guitar stem → draft song; backing track =
 band without guitar.
 
