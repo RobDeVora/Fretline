@@ -351,7 +351,8 @@ overtones that don't land on the base note's — all of them, or the lowest thre
 of path 2 (base = best-scoring note; checked after the strength history is updated, or rises are never seen).
 Also in path 2: if the tracker clearly hears a note in neither, each note must stand out against it on its own.
 Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly the E+B steps (old code 56/64).
-Known leak: E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
+Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
+recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
 
 ## Idea: play along with an MP3
