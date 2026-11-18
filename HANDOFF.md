@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.69, Android app from the v1.63 build)
+# Fretline: session handoff (18 Nov 2026, web v1.70, Android app from the v1.63 build)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,26 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.70: undo 1.69's strict checks; fixed highway speed
+
+Owner's 1.69 report (correct playing, boogie): 14/96. Bars 1-4 (#0-63): E+B 5/16, E+C# 4/16, A+E 6/8, A+F# 0/8, so
+both new checks hurt real playing: `lowOddOk` (3rd-overtone test, A+F# and E+C# steps) and the window-start limit on
+picks / `recentHeard` (E+B steps, which rely on the tracker flicking to B2). From #64 on the app mostly heard notes one
+string lower than charted (F#2+C#3 on B steps, E2+B2 on A steps), so those misses look like real wrong notes, not
+detection. Changes:
+- `fresh` and `recentHeard` back to 1.68 (no `G._winAt`). The early-window cap (half the gap to the previous step)
+  stays. Sim swapped-fret: 7 false (was 11 in 1.68, 5 in 1.69); correct 95/96.
+- `lowOddR` is measured only: the report adds `odd x.xx` per two-note step (best ratio in the 150 ms after a pick in
+  that step; omitted when the other note shares the 3rd). Sim: real E0+A4 ~2.6; A4+D2 ~0.4-0.55, but ~1.9 when the open
+  E from the previous step is still ringing (it really is sounding), so a presence test can't catch that case; it would
+  need "low E re-picked" (rise of its odd overtones at the pick). Set a threshold only from the owner's real numbers.
+- Highway: measured the other app's recording: constant ~17% of screen width per second the whole song (=
+  `W×0.17`). It has no speed setting; slowing the song spreads notes. Removed Settings › Highway speed (`#sZoom`);
+  `pps` is fixed; the player's − / + practice speed now spreads notes at the same scroll speed. At 1.0 Fretline's
+  boogie in landscape: strings ~33 px apart, notes ~30 px, eighths ~61 px apart (the other app: 41 / 32 / ~49).
+
+**Needs:** a correct run and an A4+D2 run on 1.70, with the `odd` numbers from both.
 
 ## v1.69: highway speed in pixels per second; early hits can't take the previous step's pick
 

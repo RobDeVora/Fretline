@@ -330,7 +330,6 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     </div>
     <div class="stab" data-t="disp">
     <div class="field"><label>Highway size</label><select id="sBig"><option value="1">Normal</option><option value="1.3">Large</option><option value="1.6">Extra large</option></select><div class="small">Makes notes, fret numbers, chord names and strum arrows bigger.</div></div>
-    <div class="field"><label>Highway speed: <span id="sZoomV"></span></label><input type="range" id="sZoom" min="0.6" max="2" step="0.1"><div class="small">How fast notes move across the screen, the same in every song. Faster spreads notes further apart; slower lets you read further ahead.</div></div>
     <div class="field"><label>Strums show</label><select id="sStrumView"><option value="fingers">Chord fingering (fret numbers on each string)</option><option value="arrows">Big D / U arrows</option></select></div>
     <div class="field inline"><label>Show note names instead of fret numbers</label><input type="checkbox" id="sNames"></div>
     <div class="field inline"><label>Show fretboard below the highway</label><input type="checkbox" id="sFretboard"></div>
@@ -2336,8 +2335,8 @@ function firstPending(){for(let i=G.scan;i<G.song.events.length;i++)if(!G.state[
    other must really sound too. Judged on the other note's overtones that don't land on the first one's (so a low E's
    own overtones can't pass for the B or C# above it); it must stand out from its neighbours and be reasonably strong. */
 // notes the pitch tracker reported in the last half second (two notes sounding together make it flick between them)
-function recentHeard(now){const R=G.heardRecent||(G.heardRecent=[]);while(R.length&&R[0].at<now-500)R.shift();const w0=G._winAt!=null?G._winAt:-1e9;return new Set(R.filter(x=>x.at>=w0).map(x=>x.m));} /* only since this step's window opened: not the previous step's note */
-/* v1.69: the step's lowest note must be that note, not its octave: E3 (D string, 2nd fret) has all of open E's even
+function recentHeard(now){const R=G.heardRecent||(G.heardRecent=[]);while(R.length&&R[0].at<now-500)R.shift();return new Set(R.map(x=>x.m));}
+/* v1.69 (measured only since v1.70): is the step's lowest note that note, or its octave? E3 (D string, 2nd fret) has all of open E's even
    overtones, so A4+D2 passed for E0+A4. The low note's 3rd overtone (which its octave doesn't have) must be at least
    0.15 of its 2nd and 4th. Measured directly (the targeted check skips everything under ~400 Hz). Only when the other
    note doesn't share the 3rd (E+B, A+E can't be told apart this way); the best reading during the step counts.
@@ -2347,9 +2346,9 @@ function lowOddR(e,cp){const lo=e.notes.reduce((a,b)=>b.midi<a.midi?b:a);const f
   if(sh(ft*3))return null;if(!hann||hann.length!==timeBuf.length)targetScoreBuf(timeBuf,sr,lo.midi+cp,[1]);
   const A=h=>Math.sqrt(goertzel(timeBuf,hann,sr,ft*h));const ev=[2,4].filter(h=>!sh(ft*h)).map(A);if(!ev.length)return null;
   return A(3)/Math.max(1e-9,ev.reduce((a,b)=>a+b,0)/ev.length);}
-function lowOddOk(e,cp){const R=lowOddR(e,cp);if(R==null)return true;if(window.__oddLog)window.__oddLog.push([e.t,R]);
-  if(G._oddFor!==e){G._oddFor=e;G._oddMax=0;}G._oddMax=Math.max(G._oddMax,R);return G._oddMax>=0.15;}
-function partnerOk(e,base,cp){if(e.notes.length<2)return true;if(!lowOddOk(e,cp))return false;const sr=actx.sampleRate,bm=base.midi+cp,fb=midiToFreq(bm);const bT=targetInfo(base,cp).T||1e-9;
+/* v1.70: not used to judge yet (it missed real notes on the owner's phone in 1.69); the report shows each step's best
+   ratio as 'odd x.xx' so a threshold can be set from real playing */
+function partnerOk(e,base,cp){if(e.notes.length<2)return true;const sr=actx.sampleRate,bm=base.midi+cp,fb=midiToFreq(bm);const bT=targetInfo(base,cp).T||1e-9;
   const heard=recentHeard(G._mNow||performance.now());
   for(const n of e.notes){if(n===base)continue;const tm=n.midi+cp,ft=midiToFreq(tm);
     if(heard.has(tm))continue; // the tracker itself heard this note: it's there
@@ -2375,7 +2374,7 @@ function matchEvent(e,i,now){
   if(m!=null){const R=G.heardRecent||(G.heardRecent=[]);if(!R.length||R[R.length-1].m!==m||now-R[R.length-1].at>100)R.push({at:now,m});}
   const legato=e.notes.some(n=>n.tech==='h'||n.tech==='p'||n.tech==='s');
   const pick=Math.max(det.onsetAt,det.pitchOnsetAt||-1);
-  const fresh=legato||(pick>G.lastHitAt&&now-pick<700&&pick>=(G._winAt!=null?G._winAt:-1e9));
+  const fresh=legato||(pick>G.lastHitAt&&now-pick<700);
   // 1) the pitch tracker heard exactly this note, freshly played (not one that was already ringing)
   //    A reading is confirmed by the targeted check (the tracker can report a note that isn't there when two
   //    notes ring together). An octave reading only counts if it's confirmed more strongly: the expected note itself is clearly there, or the octave
@@ -2468,6 +2467,7 @@ function chordCheck(now){
    For each note: what was expected, what the pitch tracker heard while waiting, how many picks registered, how
    strongly the expected note showed up, and how it ended. Lets problems on a real phone be seen exactly. */
 function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]={heard:[],picks:0,ts:0,t0:now,lastOn:det.onsetAt,lastPo:det.pitchOnsetAt,notes:[],lv:0,gt:gate()};}
+  if(e.notes&&e.notes.length===2&&!isChordEv(e)&&analyser&&timeBuf&&det.rms>=gate()&&det.onsetAt>=d.t0&&now-det.onsetAt<150){const R=lowOddR(e,G.capo||0);if(R!=null)d.odd=Math.max(d.odd||0,R);}
   if(det.rms>d.lv){d.lv=det.rms;d.gt=gate();}
   const m=det.stableMidi;if(m!=null&&d.heard[d.heard.length-1]!==m&&d.heard.length<8)d.heard.push(m);
   if(det.onsetAt!==d.lastOn){d.picks++;d.lastOn=det.onsetAt;}if(det.pitchOnsetAt!==d.lastPo){d.pp=(d.pp||0)+1;d.lastPo=det.pitchOnsetAt;}
@@ -2478,7 +2478,7 @@ function diagReport(){
   const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+') · '+G.hits+'/'+S.events.length];
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
-    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.grade?' · '+d.grade:'')+(d.notes.length?' · '+d.notes.join(','):''));});
+    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.odd!=null?' · odd '+d.odd.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.notes.length?' · '+d.notes.join(','):''));});
   return L.join('\n');}
 function techWords(n){return n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
 // "any octave" means one octave either way: two octaves off is almost always the pitch tracker locking onto a
@@ -2506,7 +2506,6 @@ function update(dt,now){
     if(st[i]){if(i===G.scan)G.scan++;continue;}
     const e=ev[i];const ch=isChordEv(e);const {wb,wa}=hitWindow(e,b,ev[i+1]?ev[i+1].t-e.t:null,i>0?e.t-ev[i-1].t:null);
     if(e.t-wb>eff)break;
-    G._winAt=now-(eff-(e.t-wb))/b*1000; /* when this step's window opened (picks and readings before it belong to the step before) */
     diagFrame(e,i,now);
     if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){diagEnd(i,'miss',now);st[i]=2;G.misses++;G.streak=0;const w=G.wp&&G.wp.i===i?G.wp:null;if(w){G.wp=null;diagNote(i,w.txt);}addPop(w?w.pop:'Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
     if(!ch&&!e.strum&&analyser&&det.onsetAt>G.lastHitAt&&det.onsetAt>(G.wrongOnset||0)&&now-det.onsetAt<700){
@@ -2785,7 +2784,7 @@ function draw(now){
   // v1.69: the highway moves at a set speed on screen (pixels per second), the same for every song and practice speed;
   // the notes' spacing follows from the music (a slow song or slower practice speed spreads them out). Before, it was
   // pixels per beat (times note size, times up to 1.6 for busy songs), so faster or busier songs raced past.
-  const hitX=Math.max(54,Math.min(W*0.2,140));const pps=Math.max(110,Math.min(220,W*0.17))*settings.zoom;let ppb=pps/Math.max(0.2,bps());
+  const hitX=Math.max(54,Math.min(W*0.2,140));const pps=Math.max(110,Math.min(220,W*0.17)); /* v1.70: fixed, like the other app (no speed setting); the practice speed (− / +) spreads notes out */let ppb=pps/Math.max(0.2,bps());
   const Y=s=>laneTop+(5-s+0.5)*laneH;hitX0=hitX;ppb0=ppb;
   // highway background
   if(COL.highway==='lighter'){cx.fillStyle='rgba(255,255,255,.05)';cx.fillRect(0,laneTop,W,laneH*6);}
@@ -3015,7 +3014,7 @@ function tunerUpdate(){
 let settingsOpen=false;
 function syncSettingsUI(){{const P=IS_APP&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;
   $('#appBuild').innerHTML=!IS_APP?'':P&&P.outputRoute?'Android app: latest build (full screen, sound delay per output'+(outRoute?' · sound now on '+ROUTE_NAMES[outRoute]:'')+')':'Android app: an older build. <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">Install the latest Fretline.apk</a> for full screen and a sound delay for each output.';}$('#sFingerGuide').checked=settings.fingerGuide!==false;$('#cNoteBy').value=settings.noteBy==='string'?'string':'finger';$('#sVoxOn').checked=settings.vocalGuide!==false;$('#sVoxLib').checked=settings.vocalLibrary!==false;$('#sVoxFile').checked=settings.vocalFiles!==false;$('#sVoxMade').checked=settings.vocalMadeUp!==false;
-  $('#sVoxVol').value=settings.vocalVol==null?0.7:settings.vocalVol;$('#sVoxV').textContent=Math.round((settings.vocalVol==null?0.7:settings.vocalVol)*100)+'%';$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+  $('#sVoxVol').value=settings.vocalVol==null?0.7:settings.vocalVol;$('#sVoxV').textContent=Math.round((settings.vocalVol==null?0.7:settings.vocalVol)*100)+'%';$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();fillMicList();};
@@ -3041,7 +3040,6 @@ $('#sDelEar').onclick=()=>{G.tuneAsked=true;settingsOpen=false;$('#settings').cl
 $('#sSens').oninput=e=>{settings.sens=+e.target.value;saveSettings();syncSettingsUI();};
 $('#sLat').oninput=e=>{settings.latency=+e.target.value;saveSettings();syncSettingsUI();};
 $('#sBig').onchange=e=>{settings.big=+e.target.value;saveSettings();};
-$('#sZoom').oninput=e=>{settings.zoom=+e.target.value;saveSettings();syncSettingsUI();};
 $('#sOct').onchange=e=>{settings.anyOctave=e.target.checked;saveSettings();};
 $('#sNames').onchange=e=>{settings.names=e.target.checked;saveSettings();};
 $('#sFretboard').onchange=e=>{settings.fretboard=e.target.checked;saveSettings();resizeCanvas();};
@@ -3838,7 +3836,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.69';
+const APP_VERSION='1.70';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
