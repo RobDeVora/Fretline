@@ -1,4 +1,4 @@
-# Fretline: session handoff (17 Nov 2026, v1.50)
+# Fretline: session handoff (17 Nov 2026, v1.51)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -108,6 +108,29 @@ phone applies noise suppression despite the constraints. Simulations can't repro
   rebuild and real-device testing.
 - **Noise suppression shows ON despite constraints:** document it in the tip; the native route above also fixes it.
 - Then recalibrate timing (sound delay tap test, then latency suggestion) and ask for a fresh report.
+
+## v1.51: native built-in mic (Android app)
+
+The owner's v1.50 report: mic "unnamed", noise suppression / echo cancel / auto volume all **off**, only
+"Automatic" in the mic list, and misses still at level 0.1 (24/32). So the phone-side processing isn't the cause
+and the web page can't pick the phone mic: the WebView switches the Bluetooth headphones into call mode (SCO) and
+the headset's own voice filtering silences the guitar.
+
+Fix: `NativeMicPlugin.java` (registered in `MainActivity`) records with `AudioRecord` from `TYPE_BUILTIN_MIC`
+(source UNPROCESSED if supported, else VOICE_RECOGNITION, else MIC; float or 16-bit), takes the headphones out of
+SCO/communication mode, and sends 10 ms base64 float32 chunks as `pcm` events. Stops on app pause, resumes after.
+In `index.html`, `startNativeMic()` feeds them through an AudioWorklet queue (40 ms pre-buffer, 150 ms cap, counts
+underruns as "gaps", linear resampling if rates differ) into the same analyser, so detection is unchanged. Used
+when the app has the plugin and Settings › Microphone is "Phone's built-in microphone (recommended)" (`micId ''`);
+"Let the phone choose (old way)" is `micId 'web'`. If the native mic fails, it falls back to getUserMedia and
+the report says "(app mic failed: …)". Old APKs / browsers behave as before (old APK shows a download link in the
+mic hint). Report line now shows e.g. `mic: built-in mic (…) via the app · unprocessed · float · 48000 Hz · gaps 0`.
+
+**Needs:** the owner to install the new APK (android-latest release), play the A blues melody again and send the
+report. Check the mic line says "via the app" and "built-in mic", gaps stay ~0, and the 0.1-level misses are
+gone. Then recalibrate: with headphones in music mode (A2DP) the output delay changes, so redo the sound delay
+tap test and then use the results card's latency suggestion. Not tested on a real device; Java not compiled
+locally (no Android SDK in the workspace), so check the Actions build.
 
 ## Other open ideas mentioned but not done
 - Same-pitch-different-string detection (timbre/inharmonicity), labelled beta.

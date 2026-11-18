@@ -22,6 +22,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(IncomingPlugin.class);
+        registerPlugin(NativeMicPlugin.class);
         super.onCreate(savedInstanceState);
         handleIntent(getIntent());
         // Back button / back gesture: let the page close whatever is open (Settings, a song, a dialog...).
