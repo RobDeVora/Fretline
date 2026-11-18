@@ -181,6 +181,7 @@ header h1 span{color:var(--accent)}
         <p id="rDetail"></p>
         <p class="small" id="rStrings" style="margin-top:-4px;color:var(--warn)"></p>
         <p class="small" id="rTiming" style="margin-top:-4px"></p>
+        <div id="rReport" style="margin:4px 0"></div>
         <div class="row" style="justify-content:center">
           <button id="rBack">Back</button>
           <button id="rNew" style="display:none">New track</button>
@@ -1249,6 +1250,14 @@ function detectFrame(now){
   if(!det.armed&&rms<(det.lastRms||0)*0.97)det.armed=true;
   if(det.armed&&rms>g&&rms>minPrev*1.5+g*0.3&&rms>(det.lastRms||0)*1.12&&now-det.onsetAt>80&&!bandSound(now)){det.onsetAt=now;det.armed=false;}
   det.lastRms=rms;
+  // a pick is also a short burst of bright, scratchy sound (above ~2.5 kHz) that a note already ringing doesn't
+  // have, so it shows up even when you re-pick a string that's still sounding
+  if(analyser.getFloatFrequencyData&&freqBuf){analyser.getFloatFrequencyData(freqBuf);const bh=actx.sampleRate/analyser.fftSize;let hf=0;
+    for(let k=Math.round(2500/bh),k1=Math.min(freqBuf.length-1,Math.round(8000/bh));k<=k1;k++){const db=freqBuf[k];if(db>-110)hf+=Math.pow(10,db/10);}
+    const hh=det.hfHist||(det.hfHist=[]);const minH=hh.length?Math.min(...hh):hf;hh.push(hf);if(hh.length>5)hh.shift();
+    if(det.hfArmed===undefined)det.hfArmed=true;if(!det.hfArmed&&hf<(det.lastHf||0)*0.9)det.hfArmed=true;
+    if(det.hfArmed&&rms>g&&hf>minH*4+1e-9&&hf>(det.lastHf||0)*1.3&&now-det.onsetAt>80&&!bandSound(now)){det.onsetAt=now;det.hfArmed=false;det.armed=false;}
+    det.lastHf=hf;}
   if(rms<g||now<muteUntil){det.midi=null;det.stableMidi=null;det.count=0;return;}
   const f=yin(sub,actx.sampleRate);
   if(f<=0||f>1400){det.midi=null;det.stableMidi=null;det.count=0;return;}
@@ -1814,7 +1823,7 @@ function resetRun(){
   if(!G.song)return;
   G.state=new Uint8Array(G.song.events.length);
   G.clock=-G.song.bpb;G.hits=0;G.misses=0;G.streak=0;G.best=0;G.scan=0;G.playedIdx=0;G.lastClickBeat=Math.floor(G.clock)-1;
-  G.playing=false;G.listen=false;G.finished=false;G.pops=[];G.lastHitKey=null;G.lastHitAt=-1;G.cf=0;G.cfIdx=-1;G.usedOnset=performance.now();G.wrongOnset=performance.now();G.wrongAt=0;G.ignoreOnsetUntil=0;G.offs=[];G.cc=null;G.strFb=null;G.deadStats=null;
+  G.playing=false;G.listen=false;G.finished=false;G.pops=[];G.lastHitKey=null;G.lastHitAt=-1;G.cf=0;G.cfIdx=-1;G.usedOnset=performance.now();G.wrongOnset=performance.now();G.wrongAt=0;G.ignoreOnsetUntil=0;G.offs=[];G.diag={};G.cc=null;G.strFb=null;G.deadStats=null;
   $('#results').classList.remove('show');G.bandIdx=0;updateButtons();
 }
 function updateButtons(){
@@ -1974,7 +1983,8 @@ function matchEvent(e,i,now){
   const hist=G.tHist;hist.push({at:now,T:ti.T});while(hist.length&&hist[0].at<now-600)hist.shift();
   if(det.rms<gate()){G.tcf=0;G.tRiseAt=null;return false;}
   const before=hist.filter(h=>h.at<=now-60&&h.at>=now-450).map(h=>h.T);
-  const rose=before.length>=3&&ti.T>=2.5*Math.min(...before)+1e-9;
+  const repick=evKey(e)===G.lastHitKey&&det.onsetAt>G.lastHitAt&&now-det.onsetAt<350;
+  const rose=(before.length>=3&&ti.T>=2.5*Math.min(...before)+1e-9)||repick;
   if(ti.score>=0.68&&(rose||legato)){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){G.tHist=[];return true;}return false;}
   G.tcf=0;G.tRiseAt=null;return false;
 }
@@ -2010,6 +2020,21 @@ function chordCheck(now){
   else if(dead.length>1)addPop(dead.length+' dead strings','#ff5d73');
   else if(ring.length)addPop((SNAME[ring[0]][0].toUpperCase()+SNAME[ring[0]].slice(1))+' shouldn\'t ring','#ffb347');
 }
+/* ---- detection report (results › Copy detection report) ----
+   For each note: what was expected, what the pitch tracker heard while waiting, how many picks registered, how
+   strongly the expected note showed up, and how it ended. Lets problems on a real phone be seen exactly. */
+function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]={heard:[],picks:0,ts:0,t0:now,lastOn:det.onsetAt,lastPo:det.pitchOnsetAt,notes:[]};}
+  const m=det.stableMidi;if(m!=null&&d.heard[d.heard.length-1]!==m&&d.heard.length<8)d.heard.push(m);
+  if(det.onsetAt!==d.lastOn){d.picks++;d.lastOn=det.onsetAt;}if(det.pitchOnsetAt!==d.lastPo){d.pp=(d.pp||0)+1;d.lastPo=det.pitchOnsetAt;}
+  if(analyser&&!e.strum&&!e.chord&&e.notes.length){const x=targetScore(e.notes[0],G.capo||0);if(x>d.ts)d.ts=x;}}
+function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.notes.push(txt);}
+function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);}}
+function diagReport(){
+  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+' · band '+(settings.backing?'on':'off')+' · sensitivity '+settings.sens+' · '+G.hits+'/'+S.events.length];
+  S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
+    if(!d){L.push('#'+i+' '+what+' · not reached');return;}
+    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+(d.notes.length?' · '+d.notes.join(','):''));});
+  return L.join('\n');}
 function techWords(n){return n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
 function noteOk(n,m,cp){const a=n.midi+cp;if(m===a||(settings.anyOctave&&(((a-m)%12)+12)%12===0))return true;
   if(n.bend){for(let k=1;k<=n.bend;k++){if(m===a+k||(settings.anyOctave&&(((a+k-m)%12)+12)%12===0))return true;}}return false;}
@@ -2034,14 +2059,16 @@ function update(dt,now){
     if(st[i]){if(i===G.scan)G.scan++;continue;}
     const e=ev[i];const ch=isChordEv(e);const {wb,wa}=hitWindow(e,b,ev[i+1]?ev[i+1].t-e.t:null);
     if(e.t-wb>eff)break;
-    if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){st[i]=2;G.misses++;G.streak=0;addPop('Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
+    diagFrame(e,i,now);
+    if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){diagEnd(i,'miss',now);st[i]=2;G.misses++;G.streak=0;addPop('Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
     if(settings.fx!=='off'&&!ch&&!e.strum&&det.stableMidi!=null&&det.onsetAt>(G.wrongOnset||0)&&det.onsetAt>G.lastHitAt&&now-det.onsetAt>140&&now>muteUntil&&!ringingPrev(det.stableMidi,ev,i)){
       const m=det.stableMidi,cp=G.capo||0;
-      if(!e.notes.some(n=>noteOk(n,m,cp))&&!e.notes.some(n=>targetScore(n,cp)>=0.5)){G.wrongOnset=det.onsetAt;G.wrongAt=now;fxMiss(e,now);const pp=playedPos(m,e.notes[0]);addPop(pp&&pp.f===e.notes[0].f&&pp.s!==e.notes[0].s?'Wrong string':'Wrong note','#ff5d73');break;}
+      if(!e.notes.some(n=>noteOk(n,m,cp))&&!e.notes.some(n=>targetScore(n,cp)>=0.5)){G.wrongOnset=det.onsetAt;G.wrongAt=now;diagNote(i,'wrong:'+midiToName(m));fxMiss(e,now);const pp=playedPos(m,e.notes[0]);addPop(pp&&pp.f===e.notes[0].f&&pp.s!==e.notes[0].s?'Wrong string':'Wrong note','#ff5d73');break;}
     }
     if(matchEvent(e,i,now)){
       {const po=det.pitchOnsetMidi!=null&&e.notes.some(n=>noteOk(n,det.pitchOnsetMidi,G.capo||0))?det.pitchOnsetAt:null;
       const cands=[det.onsetAt,po,G.tRiseAt].filter(x=>x!=null&&x>G.lastHitAt&&now-x<600&&(G.clock-(now-x)/1000*b)>=e.t-wb);const pk=cands.length?Math.min(...cands):-1;G.tRiseAt=null;if(G.mode==='play'&&pk>0){const clockAtPick=G.clock-(now-pk)/1000*b;(G.offs=G.offs||[]).push((clockAtPick-e.t)/b*1000);}}
+      diagEnd(i,'hit',now);
       fxHit(e,now);
       if(settings.deadStrings&&e.shape&&e.strum!=='x'&&analyser){const pv=ev[i-1];const first=e.chord||!(pv&&pv.label===e.label)||now-(G.ccAt||0)>650;
         if(first){const pk=Math.max(det.onsetAt,det.pitchOnsetAt||-1);G.cc={e,i,onset:now-pk<400?pk:now-60,best:null,prevShape:pv&&pv.shape};G.ccAt=now;}}
@@ -2071,6 +2098,12 @@ function finish(){
       if(G.speed<1)$('#rDetail').textContent+=' · play at 100% to complete the lesson';else if(ok)$('#rTitle').textContent='Lesson complete!';}
   }
   timingAdvice();
+  {const box=$('#rReport');if(box){box.innerHTML='';if(G.mode==='play'&&G.diag&&Object.keys(G.diag).length){const b=document.createElement('button');b.textContent='📋 Copy detection report';b.className='small';
+    b.onclick=async()=>{const txt=diagReport();let ok=false;
+      try{await navigator.clipboard.writeText(txt);ok=true;b.textContent='✓ Copied. Paste it in a message';}catch(e){}
+      if(!ok)try{if(navigator.share){await navigator.share({title:'Fretline detection report',text:txt});ok=true;}}catch(e){}
+      if(!ok){showMsg('Detection report','<textarea readonly style="min-height:220px">'+esc(txt)+'</textarea><p class="small">Select all and copy.</p>');}};
+    box.appendChild(b);}}}
   {const ds=G.deadStats;const box=$('#rStrings');if(box){box.textContent='';if(ds&&G.mode==='play'){const fmt=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([s,n])=>SNAME[s]+' ×'+n).join(', ');
     const parts=[];if(Object.keys(ds.dead).length)parts.push('Dead strings: '+fmt(ds.dead));if(Object.keys(ds.ring).length)parts.push('Muted strings that rang: '+fmt(ds.ring));
     box.textContent=parts.length?parts.join(' · '):'';}}}
@@ -3126,7 +3159,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.46';
+const APP_VERSION='1.47';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
