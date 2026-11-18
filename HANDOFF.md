@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.71, Android app from the v1.63 build)
+# Fretline: session handoff (18 Nov 2026, web v1.72, Android app from the v1.63 build)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,25 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.72: late first step after a fret change
+
+Owner's 1.71 report (correct playing at 100%, latency 0): 56/96, bars 1-4 32/32 (1.70: 13/32), `2nd` 0.75-0.97 on
+correct steps, so the low-overtone check works on the phone. Owner: the first step after a 2-0 → 4-0 switch often
+didn't count. The report shows misses with high `2nd` (#58 0.88, #60 0.89, #81 0.85, #85 0.96) and later grades
+drifting to +119/+129 ms.
+
+Sim (`LATE=` delays the first step after each change): 100 ms late → 55/96 (same in 1.68 and 1.70, not new). Debug:
+on a change over the ringing low E the pick is detected ~110 ms after it happens, the step's late window (gap×0.55 =
+236 ms) has closed by then, and confirming the second note takes longer still (lowPartner waits 110 ms). Fix in the
+update loop: a two-note step whose latest pick (after the last credit) falls inside its window, allowing 120 ms of
+detection lag (never past 90% of the gap to the next step), stays open until 300 ms after that pick (`waX`). Sim:
+LATE 0.10/0.15/0.20 → 96/95-96; on time 95/96; swapped 8 (was 7), E+B throughout 38 (36), E+C# throughout 45 (45),
+F#2+C#3 on E+C# steps still all rejected; melody 17/17; `test_double_stops.py` 95/96. A pick that lands near the
+boundary can now go to the earlier of two identical steps instead of the later one (same score).
+
+Still weak: A+E steps (E3's telling overtone is 165 Hz, under the long buffer's ~215 Hz reach; tracker often reads
+E2 for it).
 
 ## v1.71: second note judged on its low overtones (8192-sample analyser)
 

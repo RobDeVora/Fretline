@@ -2512,7 +2512,10 @@ function update(dt,now){
     if(e.t-wb>eff)break;
     G._winAt=now-(eff-(e.t-wb))/b*1000; /* when this step's window opened (v1.71: used only by lowPartner) */
     diagFrame(e,i,now);
-    if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){diagEnd(i,'miss',now);st[i]=2;G.misses++;G.streak=0;const w=G.wp&&G.wp.i===i?G.wp:null;if(w){G.wp=null;diagNote(i,w.txt);}addPop(w?w.pop:'Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
+    /* v1.72: a two-note step picked inside its window gets up to 300 ms after that pick to be confirmed (the second
+       note's check needs a moment; a slightly late first step after a fret change used to run out of window) */
+    let waX=wa;if(!ch&&!e.strum&&e.notes.length>=2&&G.mode==='play'){const pk=Math.max(det.onsetAt,det.pitchOnsetAt||-1);if(pk>G.lastHitAt){const pc=eff-(now-pk)/1000*b;const gp=ev[i+1]?ev[i+1].t-e.t:9;if(pc>=e.t-wb&&pc<=e.t+Math.min(wa+0.12*b,gp*0.9))waX=Math.max(wa,pc-e.t+0.3*b);}} /* picks are detected up to ~110 ms late on a fret change over a ringing string */
+    if(G.mode==='play'&&e.t+Math.max(waX,ch?Math.min(e.d*0.6,1.5):0)<eff){diagEnd(i,'miss',now);st[i]=2;G.misses++;G.streak=0;const w=G.wp&&G.wp.i===i?G.wp:null;if(w){G.wp=null;diagNote(i,w.txt);}addPop(w?w.pop:'Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
     if(!ch&&!e.strum&&analyser&&det.onsetAt>G.lastHitAt&&det.onsetAt>(G.wrongOnset||0)&&now-det.onsetAt<700){
       if(G.wnPick!==det.onsetAt){G.wnPick=det.onsetAt;G.wnMax=0;}
       const cp=G.capo||0;G.wnMax=Math.max(G.wnMax,...e.notes.map(n=>targetScore(n,cp)));
@@ -3841,7 +3844,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.71';
+const APP_VERSION='1.72';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
