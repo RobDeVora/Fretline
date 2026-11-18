@@ -1,4 +1,4 @@
-# Fretline: session handoff (17 Nov 2026, v1.53)
+# Fretline: session handoff (17 Nov 2026, v1.54)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -163,6 +163,23 @@ the VOICE_COMMUNICATION source, and leaves call mode on stop/pause or when switc
 `''` built-in, `n:bluetooth`, `n:wired`, `n:usb` (shown only if present), `web` old way. The Bluetooth hint warns
 it's call quality and will miss notes; if no headset is connected the built-in mic is used. With the v1.51 APK
 (no `listInputs`) the Bluetooth option is shown disabled with "install the latest app". Not tested on a device.
+
+## v1.54: lyrics on screen (🎤 Sing)
+
+Owner's goal: generated vocals from chord-sheet/tab lyrics. Agreed first steps: lyrics on screen with a Sing toggle,
+then a vocal guide (band plays the melody while they strum).
+- `parseChordSheet` now also returns `ev.lyrics` = lines `[{t0, segs:[{t,d,text}]}]` (`lyricLines`): ChordPro
+  `[G]words` and chords-above-words (text cut at the chord columns). Pickup words go with the line's first chord.
+  Section labels / `{directives}` skipped; lyric lines without chords are dropped (their chords aren't repeated
+  either); repeats (x2) get the words on the first pass. `buildSong` copies them to `song.lyrics` (re-parsed from
+  `def.src`, so songs imported earlier get lyrics too).
+- `drawLyrics`: karaoke strip between strings and fretboard (current line, part over the current chord in yellow,
+  sung part dimmed; next line below). Short screens (landscape): one line laid over the bottom of the highway.
+- `#singBtn` (shown only when the song has lyrics), `settings.sing` (default on).
+- Not yet: lyrics from tabs, MIDI (.kar lyric events), MusicXML, Guitar Pro. Library chord songs have no lyrics.
+- **Vocal guide needs a melody**, which chord sheets don't have. Asked the owner whether to (a) make up a melody from
+  the chords and syllables, (b) add real tunes + words to the public-domain library songs, (c) read melody + lyrics
+  from MIDI/MusicXML files that have them. Real sung words (vocal synthesis) isn't feasible in the browser now.
 
 ## Other open ideas mentioned but not done
 - Same-pitch-different-string detection (timbre/inharmonicity), labelled beta.

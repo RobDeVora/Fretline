@@ -141,6 +141,7 @@ header h1 span{color:var(--accent)}
     <select id="capoSel" title="Digital capo" style="padding:6px 8px"></select>
     <select id="simpSel" title="Simplify chords" style="padding:6px 8px;display:none"></select>
     <select id="strumSel" title="Strumming pattern" style="padding:6px 8px;display:none"></select>
+    <button id="singBtn" title="Lyrics on screen while you play" style="padding:6px 10px;display:none">🎤 Sing</button>
     <button id="bandBtn" title="Backing band: drums, bass and piano that fit what you're playing" style="padding:6px 10px">🥁 Band</button>
     <div class="speed"><button id="spDown">−</button><span id="spVal">100%</span><button id="spUp">+</button></div>
   </div>
@@ -473,22 +474,52 @@ function parseChordSeq(str,cb){
   return ev;
 }
 const CHORD_RE=/^[A-G][#b]?(?:maj|min|m|M|dim|aug|sus|add|°|ø|\+|-|\d|b|#)*(?:\/[A-G][#b]?)?$/;
+/* Lyrics in a chord sheet, tied to the chords they're sung over. Two layouts:
+   ChordPro-style  "[G]Amazing [C]grace"  and chords on a line above the words (chord columns line up with syllables).
+   Each piece of text gets the time of its chord; text before a line's first chord (a pickup) goes with that chord.
+   Returns lines: [{t0, segs:[{t,d,text}]}]. Lines with no chords (e.g. later verses written without them) are left
+   out, because the chords aren't repeated for them either. */
+const SECTION_RE=/^\s*[\[(]?\s*(verse|chorus|bridge|intro|outro|pre-?chorus|refrain|solo|instrumental|interlude|coda|tag|hook|ending|break)\b[^a-z]*$/i;
+function lyricText(s){return s.replace(/\{[^}]*\}/g,'').replace(/\[[^\]]*\]/g,'').replace(/\s+/g,' ');}
+function lyricLines(rows,cb){const out=[];
+  for(const r of rows){const segs=[];
+    r.segs.forEach(([ci,txt],k)=>{let x=lyricText(txt);if(k===0)x=x.replace(/^\s+/,'');if(!x.trim()&&!(segs.length&&x))return;segs.push({t:Math.max(0,ci)*cb,d:cb,text:x});});
+    if(segs.length&&segs.some(s=>s.text.trim())){segs[segs.length-1].text=segs[segs.length-1].text.replace(/\s+$/,'');out.push({t0:segs[0].t,segs});}}
+  return out;}
 function parseChordSheet(text,cb){
-  let names=[];
+  let names=[];const rows=[];
   const br=[...text.matchAll(/\[([^\]\s]+)\]/g)].map(m=>m[1]).filter(x=>CHORD_RE.test(x));
-  if(br.length>=2)names=br;
+  if(br.length>=2){names=br;
+    let ci=0;
+    for(const line of text.replace(/\r/g,'').split('\n')){
+      if(/^\s*\{.*\}\s*$/.test(line)||SECTION_RE.test(lyricText(line).trim()))continue;
+      const ms=[...line.matchAll(/\[([^\]\s]+)\]/g)].filter(m=>CHORD_RE.test(m[1]));if(!ms.length)continue;
+      const segs=[];const lead=line.slice(0,ms[0].index);if(lyricText(lead).trim())segs.push([ci,lead]);
+      ms.forEach((m,k)=>{segs.push([ci+k,line.slice(m.index+m[0].length,k+1<ms.length?ms[k+1].index:line.length)]);});
+      ci+=ms.length;rows.push({segs});}
+  }
   else{
-    for(const raw of text.replace(/\r/g,'').split('\n')){
+    const lines=text.replace(/\r/g,'').split('\n');
+    for(let li=0;li<lines.length;li++){const raw=lines[li];
       let toks=raw.trim().split(/\s+/).filter(Boolean);
       let rep=1;
       toks=toks.filter(t=>{const m=/^\(?[x×](\d+)\)?$/i.exec(t)||/^\(?(\d+)[x×]\)?$/i.exec(t);if(m){rep=parseInt(m[1],10);return false;}return !/^[|:\-\/.%]+$/.test(t);});
       toks=toks.map(t=>t.replace(/^\(|\)$/g,'').replace(/^\||\|$/g,''));
       if(!toks.length)continue;
-      if(toks.every(t=>CHORD_RE.test(t))){for(let r=0;r<Math.min(rep,8);r++)names.push(...toks);}
+      if(toks.every(t=>CHORD_RE.test(t))){const ci0=names.length;for(let r=0;r<Math.min(rep,8);r++)names.push(...toks);
+        // the words on the next line, cut at the chords' columns
+        const nx=lines[li+1];
+        if(nx!=null&&nx.trim()&&!isTabLine(nx)&&!/^\s*\{.*\}\s*$/.test(nx)&&!SECTION_RE.test(nx.trim())){
+          const nt=nx.trim().split(/\s+/).map(t=>t.replace(/^\(|\)$/g,'').replace(/^\||\|$/g,''));
+          if(!nt.every(t=>CHORD_RE.test(t)||/^[|:\-\/.%]+$/.test(t)||/^\(?[x×]?\d+[x×]?\)?$/i.test(t))){
+            const cols=[...raw.matchAll(/\S+/g)].filter(m=>CHORD_RE.test(m[0].replace(/^[(|]+|[)|]+$/g,''))).map(m=>m.index+(m[0].length-m[0].replace(/^[(|]+/,'').length));
+            if(cols.length===toks.length){const segs=[];const lead=nx.slice(0,cols[0]);if(lead.trim())segs.push([ci0,lead]);
+              cols.forEach((c,k)=>segs.push([ci0+k,nx.slice(c,k+1<cols.length?cols[k+1]:nx.length)]));rows.push({segs});li++;}}}}
     }
   }
   const ev=[];let t=0;
   for(const n of names){ev.push(chordEvent(n,t,cb));t+=cb;}
+  const ly=lyricLines(rows,cb);if(ly.length)ev.lyrics=ly;
   return ev;
 }
 
@@ -1189,14 +1220,14 @@ function buildSong(def){
     else events=parseChordSheet(def.src,def.cb||4);
   }
   if(!def.noChords)inferChords(events,def.bpb||4);
-  const song={id:def.id,title:def.title,cat:def.cat,bpm:def.bpm||90,bpb:def.bpb||4,events,length:songLength(events),gen:def.gen||null,key:def.key||null};
+  const song={id:def.id,title:def.title,cat:def.cat,bpm:def.bpm||90,bpb:def.bpb||4,events,length:songLength(events),gen:def.gen||null,key:def.key||null,lyrics:(events&&events.lyrics)||def.lyrics||null};
   if(def.cat!=='gen')Object.defineProperty(def,'_built',{value:song,writable:true,configurable:true,enumerable:false});
   return song;
 }
 
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
-const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,micId:'',backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1},store.get('settings',{}));
+const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,micId:'',backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1,sing:true},store.get('settings',{}));
 function saveSettings(){store.set('settings',settings);}
 // The level below which sound is treated as silence. The sensitivity setting sets the most it can be; in a quiet room
 // it drops to just above the room's own noise (measured between notes), so soft notes on a quiet phone mic still count.
@@ -1887,7 +1918,7 @@ const G={def:null,song:null,state:null,clock:0,playing:false,mode:'play',speed:1
 function bps(){return G.song.bpm*G.speed/60;}
 function openSong(def){
   if(def.libFile&&!def.events){showHint('Loading '+def.title+'…',4000);loadLibEvents(def).then(()=>openSong(def)).catch(()=>showMsg('Could not load the song','<p>Fretline couldn’t load this song. Connect to the internet and try again (after the first time, it works offline).</p>'));return;}
-  G.def=def;G.base=buildSong(def);G.song=G.base;
+  G.def=def;G.base=buildSong(def);G.song=G.base;syncSingBtn();
   {const cs=store.get('capo',{});G.origCapo=G.capo=cs[def.id]!=null?cs[def.id]:(def.capo||0);}
   setupStrum();syncCapo();G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);
   $('#pTitle').textContent=G.song.title;
@@ -1945,6 +1976,9 @@ async function prepBand(){
   if(!store.get('bandTip',false)){store.set('bandTip',true);showHint('🥁 Backing band on. Use headphones (and tick “I\'m using headphones” in Settings) so the mic only hears your guitar. Tap 🥁 Band to turn it off.',8000);}
   if(G.band.key){const t=setTimeout(()=>showHint('Loading the backing band (first time only)…',20000),400);try{await loadBandFonts();}catch(e){}clearTimeout(t);if(G.notice&&G.notice.startsWith('Loading the backing band'))showHint('');}
 }
+function hasLyrics(){return !!(G.song&&G.song.lyrics&&G.song.lyrics.length);}
+function syncSingBtn(){const b=$('#singBtn');if(!b)return;b.style.display=hasLyrics()?'':'none';b.classList.toggle('on',!!settings.sing);b.textContent=settings.sing?'🎤 Sing on':'🎤 Sing off';}
+$('#singBtn').onclick=()=>{settings.sing=!settings.sing;saveSettings();syncSingBtn();};
 function syncBandBtn(){const b=$('#bandBtn');if(b){b.classList.toggle('on',!!settings.backing);b.textContent=settings.backing?'🥁 Band on':'🥁 Band off';}}
 $('#bandBtn').onclick=()=>{settings.backing=!settings.backing;saveSettings();syncBandBtn();bandSeek();if(settings.backing&&G.playing)prepBand();};
 syncBandBtn();
@@ -2285,10 +2319,30 @@ function applyColors(){
 }
 applyColors();
 function rr(x,y,w,h,r){cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r);cx.arcTo(x+w,y+h,x,y+h,r);cx.arcTo(x,y+h,x,y,r);cx.arcTo(x,y,x+w,y,r);cx.closePath();}
+/* karaoke strip: the current lyric line (words already sung dimmed, the part over the current chord highlighted)
+   and the next line below it */
+function drawLyrics(lines,y,W,h,k,shade){
+  const c=G.clock;let li=0;for(let i=0;i<lines.length;i++)if(lines[i].t0<=c+0.25)li=i;
+  cx.fillStyle='rgba(0,0,0,'+(shade||0.28)+')';cx.fillRect(0,y-2,W,h);const ta=cx.textAlign;cx.textAlign='left';
+  const row=(L,yy,size,dim)=>{if(!L)return;let fs=size;const full=L.segs.map(s=>s.text).join('');
+    cx.font='600 '+fs+'px -apple-system,sans-serif';let w=cx.measureText(full).width;
+    if(w>W-16){fs=Math.max(10,Math.floor(fs*(W-16)/w));cx.font='600 '+fs+'px -apple-system,sans-serif';w=cx.measureText(full).width;}
+    let x=Math.max(8,(W-w)/2);cx.textBaseline='middle';
+    for(const s of L.segs){const now=!dim&&s.t<=c&&c<s.t+s.d,past=!dim&&s.t+s.d<=c;
+      cx.fillStyle=dim?'rgba(255,255,255,.45)':now?'#ffd166':past?'rgba(255,255,255,.5)':'#fff';cx.fillText(s.text,x,yy);x+=cx.measureText(s.text).width;}
+    cx.textBaseline='alphabetic';};
+  if(h>=40*k){row(lines[li],y+h*0.3,Math.round(16*k),false);row(lines[li+1],y+h*0.75,Math.round(13*k),true);}
+  else row(lines[li],y+h*0.45,Math.round(15*k),false);
+  cx.textAlign=ta;
+}
 function draw(now){
   const W=CW,H=CH,S=G.song,ev=S.events;cx.clearRect(0,0,W,H);
   syncFocus();const k=settings.big||1;const F=px=>Math.round(px*k)+'px';
-  const fbH=settings.fretboard?Math.max(64,Math.min(120,H*0.26)):0;const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?72:44)*k),laneBot=H-(settings.fretboard?fbH+18:14);const laneH=Math.max(12,(laneBot-laneTop)/6);
+  const fbH=settings.fretboard?Math.max(64,Math.min(120,H*0.26)):0;const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?72:44)*k);let laneBot=H-(settings.fretboard?fbH+18:14);
+  // lyric strip under the strings: two lines, or just the current one when there isn't room
+  // (if even one line would squeeze the strings below their minimum, it's laid over the bottom of the highway instead)
+  let lyrH=0,lyrOver=0;if(settings.sing&&S.lyrics&&S.lyrics.length){const room=laneBot-laneTop;
+    if(room-Math.round(44*k)>=110)lyrH=Math.round(44*k);else if(room-Math.round(24*k)>=6*14)lyrH=Math.round(24*k);else lyrOver=Math.round(24*k);if(lyrH)lyrH+=6;laneBot-=lyrH;}const laneH=Math.max(12,(laneBot-laneTop)/6);
   const hitX=Math.max(54,Math.min(W*0.2,140));const ppb=Math.max(70,Math.min(170,W/7))*settings.zoom*Math.sqrt(k);
   const Y=s=>laneTop+(5-s+0.5)*laneH;hitX0=hitX;ppb0=ppb;
   // highway background
@@ -2427,7 +2481,8 @@ function draw(now){
   // count-in
   if(G.playing&&G.clock<0){cx.fillStyle='rgba(255,255,255,.9)';cx.font='bold 56px -apple-system,sans-serif';cx.fillText(String(Math.ceil(-G.clock)),W/2,laneTop+laneH*3);}
   if(!G.playing&&!G.finished&&G.clock<0){cx.fillStyle='rgba(255,255,255,.55)';cx.font='15px -apple-system,sans-serif';cx.fillText(G.mode==='wait'?'Wait mode: the track pauses until you play each note':'Press Play, then play the notes as they reach the glowing line',W/2,laneTop+laneH*3);}
-  if(settings.fretboard)drawFretboard(laneBot+14,fbH,W);
+  if(lyrH)drawLyrics(S.lyrics,laneBot+4,W,lyrH-6,k);else if(lyrOver)drawLyrics(S.lyrics,laneBot-lyrOver+2,W,lyrOver,k,0.62);
+  if(settings.fretboard)drawFretboard(laneBot+14+lyrH,fbH,W);
 }
 // technique marks: h / p arcs and slide lines from the previous note on the string, bend arrows, vibrato waves
 function drawTech(n,x,y,r,w,st,k,F){
@@ -3280,7 +3335,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.53';
+const APP_VERSION='1.54';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
