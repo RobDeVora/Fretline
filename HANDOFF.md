@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, v1.60)
+# Fretline: session handoff (18 Nov 2026, v1.61)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -268,6 +268,16 @@ fretboard) that anticipates the following notes, and said notes move too fast to
 - Finger guide: `drawHand` draws the back of a fretting hand (thumb left, fingers 1-4 in `FCOL`, active fingers
   lit with a glow); beside it the position and a badge per finger used ("③ E3", "0 A open"), then the queue.
   Strip 76k tall (48+ slim); on short screens with the guide on, the fretboard shrinks (min 46 px) first.
+
+## v1.61: one-time sound control, higher highway, bigger hand
+
+- The Listen "Sound − / +" control shows only until ✓ Done (`settings.listenTuned`); Settings › Sound delay ›
+  "👂 Line it up by ear" brings it back for the next Listen (`G.tuneAsked`).
+- Highway starts higher: `laneTop` 46k with chord names (was 72k), 30k without (was 44k); chord names row moved up
+  to `laneTop-20k`. The score panel sits on the right of the chord-name row.
+- Finger guide strip up to 88k tall when the strings keep 26+ px each, so the hand is about twice the size in
+  landscape with the fretboard off.
+- Possible next step: hide Android's status bar during play (immersive mode) in the app for a little more height.
 
 ## Idea: play along with an MP3
 

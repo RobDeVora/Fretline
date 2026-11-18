@@ -199,7 +199,7 @@ header h1 span{color:var(--accent)}
     <button id="btnRestart" title="Restart">⟲</button>
     <button class="primary" id="btnPlay">▶ Play</button>
     <button id="btnListen" title="Hear it">Listen</button>
-    <span id="lsTune" style="display:none;align-items:center;gap:4px" title="Line the sound up with the notes reaching the rings"><span class="small">Sound</span><button id="lsEarly" style="padding:6px 9px">−</button><span id="lsVal" class="small" style="min-width:52px;text-align:center"></span><button id="lsLate" style="padding:6px 9px">+</button></span>
+    <span id="lsTune" style="display:none;align-items:center;gap:4px" title="Line the sound up with the notes reaching the rings"><span class="small">Sound</span><button id="lsEarly" style="padding:6px 9px">−</button><span id="lsVal" class="small" style="min-width:52px;text-align:center"></span><button id="lsLate" style="padding:6px 9px">+</button><button id="lsDone" class="primary" style="padding:6px 10px">✓ Done</button></span>
     <button id="btnRegen" style="display:none" title="Generate a new track">New</button>
   </div>
 </section>
@@ -315,7 +315,8 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="small" style="margin-top:-6px">Off: just aim for the rings on the hit line. The window still works the same.</div>
     <div class="field"><label>Strums show</label><select id="sStrumView"><option value="fingers">Chord fingering (fret numbers on each string)</option><option value="arrows">Big D / U arrows</option></select></div>
     <div class="field"><label>Sound delay: <span id="sDelV"></span></label><input type="range" id="sDel" min="-10" max="400" step="10"><span class="small">How long the app's sound takes to reach your ears. Bluetooth headphones add 150–300 ms; slide left to the end for Auto. The band, Listen and the count-in play this much early so you hear them right on the line.</span>
-      <button id="sDelTest" style="margin-top:6px">🎧 Measure with a tap test</button></div>
+      <button id="sDelTest" style="margin-top:6px">🎧 Measure with a tap test</button>
+      <button id="sDelEar" style="margin-top:6px">👂 Line it up by ear (in a song)</button></div>
     <div class="field"><label>Highway speed / note spacing: <span id="sZoomV"></span></label><input type="range" id="sZoom" min="0.6" max="2" step="0.1"></div>
     <div class="field inline"><label>Accept the right note in any octave</label><input type="checkbox" id="sOct"></div>
     <div class="field inline"><label>Show note names instead of fret numbers</label><input type="checkbox" id="sNames"></div>
@@ -2160,7 +2161,7 @@ function updateButtons(){
   $('#btnPlay').textContent=G.playing&&!G.listen?'❚❚ Pause':'▶ Play';
   $('#btnListen').textContent=G.listen&&G.playing?'■ Stop':'Listen';
   $('#btnListen').classList.toggle('on',G.listen);
-  $('#lsTune').style.display=G.listen&&G.playing?'inline-flex':'none';syncLsVal();
+  $('#lsTune').style.display=G.listen&&G.playing&&(!settings.listenTuned||G.tuneAsked)?'inline-flex':'none';syncLsVal();
   document.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.mode===G.mode));
   $('#spVal').textContent=Math.round(G.speed*100)+'%';
   syncFocus();
@@ -2203,6 +2204,7 @@ syncBandBtn();
 function syncLsVal(){const v=$('#lsVal');if(v)v.textContent=Math.round(soundDelay()*1000)+' ms';}
 function nudgeDelay(d){settings.soundDelay=Math.max(0,Math.min(500,Math.round(soundDelay()*1000)+d));saveSettings();syncLsVal();bandSeek();if(typeof syncSettingsUI==='function')syncSettingsUI();}
 $('#lsEarly').onclick=()=>nudgeDelay(-10);$('#lsLate').onclick=()=>nudgeDelay(10);
+$('#lsDone').onclick=()=>{settings.listenTuned=true;saveSettings();G.tuneAsked=false;updateButtons();showHint('Sound timing saved. To adjust it again: Settings › Sound delay › Line it up by ear.',4000);};
 $('#btnRestart').onclick=()=>{const was=G.playing&&!G.listen;resetRun();if(was){G.playing=true;updateButtons();}};
 $('#btnBack').onclick=()=>{resetRun();keepAwake(false);show('home');renderList();};
 document.querySelectorAll('#modeSeg button').forEach(b=>b.onclick=()=>{G.mode=b.dataset.mode;updateButtons();});
@@ -2642,14 +2644,14 @@ function drawLyrics(lines,y,W,h,k,shade){
 function draw(now){
   const W=CW,H=CH,S=G.song,ev=S.events;cx.clearRect(0,0,W,H);
   syncFocus();const k=settings.big||1;const F=px=>Math.round(px*k)+'px';
-  const tightFb=settings.fingerGuide!==false&&H<440;const fbH=settings.fretboard?Math.max(tightFb?46:64,Math.min(120,H*(tightFb?0.17:0.26))):0;const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?72:44)*k);let laneBot=H-(settings.fretboard?fbH+18:14);
+  const tightFb=settings.fingerGuide!==false&&H<440;const fbH=settings.fretboard?Math.max(tightFb?46:64,Math.min(120,H*(tightFb?0.17:0.26))):0;const hasSegs=G.segs&&G.segs.length;const laneTop=Math.round((hasSegs?46:30)*k);let laneBot=H-(settings.fretboard?fbH+18:14);
   // lyric strip under the strings: two lines, or just the current one when there isn't room
   // (if even one line would squeeze the strings below their minimum, it's laid over the bottom of the highway instead)
   if(G._fgFor!==S.events){planFingers(S.events);G._fgFor=S.events;
     // how close notes typically get (15th percentile of the gaps between notes)
     const ts=S.events.filter(e=>!e.rest).map(e=>e.t);const gs=[];for(let j=1;j<ts.length;j++){const g=ts[j]-ts[j-1];if(g>0.06)gs.push(g);}gs.sort((a,b)=>a-b);G._gapQ=gs.length?Math.max(0.125,gs[Math.floor(gs.length*0.15)]):1;}
   // finger guide strip (and lyrics) under the strings; on short screens they get smaller, then lie over the highway
-  let fgH=0,fgOver=0;if(settings.fingerGuide!==false){const room=laneBot-laneTop;const full=Math.round(76*k),small=Math.max(48,Math.round(40*k));
+  let fgH=0,fgOver=0;if(settings.fingerGuide!==false){const room=laneBot-laneTop;const full=Math.round(88*k),small=Math.max(48,Math.round(40*k));
     if(room-full-(settings.fretboard?10*k:0)>=6*26)fgH=full;else if(room-small>=6*16)fgH=small;else fgOver=small;if(fgH&&settings.fretboard)fgH+=Math.round(10*k);laneBot-=fgH;}
   let lyrH=0,lyrOver=0;const LY=settings.sing&&songLyrics(S);if(LY){const room=laneBot-laneTop;
     if(room-Math.round(44*k)>=110)lyrH=Math.round(44*k);else if(room-Math.round(24*k)>=6*14)lyrH=Math.round(24*k);else lyrOver=Math.round(24*k);if(lyrH)lyrH+=6;laneBot-=lyrH;}const laneH=Math.max(12,(laneBot-laneTop)/6);
@@ -2770,7 +2772,7 @@ function draw(now){
   }
   // chord row: names scroll in, pin at the left while active, get pushed off by the next
   if(hasSegs){
-    const segs=G.segs;const rowY=laneTop-24*k;const pinX=hitX+6;
+    const segs=G.segs;const rowY=laneTop-20*k;const pinX=hitX+6;
     cx.textAlign='left';cx.textBaseline='middle';
     for(let si=0;si<segs.length;si++){
       const sg=segs[si];const x=hitX+(sg.t-G.clock)*ppb;if(x>W+10)break;
@@ -2901,6 +2903,8 @@ function previewSound(){if(!actx)return;const shape=[3,2,0,0,0,3];shape.forEach(
 $('#sFx').onchange=e=>{settings.fx=e.target.value;saveSettings();};
 $('#sPreview').onclick=async()=>{await ensureAudio();if(settings.sound!=='basic'&&sampler.id!==settings.sound)await applySound(settings.sound);previewSound();};
 $('#sClose').onclick=()=>{settingsOpen=false;$('#settings').classList.remove('show');};
+$('#sDelEar').onclick=()=>{G.tuneAsked=true;settingsOpen=false;$('#settings').classList.remove('show');
+  showHint(G.song?'Press Listen, then use Sound − / + until the notes sound just as they reach the rings. Tap ✓ Done when it\'s right.':'Open a song, press Listen, then use Sound − / + until the notes sound as they reach the rings.',9000);};
 $('#sSens').oninput=e=>{settings.sens=+e.target.value;saveSettings();syncSettingsUI();};
 $('#sLat').oninput=e=>{settings.latency=+e.target.value;saveSettings();syncSettingsUI();};
 $('#sBig').onchange=e=>{settings.big=+e.target.value;saveSettings();};
@@ -3689,7 +3693,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.60';
+const APP_VERSION='1.61';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
