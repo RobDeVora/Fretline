@@ -67,13 +67,14 @@ header h1 span{color:var(--accent)}
 #player .bottom{display:flex;align-items:center;justify-content:center;gap:10px;padding:6px 10px 8px}
 #player .bottom button{min-width:52px;padding:10px 14px}
 #btnPlay{min-width:110px!important}
-.overlay{position:absolute;inset:0;background:rgba(10,12,16,.82);display:none;align-items:center;justify-content:center;z-index:5;padding:20px}
+.overlay{position:absolute;inset:0;background:rgba(10,12,16,.82);display:none;align-items:center;align-items:safe center;justify-content:center;z-index:5;padding:20px;overflow-y:auto}
 .overlay.show{display:flex}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px;max-width:420px;width:100%;max-height:90%;overflow:auto}
 .card h2{margin:0 0 8px;font-size:20px}
 .card p{color:var(--muted);margin:6px 0}
 .stars{font-size:34px;letter-spacing:4px;color:var(--warn);margin:4px 0}
 .big{font-size:40px;font-weight:800}
+@media (max-height:520px){#results .card{padding:10px 16px}#results h2{margin:2px 0;font-size:18px}#results .stars{font-size:22px;margin:0}#results .big{font-size:28px}#results p{margin:4px 0}#results .row{margin-top:6px}}
 .row{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
 .row.end{justify-content:flex-end}
 .field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
@@ -172,7 +173,7 @@ header h1 span{color:var(--accent)}
         <div class="row end"><button id="iListen">Listen first</button><button class="primary" id="iStart">Start</button></div>
       </div>
     </div>
-    <div class="overlay" id="results">
+    <div class="overlay" id="results" style="position:fixed">
       <div class="card" style="text-align:center">
         <h2 id="rTitle">Nice work!</h2>
         <div class="stars" id="rStars">★★★</div>
@@ -304,6 +305,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field inline"><label>Show the timing window as a shaded band</label><input type="checkbox" id="sBand"></div>
     <div class="small" style="margin-top:-6px">Off: just aim for the rings on the hit line. The window still works the same.</div>
     <div class="field"><label>Strums show</label><select id="sStrumView"><option value="fingers">Chord fingering (fret numbers on each string)</option><option value="arrows">Big D / U arrows</option></select></div>
+    <div class="field"><label>Sound delay: <span id="sDelV"></span></label><input type="range" id="sDel" min="-10" max="400" step="10"><span class="small">How long the app's sound takes to reach your ears. Bluetooth headphones add 150–300 ms; slide left to the end for Auto. The band, Listen and the count-in play this much early so you hear them right on the line.</span></div>
     <div class="field"><label>Note spacing (zoom): <span id="sZoomV"></span></label><input type="range" id="sZoom" min="0.6" max="2" step="0.1"></div>
     <div class="field inline"><label>Accept the right note in any octave</label><input type="checkbox" id="sOct"></div>
     <div class="field inline"><label>Show note names instead of fret numbers</label><input type="checkbox" id="sNames"></div>
@@ -1180,7 +1182,7 @@ function buildSong(def){
 
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
-const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,backing:true,bandVol:0.6,headphones:false,deadStrings:true},store.get('settings',{}));
+const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1},store.get('settings',{}));
 function saveSettings(){store.set('settings',settings);}
 function gate(){return 0.04*Math.pow(0.65,settings.sens-1);}
 let bests=store.get('best',{});
@@ -1435,7 +1437,7 @@ function stopVoices(){if(!actx)return;const t=actx.currentTime;for(const k in vo
 function pluck(midi,when,vol,dur,cents,lp,s,fx){
   const det$=cents?Math.pow(2,cents/1200):1;const dest=masterOut();
   const out=()=>{if(!lp)return dest;const f=actx.createBiquadFilter();f.type='lowpass';f.frequency.value=lp;f.connect(dest);return f;};
-  const t=actx.currentTime+(when||0);const ring=s!=null;
+  const t=actx.currentTime+(when||0)+pluckOffset;const ring=s!=null;
   let b=null,rate=1,gainMul=1;
   if(sampler.id!=='basic'){
     b=sampler.buffers[midi];
@@ -1604,12 +1606,12 @@ function buildBand(S,shift){
 // called every frame while playing: schedule the next ~0.2 s of band hits at exact audio times
 function bandTick(){
   const B=G.band;if(!B||!settings.backing||!actx||G.waiting||G.mode==='wait')return;
-  const b=bps();const ahead=G.clock+0.2*b;const E=B.events;
-  while(G.bandIdx<E.length&&E[G.bandIdx].t<=ahead){const h=E[G.bandIdx++];if(h.t<0||h.t<G.clock-0.05*b)continue;
-    const when=actx.currentTime+Math.max(0,(h.t-G.clock)/b);
+  const b=bps();const D=soundDelay();const ahead=G.clock+(0.2+D)*b;const E=B.events;
+  while(G.bandIdx<E.length&&E[G.bandIdx].t<=ahead){const h=E[G.bandIdx++];if(h.t<0||h.t<G.clock+(D-0.05)*b)continue;
+    const when=actx.currentTime+Math.max(0,(h.t-G.clock)/b-D);
     if(h.kind==='bass'||h.kind==='keys')bandNote(h.kind,h.midi,when,h.v,h.d/b);else drum(h.kind,when,h.v);
     // remember when this reaches the speaker so the mic doesn't mistake it for your guitar
-    const at=performance.now()+(when-actx.currentTime+(actx.outputLatency||actx.baseLatency||0))*1000;bandHits.push(at);if(bandHits.length>64)bandHits.shift();}
+    const at=performance.now()+(when-actx.currentTime+D)*1000;bandHits.push(at);if(bandHits.length>64)bandHits.shift();}
 }
 const bandHits=[];
 function bandSound(now){if(settings.headphones||!settings.backing||!G.band||!G.playing)return false;for(let i=bandHits.length-1;i>=0;i--){const d=now-bandHits[i];if(d>=-25&&d<=110)return true;}return false;}
@@ -1631,18 +1633,23 @@ function fxMiss(e,now){
   // without headphones the mic hears this sound: stop listening for a moment so it isn't taken for your playing
   if(!settings.headphones)muteUntil=Math.max(muteUntil,now+250);
 }
-function playEvent(e){
+// How long the app's sound takes to reach your ears. Bluetooth headphones add 150-300 ms. The band, Listen, the
+// count-in and the metronome are played this much early, so you hear them exactly as notes reach the line.
+function soundDelay(){if(settings.soundDelay>=0)return settings.soundDelay/1000;if(!actx)return 0;const d=(actx.outputLatency||0)||(actx.baseLatency||0);return Math.min(0.5,Math.max(0,d));}
+let pluckOffset=0;
+function playEvent(e,at){pluckOffset=Math.max(0,at||0);try{playEvent0(e);}finally{pluckOffset=0;}}
+function playEvent0(e){
   if(!actx)return;
   const sec=G.song?e.d*60/(G.song.bpm*G.speed)+0.15:1.5;
-  if(e.strum){if(e.strum==='x'){stopVoices();if(sampler.id!=='basic'){(e.snotes||[]).forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.008,0.12,0.06));}else click(false,performance.now());return;}if(e.shape)e.shape.forEach((f,s)=>{if(f<0)dampString(s,actx.currentTime);});const ns=(e.snotes||[]).slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.012,e.strum==='U'?0.16:0.22,sec,0,0,n.s));return;}
-  if(e.chord||e.notes.length>=3){if(e.shape)e.shape.forEach((f,s)=>{if(f<0)dampString(s,actx.currentTime);});const ns=e.notes.slice().sort((a,b)=>a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.018,0.22,sec,0,0,n.s));}
+  if(e.strum){if(e.strum==='x'){stopVoices();if(sampler.id!=='basic'){(e.snotes||[]).forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.008,0.12,0.06));}else click(false,performance.now());return;}if(e.shape)e.shape.forEach((f,s)=>{if(f<0)dampString(s,actx.currentTime+pluckOffset);});const ns=(e.snotes||[]).slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.012,e.strum==='U'?0.16:0.22,sec,0,0,n.s));return;}
+  if(e.chord||e.notes.length>=3){if(e.shape)e.shape.forEach((f,s)=>{if(f<0)dampString(s,actx.currentTime+pluckOffset);});const ns=e.notes.slice().sort((a,b)=>a.s-b.s);ns.forEach((n,i)=>pluck(n.midi+(G.capo||0),i*0.018,0.22,sec,0,0,n.s));}
   else e.notes.forEach(n=>{const cp=G.capo||0;const leg=n.tech==='h'||n.tech==='p';
     pluck(n.midi+cp,0,leg?0.28:0.4,sec,0,0,n.s,(n.tech||n.bend||n.vib)?{from:n.tech==='s'&&n.from?n.from.midi+cp:null,bend:n.bend||0,vib:!!n.vib}:null);});
 }
-function click(accent,now){
+function click(accent,now,at){
   if(!actx)return;const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=accent?1600:1100;
-  const t=actx.currentTime;g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(accent?0.35:0.2,t+0.002);g.gain.exponentialRampToValueAtTime(0.0001,t+0.04);
-  o.connect(g);g.connect(actx.destination);o.start(t);o.stop(t+0.05);muteUntil=now+70;
+  const t=actx.currentTime+Math.max(0,at||0);g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(accent?0.35:0.2,t+0.002);g.gain.exponentialRampToValueAtTime(0.0001,t+0.04);
+  o.connect(g);g.connect(actx.destination);o.start(t);o.stop(t+0.05);if(!settings.headphones)muteUntil=Math.max(muteUntil,now+(t-actx.currentTime)*1000+70);
 }
 
 /* ================= UI helpers ================= */
@@ -2004,11 +2011,12 @@ function update(dt,now){
   let target=G.clock+dt*b;G.waiting=false;
   if(G.mode==='wait'&&!G.listen){const i=firstPending();if(i>=0&&target>ev[i].t){target=Math.max(G.clock,ev[i].t);G.waiting=true;}}
   const fb=Math.floor(target+1e-6);
-  if(fb>G.lastClickBeat){G.lastClickBeat=fb;if(fb<0||(settings.metronome&&!G.waiting&&!G.listen))click(((fb%S.bpb)+S.bpb)%S.bpb===0,now);}
+  const D=soundDelay();const fbA=Math.floor(target+D*b+1e-6);
+  if(fbA>G.lastClickBeat&&!G.waiting){G.lastClickBeat=fbA;if(fbA<0||(settings.metronome&&!G.listen))click(((fbA%S.bpb)+S.bpb)%S.bpb===0,now,(fbA-target)/b-D);}
   G.clock=target;
   bandTick();
   if(G.listen){
-    while(G.playedIdx<ev.length&&ev[G.playedIdx].t<=G.clock){playEvent(ev[G.playedIdx]);st[G.playedIdx]=3;G.playedIdx++;}
+    while(G.playedIdx<ev.length&&ev[G.playedIdx].t<=G.clock+D*b){const e=ev[G.playedIdx];playEvent(e,(e.t-G.clock)/b-D);st[G.playedIdx]=3;G.playedIdx++;}
     if(G.clock>S.length+1){resetRun();}
     return;
   }
@@ -2335,7 +2343,7 @@ function tunerUpdate(){
 
 /* ---- settings ---- */
 let settingsOpen=false;
-function syncSettingsUI(){$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+function syncSettingsUI(){$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sZoom').value=settings.zoom;$('#sZoomV').textContent=settings.zoom.toFixed(1)+'×';$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();};
@@ -2366,6 +2374,7 @@ $('#sStrumView').onchange=e=>{settings.strumView=e.target.value;saveSettings();}
 $('#sTiming').onchange=e=>{settings.timing=+e.target.value;saveSettings();};
 $('#sBand').onchange=e=>{settings.band=e.target.checked;saveSettings();};
 $('#sPhones').onchange=e=>{settings.headphones=e.target.checked;saveSettings();};
+$('#sDel').oninput=e=>{const v=+e.target.value;settings.soundDelay=v<0?-1:v;saveSettings();syncSettingsUI();};
 $('#sDead').onchange=e=>{settings.deadStrings=e.target.checked;saveSettings();};
 $('#sBandVol').oninput=e=>{settings.bandVol=+e.target.value;saveSettings();$('#sBandV').textContent=Math.round(settings.bandVol*100)+'%';if(bandBus)bandBus.gain.value=settings.bandVol;};
 $('#sMetro').onchange=e=>{settings.metronome=e.target.checked;saveSettings();};
@@ -3076,7 +3085,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.43';
+const APP_VERSION='1.44';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
