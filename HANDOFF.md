@@ -1,4 +1,4 @@
-# Fretline: session handoff (17 Nov 2026, v1.51)
+# Fretline: session handoff (17 Nov 2026, v1.52)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -137,6 +137,22 @@ the app · voice recognition · float · 48000 Hz · gaps 2` (UNPROCESSED isn't 
 0.7, no 0.1-level notes. Mic problem solved. Next: recalibrate timing (tap test, then latency suggestion; latency
 was still 250 ms / sound delay 70 from the call-mode days). Worth watching: #6, #22, #29 counted with picks 0/0 at
 levels 2-5 (quick repeats / soft notes); could be ringing from the previous note being credited.
+
+After recalibrating (latency 150 ms, sound delay 190): 32/32 again, every note with a pick. Mic gaps 4.
+
+## v1.52: timing grades and fewer false "Wrong note"s
+
+- **Grades:** each hit is graded from its pick time minus latency compensation (`G.hitOff`, `timingGrade`):
+  Perfect ≤ 50 ms, Good ≤ 100 ms, else "Okay · early/late" (all × the Timing window setting). Pop-up colours
+  green / blue / amber; results card shows "Perfect n · Good n · Okay n" (`#rGrades`); report adds e.g.
+  `· perfect +23 ms` per note. Without a detected pick it falls back to the credit time. Wait mode just says Good.
+  The sim shows +67 ms raw detection delay, which the latency suggestion absorbs on the phone.
+- **Wrong note wait:** the owner saw "Wrong note" on note #9 (A3 on G2 after C4 on B1) in two 32/32 runs: a
+  fretting finger sounding the B string (C#4), heard as a pick. Wrong notes are now suspected (`wrongSuspect`)
+  and only reported after 250 ms (`wrongSettle`) if the note wasn't credited and no new pick came; otherwise the
+  report says `cancelled wrong:…`. If the note is missed while a wrong note is pending, the pop-up says "Wrong
+  note"/"Wrong string" instead of "Miss". Wrong-note sweep (G string) flags exactly as before. The ghost-note sim
+  couldn't reproduce the phone's false pick, so this needs the owner's next report to confirm.
 
 ## Other open ideas mentioned but not done
 - Same-pitch-different-string detection (timbre/inharmonicity), labelled beta.

@@ -23,6 +23,7 @@ The scripts route the app's sample downloads (jsdelivr/unpkg) to these local fil
 | `chords_dead_strings.py` | Strummed progression with a dead B, low E ringing on D, dead D in Am, dead G on a repeat C. Prints the ✓/✕/! per string | `python3 chords_dead_strings.py <repo dir>` |
 | `song_report_sim.py` | A melody like the user's "Melody in A blues", prints the detection report (set `window.__gap`, `__gain`, `__noise` via an init script) | see the file |
 | `test_native_mic.py` | The Android app's native-mic path with a fake `NativeMic` plugin (bursty 10 ms chunks of a 220 Hz tone): analyser gets the sound, pitch reads 220, no gaps; and that a failing app mic falls back to the web mic | `python3 test_native_mic.py <repo dir>` |
+| `test_wrong_wait_grades.py` | v1.52 logic: a suspected wrong note is cancelled by a hit or a new pick within 250 ms, reported otherwise; Perfect/Good/Okay thresholds | `python3 test_wrong_wait_grades.py <repo dir>` |
 | `chord_strings_static.py` | Per-string chord analysis on single snapshots of 9 open/barre chords, each string removed in turn | `python3 chord_strings_static.py <repo dir>` |
 
 Last results (v1.49): sweeps 108/108 at normal and quiet volume, 0/108 wrong notes counted, chord test
