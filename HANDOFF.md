@@ -416,6 +416,13 @@ twice. Now: on a lost device the session is rebuilt on the GPU (up to 2×, 300 m
 processor. Multi-core: `sw.js` adds COOP same-origin + COEP credentialless to navigations under `/lab/` only, the Lab
 page registers the SW and reloads once, ORT uses up to 6 threads (tested: isolated, threads work, CDN-origin runtime OK;
 main app not isolated). Test hooks: `?ortbase=` and `?modelurl=`.
+Next phone run broke two things: (1) the new SW version's `activate` deleted every cache but its own, including
+`fretline-models` (now kept); (2) the piece download stopped after the first 16 MB piece on real Hugging Face (works
+against a local Range server, so HF/redirect behaviour differs) and cached a 17 MB file → "protobuf parsing failed".
+Download is back to one continuous fetch (as in the working run) that continues with `Range: bytes=N-` if the
+connection drops, retried up to 6×; files under 97% of the expected size (`EXPECT`) are never cached, and an incomplete
+saved copy is discarded. Isolation also showed "threads no" on the phone: COEP is now `require-corp` (script loaded
+with crossOrigin=anonymous), up to 2 reload attempts, report logs whether the SW is in charge.
 **Needs:** owner to run processor (now multi-core) and graphics chip again and send the report + say how the guitar track sounds. Then:
 Basic Pitch (`@spotify/basic-pitch`, model inside the npm package) on the guitar stem → draft song; backing track =
 band without guitar.

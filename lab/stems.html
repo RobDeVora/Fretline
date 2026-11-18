@@ -57,8 +57,8 @@ const ORT_VER='1.31.1';
 const ORT_BASE=new URLSearchParams(location.search).get('ortbase')||`https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VER}/dist/`;
 /* several processor cores need a cross-origin isolated page: Fretline's service worker adds the headers for /lab/;
    if it isn't in charge of this page yet, register it and reload once */
-if(!self.crossOriginIsolated&&'serviceWorker' in navigator&&!sessionStorage.getItem('labReload')){
-  navigator.serviceWorker.register('../sw.js',{scope:'../'}).then(r=>navigator.serviceWorker.ready).then(()=>{sessionStorage.setItem('labReload','1');location.reload();}).catch(()=>{});}
+if(!self.crossOriginIsolated&&'serviceWorker' in navigator&&(+sessionStorage.getItem('labReload')||0)<2){
+  navigator.serviceWorker.register('../sw.js',{scope:'../'}).then(r=>{try{r.update();}catch(e){}return navigator.serviceWorker.ready;}).then(()=>{sessionStorage.setItem('labReload',String((+sessionStorage.getItem('labReload')||0)+1));setTimeout(()=>location.reload(),400);}).catch(()=>{});}
 const MODELS={sonic:new URLSearchParams(location.search).get('modelurl')||'https://huggingface.co/smank/htdemucs-onnx/resolve/main/htdemucs_6s.onnx',fp16:'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx',
               fp32:'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s.onnx'};
 const SEG=343980,SR=44100,OVERLAP=0.25,STEMS=['drums','bass','other','vocals','guitar','piano'],GTR=4;
@@ -71,29 +71,30 @@ window.addEventListener('error',e=>{CON.push('page error: '+(e.message||e));});w
 logEl.onclick=()=>{try{navigator.clipboard.writeText(R.join('\n'));status('Report copied.');}catch(e){}};
 $('file').onchange=()=>{$('go').disabled=!$('file').files.length;status($('file').files.length?'Ready.':'Choose a file.');};
 
-function loadScript(src){return new Promise((ok,bad)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>bad(new Error('could not load '+src));document.head.appendChild(s);});}
-/* downloads the model in 16 MB pieces (HTTP Range), retrying a failed piece up to 5 times; each piece is kept in the
-   cache as it arrives, so a dropped connection or a reload resumes instead of starting again */
-const PIECE=16*1024*1024;
+function loadScript(src){return new Promise((ok,bad)=>{const s=document.createElement('script');s.crossOrigin='anonymous';s.src=src;s.onload=ok;s.onerror=()=>bad(new Error('could not load '+src));document.head.appendChild(s);});}
+/* downloads the model in one go; if the connection drops it continues from where it stopped (HTTP Range); a file
+   smaller than the model should be is never kept */
+const EXPECT={sonic:240e6,fp32:250e6,fp16:130e6};
 async function getModel(url){
-  let cache=null;try{cache=await caches.open('fretline-models');const hit=await cache.match(url);if(hit){log('model: from this phone\'s cache');return new Uint8Array(await hit.arrayBuffer());}}catch(e){}
-  const parts=[];let got=0,resumed=0;
-  for(let i=0;;i++){const key=url+'?fretline-piece='+i; /* not #: the Cache API ignores fragments */let buf=null;
-    try{if(cache){const h=await cache.match(key);if(h){buf=new Uint8Array(await h.arrayBuffer());resumed++;}}}catch(e){}
-    if(!buf){let err=null;
-      for(let a=1;a<=5&&!buf;a++){try{const r=await fetch(url,{headers:{Range:'bytes='+(i*PIECE)+'-'+((i+1)*PIECE-1)}});
-          if(r.status===416){buf=new Uint8Array(0);break;}
-          if(r.status===200){if(i>0)throw new Error('server ignored the piece request');buf=new Uint8Array(await r.arrayBuffer());parts.push(buf);got+=buf.length;log('model: server sent it whole');i=-1;break;}
-          if(r.status!==206)throw new Error('HTTP '+r.status);buf=new Uint8Array(await r.arrayBuffer());
-        }catch(e){err=e;log('model: piece '+(i+1)+' try '+a+' failed ('+(e.message||e)+')');await new Promise(z=>setTimeout(z,1500*a));}}
-      if(!buf)throw new Error('model download kept failing: '+(err&&err.message||err));
-      if(i===-1)break;
-      try{if(cache&&buf.length)await cache.put(key,new Response(buf.slice()));}catch(e){}}
-    if(!buf.length)break;parts.push(buf);got+=buf.length;prog(Math.min(0.3,got/2.5e8*0.3));status('Downloading the model… '+Math.round(got/1e6)+' MB');
-    if(buf.length<PIECE)break;}
-  const all=new Uint8Array(got);let o=0;for(const p of parts){all.set(p,o);o+=p.length;}
-  log('model: '+(got/1e6).toFixed(0)+' MB'+(resumed?' ('+resumed+' pieces were already on the phone)':''));
-  try{if(cache){await cache.put(url,new Response(all.slice(),{headers:{'content-type':'application/octet-stream'}}));for(let i=0;i<parts.length;i++)await cache.delete(url+'?fretline-piece='+i);}}catch(e){log('model: could not keep a copy ('+e.message+')');}
+  let cache=null;const want=new URLSearchParams(location.search).get('modelurl')?0:(EXPECT[$('mdl').value]||0);
+  try{cache=await caches.open('fretline-models');const hit=await cache.match(url);if(hit){const b=new Uint8Array(await hit.arrayBuffer());
+      if(b.length>=want*0.97){log('model: from this phone\'s cache ('+(b.length/1e6).toFixed(0)+' MB)');return b;}
+      log('model: the saved copy is incomplete ('+(b.length/1e6).toFixed(0)+' MB), downloading again');await cache.delete(url);}}catch(e){}
+  for(const k of await (cache?cache.keys():[]))if(String(k.url).includes('fretline-piece'))await cache.delete(k);
+  let parts=[],got=0;
+  for(let a=1;a<=6;a++){
+    try{const r=await fetch(url,got?{headers:{Range:'bytes='+got+'-'}}:{});
+      if(got&&r.status!==206){log('model: could not continue (HTTP '+r.status+'), starting over');parts=[];got=0;if(r.status!==200)throw new Error('HTTP '+r.status);}
+      else if(!r.ok)throw new Error('HTTP '+r.status);
+      if(a===1)log('model: downloading'+(r.headers.get('content-length')?' '+(+r.headers.get('content-length')/1e6).toFixed(0)+' MB':''));
+      const rd=r.body.getReader();
+      for(;;){const {done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;prog(Math.min(0.3,got/(want||2.5e8)*0.3));status('Downloading the model… '+Math.round(got/1e6)+(want?' / ~'+Math.round(want/1e6):'')+' MB');}
+      break;
+    }catch(e){log('model: connection dropped at '+(got/1e6).toFixed(0)+' MB ('+(e.message||e)+'), try '+a);if(a===6)throw new Error('model download kept failing');await new Promise(z=>setTimeout(z,1500*a));}}
+  if(want&&got<want*0.97)throw new Error('model download incomplete: '+(got/1e6).toFixed(0)+' MB of about '+(want/1e6).toFixed(0)+' MB');
+  const all=new Uint8Array(got);let o=0;for(const p of parts){all.set(p,o);o+=p.length;}parts=null;
+  log('model: downloaded '+(got/1e6).toFixed(0)+' MB');
+  try{if(cache)await cache.put(url,new Response(all.slice(),{headers:{'content-type':'application/octet-stream'}}));}catch(e){log('model: could not keep a copy ('+e.message+')');}
   return all;}
 async function decode(file,secs){
   const ab=await file.arrayBuffer();const ac=new (window.AudioContext||window.webkitAudioContext)();
@@ -112,6 +113,7 @@ $('go').onclick=async()=>{
     log('Fretline Lab · split a song · '+new Date().toISOString().slice(0,16).replace('T',' '));
     log('device: '+navigator.userAgent.replace(/\s+/g,' ').slice(0,160));
     log('cores '+(navigator.hardwareConcurrency||'?')+' · memory '+(navigator.deviceMemory?navigator.deviceMemory+' GB':'?')+' · WebGPU '+(('gpu' in navigator)?'present':'absent')+' · threads '+(self.crossOriginIsolated?'yes (cross-origin isolated)':'no (single thread)'));
+    log('service worker: '+(navigator.serviceWorker&&navigator.serviceWorker.controller?'in charge':'not in charge')+' · reload done '+(sessionStorage.getItem('labReload')?'yes':'no'));
     status('Loading the AI runtime…');
     if(!window.ort)await loadScript(ORT_BASE+'ort.webgpu.min.js');
     ort.env.wasm.wasmPaths=ORT_BASE;ort.env.wasm.numThreads=self.crossOriginIsolated?Math.min(6,navigator.hardwareConcurrency||2):1;log('processor threads: '+ort.env.wasm.numThreads);
