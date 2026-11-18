@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Fretline Lab · Split a song</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#2a2f3a;--text:#e8ebf0;--muted:#9aa3b2;--accent:#5ce1a6;--warn:#ffd43b;--bad:#ff6b81}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:14px max(14px,env(safe-area-inset-left)) 40px}
+h1{font-size:21px;margin:4px 0 2px}p{margin:6px 0}.small{color:var(--muted);font-size:13.5px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:12px 0}
+label{display:block;margin:8px 0 4px;font-weight:600}select,input[type=file]{width:100%;font-size:15px;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text)}
+button{font-size:16px;padding:11px 16px;border-radius:12px;border:0;background:var(--accent);color:#06281a;font-weight:700;margin-top:12px;width:100%}button:disabled{opacity:.45}
+.row{display:flex;gap:10px}.row>*{flex:1}
+#log{white-space:pre-wrap;font:12.5px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#c9d1dd;max-height:260px;overflow:auto}
+.bar{height:10px;background:#0b0d12;border-radius:6px;overflow:hidden;margin:8px 0}.bar>div{height:100%;width:0;background:var(--accent);transition:width .2s}
+audio{width:100%;margin:6px 0}a{color:var(--accent)}
+</style>
+</head>
+<body>
+<a href="../index.html" class="small">‹ Back to Fretline</a>
+<h1>🧪 Split a song</h1>
+<p class="small">Test of Demucs (Meta's open-source source-separation model, 6-stem version) running on this device: it pulls
+the guitar out of a recording, and leaves you the band without the guitar to practise over. Your audio never leaves
+the phone. The model is downloaded once (about 136 MB, so use Wi-Fi) and kept for next time.</p>
+
+<div class="card">
+  <label for="file">Audio file (MP3, WAV, M4A…)</label>
+  <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac">
+  <div class="row">
+    <div><label for="secs">How much</label><select id="secs"><option value="30">First 30 s (quick test)</option><option value="60">First 60 s</option><option value="0">Whole song</option></select></div>
+    <div><label for="be">Run on</label><select id="be"><option value="auto">Graphics chip if possible</option><option value="wasm">Processor only</option></select></div>
+  </div>
+  <label for="mdl">Model</label>
+  <select id="mdl"><option value="fp16">Half-size download (136 MB)</option><option value="fp32">Full (258 MB)</option></select>
+  <button id="go" disabled>Split it</button>
+  <div class="bar"><div id="prog"></div></div>
+  <div id="status" class="small">Choose a file.</div>
+</div>
+
+<div class="card" id="out" style="display:none">
+  <b>Guitar only</b><audio id="aGtr" controls></audio><a id="dGtr" download="guitar.wav">Download guitar.wav</a>
+  <p></p><b>Band without guitar</b><audio id="aRest" controls></audio><a id="dRest" download="band-no-guitar.wav">Download band-no-guitar.wav</a>
+</div>
+
+<div class="card"><b>Report</b> <span class="small">(📋 tap to copy and send it)</span><div id="log"></div></div>
+
+<script>
+/* Fretline Lab: Demucs htdemucs_6s (ONNX export by StemSplit, MIT, original by facebookresearch/demucs; Rouard,
+   Massa & Défossez, ICASSP 2023). Input "mix" [1,2,343980] (7.8 s stereo at 44.1 kHz), output "stems"
+   [1,6,2,343980] in the order drums, bass, other, vocals, guitar, piano. Chunks overlap by a quarter and are blended
+   with a triangular weight (as Demucs' own apply_model does); the mix is normalised by the mono mean/std first. */
+const ORT_VER='1.20.1';
+const ORT_BASE=`https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VER}/dist/`;
+const MODELS={fp16:'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx',
+              fp32:'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s.onnx'};
+const SEG=343980,SR=44100,OVERLAP=0.25,STEMS=['drums','bass','other','vocals','guitar','piano'],GTR=4;
+const $=id=>document.getElementById(id);const logEl=$('log');const R=[];
+function log(s){R.push(s);logEl.textContent=R.join('\n');logEl.scrollTop=1e9;}
+function status(s){$('status').textContent=s;}
+function prog(f){$('prog').style.width=Math.round(f*100)+'%';}
+logEl.onclick=()=>{try{navigator.clipboard.writeText(R.join('\n'));status('Report copied.');}catch(e){}};
+$('file').onchange=()=>{$('go').disabled=!$('file').files.length;status($('file').files.length?'Ready.':'Choose a file.');};
+
+function loadScript(src){return new Promise((ok,bad)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>bad(new Error('could not load '+src));document.head.appendChild(s);});}
+async function getModel(url){
+  let cache=null;try{cache=await caches.open('fretline-models');const hit=await cache.match(url);if(hit){log('model: from this phone\'s cache');return new Uint8Array(await hit.arrayBuffer());}}catch(e){}
+  const r=await fetch(url);if(!r.ok)throw new Error('model download failed: HTTP '+r.status);
+  const total=+r.headers.get('content-length')||0;const rd=r.body.getReader();const parts=[];let got=0;
+  for(;;){const {done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;if(total){prog(got/total*0.3);status('Downloading the model… '+Math.round(got/1e6)+' / '+Math.round(total/1e6)+' MB');}}
+  const buf=new Uint8Array(got);let o=0;for(const p of parts){buf.set(p,o);o+=p.length;}
+  log('model: downloaded '+(got/1e6).toFixed(0)+' MB');
+  try{if(cache)await cache.put(url,new Response(buf.slice(),{headers:{'content-type':'application/octet-stream'}}));}catch(e){log('model: could not keep a copy ('+e.message+')');}
+  return buf;}
+async function decode(file,secs){
+  const ab=await file.arrayBuffer();const ac=new (window.AudioContext||window.webkitAudioContext)();
+  let b=await ac.decodeAudioData(ab);try{ac.close();}catch(e){}
+  const dur=secs?Math.min(secs,b.duration):b.duration;const n=Math.round(dur*SR);
+  if(b.sampleRate!==SR||b.numberOfChannels!==2||n<b.length){const off=new OfflineAudioContext(2,n,SR);const s=off.createBufferSource();s.buffer=b;s.connect(off.destination);s.start(0);b=await off.startRendering();}
+  return [b.getChannelData(0).slice(0,n),(b.numberOfChannels>1?b.getChannelData(1):b.getChannelData(0)).slice(0,n)];}
+function wav(L,Rc){const n=L.length,buf=new ArrayBuffer(44+n*4),v=new DataView(buf);const w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  w(0,'RIFF');v.setUint32(4,36+n*4,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,2,true);v.setUint32(24,SR,true);v.setUint32(28,SR*4,true);v.setUint16(32,4,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*4,true);
+  let o=44;for(let i=0;i<n;i++){for(const x of [L[i],Rc[i]]){const c=Math.max(-1,Math.min(1,x));v.setInt16(o,c<0?c*0x8000:c*0x7fff,true);o+=2;}}return new Blob([buf],{type:'audio/wav'});}
+
+$('go').onclick=async()=>{
+  $('go').disabled=true;R.length=0;prog(0);$('out').style.display='none';
+  const t0=performance.now();
+  try{
+    log('Fretline Lab · split a song · '+new Date().toISOString().slice(0,16).replace('T',' '));
+    log('device: '+navigator.userAgent.replace(/\s+/g,' ').slice(0,160));
+    log('cores '+(navigator.hardwareConcurrency||'?')+' · memory '+(navigator.deviceMemory?navigator.deviceMemory+' GB':'?')+' · WebGPU '+(('gpu' in navigator)?'present':'absent')+' · threads '+(self.crossOriginIsolated?'yes':'no (single thread)'));
+    status('Loading the AI runtime…');
+    if(!window.ort)await loadScript(ORT_BASE+'ort.webgpu.min.js');
+    ort.env.wasm.wasmPaths=ORT_BASE;ort.env.wasm.numThreads=self.crossOriginIsolated?Math.min(4,navigator.hardwareConcurrency||2):1;
+    const model=await getModel(MODELS[$('mdl').value]);
+    status('Starting the model…');
+    let session=null,used='';const want=$('be').value;
+    const tryEp=async ep=>{const ts=performance.now();const s=await ort.InferenceSession.create(model,{executionProviders:[ep],graphOptimizationLevel:'all'});log('runtime: '+ep+' ready in '+((performance.now()-ts)/1000).toFixed(1)+' s');return s;};
+    if(want==='auto'&&('gpu' in navigator)){try{session=await tryEp('webgpu');used='webgpu';}catch(e){log('runtime: graphics chip not usable ('+String(e.message||e).slice(0,140)+'), using the processor');}}
+    if(!session){session=await tryEp('wasm');used='wasm';}
+    status('Reading the audio…');
+    const secs=+$('secs').value;const [L,Rc]=await decode($('file').files[0],secs);const N=L.length;
+    log('audio: '+(N/SR).toFixed(1)+' s'+(secs?' (first '+secs+' s)':' (whole file)'));
+    // normalise like Demucs: by the mono mix's mean and spread
+    let mean=0;for(let i=0;i<N;i++)mean+=(L[i]+Rc[i])/2;mean/=N;let vs=0;for(let i=0;i<N;i++){const d=(L[i]+Rc[i])/2-mean;vs+=d*d;}const sd=Math.sqrt(vs/N)||1;
+    const stride=Math.round(SEG*(1-OVERLAP));const nCh=Math.max(1,Math.ceil(Math.max(0,N-SEG)/stride)+1);
+    const W=new Float32Array(SEG);for(let i=0;i<SEG;i++)W[i]=Math.min(i+1,SEG-i)/(SEG/2);
+    const gL=new Float32Array(N),gR=new Float32Array(N),rL=new Float32Array(N),rR=new Float32Array(N),ws=new Float32Array(N);
+    const inp=new Float32Array(2*SEG);const times=[];
+    for(let c=0;c<nCh;c++){
+      const st=c*stride;inp.fill(0);for(let i=0;i<SEG&&st+i<N;i++){inp[i]=(L[st+i]-mean)/sd;inp[SEG+i]=(Rc[st+i]-mean)/sd;}
+      const tc=performance.now();const out=await session.run({mix:new ort.Tensor('float32',inp,[1,2,SEG])});const dt=performance.now()-tc;times.push(dt);
+      const S=out.stems.data;/* [1,6,2,SEG] */
+      for(let i=0;i<SEG&&st+i<N;i++){const w=W[i];ws[st+i]+=w;
+        for(let ch=0;ch<2;ch++){let rest=0;for(let k=0;k<6;k++){const v=S[(k*2+ch)*SEG+i];if(k===GTR){if(ch===0)gL[st+i]+=w*v;else gR[st+i]+=w*v;}else rest+=v;}
+          if(ch===0)rL[st+i]+=w*rest;else rR[st+i]+=w*rest;}}
+      if(out.stems.dispose)out.stems.dispose();
+      prog(0.3+0.7*(c+1)/nCh);status('Splitting… part '+(c+1)+' of '+nCh+' ('+(dt/1000).toFixed(1)+' s for 7.8 s of audio)');
+      log('part '+(c+1)+'/'+nCh+': '+(dt/1000).toFixed(1)+' s');}
+    for(let i=0;i<N;i++){const w=ws[i]||1;gL[i]=gL[i]/w*sd+mean;gR[i]=gR[i]/w*sd+mean;rL[i]=rL[i]/w*sd+5*mean;rR[i]=rR[i]/w*sd+5*mean;}
+    const tot=times.reduce((a,b)=>a+b,0)/1000;
+    log('done on '+used+': '+tot.toFixed(1)+' s of model time for '+(N/SR).toFixed(1)+' s of audio ('+(tot/(N/SR)).toFixed(2)+'× the song length); whole run '+((performance.now()-t0)/1000).toFixed(1)+' s');
+    let eg=0,er=0;for(let i=0;i<N;i++){eg+=gL[i]*gL[i]+gR[i]*gR[i];er+=rL[i]*rL[i]+rR[i]*rR[i];}
+    log('guitar share of the sound: '+(100*eg/(eg+er||1)).toFixed(0)+'%');
+    const bg=wav(gL,gR),br=wav(rL,rR);$('aGtr').src=URL.createObjectURL(bg);$('dGtr').href=$('aGtr').src;$('aRest').src=URL.createObjectURL(br);$('dRest').href=$('aRest').src;
+    $('out').style.display='';status('Done. Listen below, then tap the report to copy it.');window.__labDone={used,tot,N,parts:nCh};
+  }catch(e){log('ERROR: '+(e&&e.message||e));status('Something went wrong: '+(e&&e.message||e));window.__labDone={error:String(e&&e.message||e)};}
+  $('go').disabled=false;};
+</script>
+</body>
+</html>

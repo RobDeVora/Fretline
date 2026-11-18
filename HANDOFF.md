@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.76, Android app from the v1.63 build)
+# Fretline: session handoff (18 Nov 2026, web v1.77, Android app from the v1.63 build)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,22 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.77: Lab page: split a song with Demucs (on device)
+
+Owner wants to import a band recording, isolate the guitar and build a highway song from it. Discussed limits (guitar
+stem is the experimental part of `htdemucs_6s`; all guitars land in one stem; phone speed/memory unknown; weights'
+licence not explicitly granted; separation is only step 1, then Basic Pitch → beats → fingering → chords). Step 1 built:
+**`lab/stems.html`** (linked from Settings › App), standalone, doesn't touch the main app. onnxruntime-web 1.20.1 from
+jsdelivr (WebGPU, falls back to WASM; single thread on GitHub Pages: no cross-origin isolation), model
+`adowu/htdemucs-6s-onnx` from Hugging Face (fp16-weights 136 MB default / fp32 258 MB), kept in Cache API
+`fretline-models`. Input `mix` [1,2,343980] @ 44.1 kHz, output `stems` [1,6,2,343980] (drums, bass, other, vocals,
+guitar, piano); mono mean/std normalisation, 25% overlap, triangular blend; outputs guitar and "band without guitar"
+as WAV players/downloads; report = per-chunk times, backend, guitar share. Tested in headless Chrome with a stand-in
+ONNX of the same shape (the workspace can't reach Hugging Face): blending exact (max error 0), GPU→WASM fallback works.
+**Needs:** owner to run it on the phone (30 s first) and send the report + say how the guitar track sounds. Then:
+Basic Pitch (`@spotify/basic-pitch`, model inside the npm package) on the guitar stem → draft song; backing track =
+band without guitar.
 
 ## v1.76: research-led: tuning follower and whitened chord sound
 
