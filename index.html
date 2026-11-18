@@ -1360,10 +1360,12 @@ function buildSong(def){
 
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
-const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:true,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,micId:'',backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1,sing:true,fingerGuide:true,noteBy:'finger',vocalGuide:true,vocalVol:0.7,vocalLibrary:true,vocalFiles:true,vocalMadeUp:true},store.get('settings',{}));
+const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:false,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,micId:'',backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1,sing:true,fingerGuide:true,noteBy:'finger',vocalGuide:true,vocalVol:0.7,vocalLibrary:true,vocalFiles:true,vocalMadeUp:true},store.get('settings',{}));
 // with the Android app, the sound delay and "I'm using headphones" are kept separately for each output
 // (phone speaker, Bluetooth, wired, USB) and swapped in when the sound moves (see outRoute below)
 let outRoute=null,outName='';
+// v1.65: "accept the right note in any octave" now defaults to off (playing G3 for a G4 shouldn't count); once
+if(!settings.octV2){settings.octV2=true;settings.anyOctave=false;}
 function saveSettings(){if(outRoute){(settings.soundDelays=settings.soundDelays||{})[outRoute]=settings.soundDelay;(settings.phonesBy=settings.phonesBy||{})[outRoute]=!!settings.headphones;}store.set('settings',settings);}
 // The level below which sound is treated as silence. The sensitivity setting sets the most it can be; in a quiet room
 // it drops to just above the room's own noise (measured between notes), so soft notes on a quiet phone mic still count.
@@ -2351,7 +2353,20 @@ function matchEvent(e,i,now){
   //    moment before (a note that was already ringing, or an open string humming along, doesn't jump).
   if(!analyser)return false;
   if(G.tcIdx!==i){G.tcIdx=i;G.tcf=0;G.tHist=[];G.tRiseAt=null;}
-  let ti={score:0,T:0};for(const n of e.notes){const x=targetInfo(n,cp);if(x.score>ti.score)ti=x;}
+  let ti={score:0,T:0},tm=null;for(const n of e.notes){const x=targetInfo(n,cp);if(x.score>ti.score){ti=x;tm=n.midi+cp;}}
+  // ...unless the pitch tracker hears a different note that's really there (its odd overtones stand out, so it
+  // isn't a phantom), and the expected note is just one of its overtones (G3 rings at D5, its 3rd) or much weaker
+  // than it (an open string humming in sympathy). A played note is at least half as strong as what's ringing.
+  if(m!=null&&tm!=null&&!e.notes.some(n=>noteOk(n,m,cp))){const mi=targetInfo({midi:m-cp},cp);
+    if(mi.score>=0.6){const d=tm-m;let block=ti.T<0.3*mi.T;
+      // an overtone of the heard note: block it if the heard note was just picked again, which shows in its own
+      // overtones that the expected note doesn't share (a phantom low note has none; a note ringing on doesn't jump)
+      const Hn=[[12,2],[19,3],[24,4],[28,5],[31,6],[34,7],[36,8]].find(x=>x[0]===d);
+      if(!block&&Hn){const inf={};const us=targetScoreBuf(timeBuf,actx.sampleRate,m,[1,2,3,4,5,6,7,8].filter(x=>x%Hn[1]),inf);
+        const uh=G.uHist&&G.uHist.k===m+'/'+i?G.uHist:(G.uHist={k:m+'/'+i,h:[]});uh.h.push({at:now,T:inf.T||0});while(uh.h.length&&uh.h[0].at<now-600)uh.h.shift();
+        const ub=uh.h.filter(x=>x.at<=now-60&&x.at>=now-450).map(x=>x.T);const uRose=ub.length>=3&&(inf.T||0)>=1.8*Math.min(...ub)+1e-9;
+        if(us>=0.6&&uRose)block=true;}
+      if(block){G.tcf=0;G.tRiseAt=null;return false;}}}
   const hist=G.tHist;hist.push({at:now,T:ti.T});while(hist.length&&hist[0].at<now-600)hist.shift();
   // the note's strength jumping after a pick can't be noise, so this check also accepts somewhat quieter sound
   if(det.rms<gate()*0.5){G.tcf=0;G.tRiseAt=null;return false;}
@@ -3764,7 +3779,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.64';
+const APP_VERSION='1.65';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, v1.64 + APK from v1.63)
+# Fretline: session handoff (18 Nov 2026, v1.65 + APK from v1.63)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -312,6 +312,19 @@ bottom-left corner (base on the edge) and one line above the buttons: position, 
 Lanes end 16k above the zone; lyrics sit just above the zone. Portrait keeps the strip layout; narrow screens put
 chord names below the score panel (`laneTop` 66k when W<560). Lesson: an inline `//` comment in a one-line
 statement commented out `let laneBot` and broke drawing — caught by screenshot test, use /* */ in single-line code.
+
+## v1.65: false hits from overtones and sympathetic strings
+
+Owner played only G3 (A10) through "A minor pentatonic, shape 3" and got 21/34. Simulated (`test_one_note_all_song.py`):
+11/34. Causes: (1) "any octave" on, so G3 counted for G4; (2) path 2 of `matchEvent` (targeted check + strength
+rise) credited notes that were G3's overtones (D5 = 3rd) or faint sympathetic ringing (E4), because every re-pick
+makes everything rise. Fix in path 2: when the tracker hears a different note that's really there
+(`targetInfo(m).score>=0.6`), block the expected note if it's under 30% of that note's strength, or if it's one of
+its overtones (d = 12,19,24,28,31,34,36) AND the heard note was just re-picked — judged from the heard note's own
+overtones that the expected one doesn't share (`G.uHist`, rise 1.8x). A phantom low note (tracker said D2 for A3)
+has no unshared overtones so it doesn't block. Result: G3-only 1/34 strict (6/34 with any octave), correct
+playing 33/34 (unchanged), fretboard sweeps A/G 18/18, wrong-note sweep 0 hits, song sim 17/17.
+`anyOctave` now defaults off, switched off once for existing settings (`settings.octV2`).
 
 ## Idea: play along with an MP3
 

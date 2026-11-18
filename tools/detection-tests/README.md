@@ -35,6 +35,7 @@ The scripts route the app's sample downloads (jsdelivr/unpkg) to these local fil
 | `shot_finger_guide.py` | Screenshots of the finger guide strip, landscape/portrait, fretboard on/off, playing and not (to /tmp/mm/). Serve the repo on 8769 first | `python3 shot_finger_guide.py <multi-part.mid>` |
 | `test_listen_nudge.py` | v1.61: the Sound − / + control shows during Listen until ✓ Done, then only when asked for from Settings › Line it up by ear. Serve the repo on 8769 first | `python3 test_listen_nudge.py` |
 | `test_v162_settings_route_hand.py` | v1.62: per-output sound delay / headphones with a fake plugin route switch, Settings tabs, hand size while playing at the owner's app screen sizes (screenshots to /tmp/mm). Serve the repo on 8769 first | `python3 test_v162_settings_route_hand.py <multi-part.mid>` |
+| `test_one_note_all_song.py` | v1.65: the owner's A minor pentatonic lesson with only G3 played (`PLAY=55`): should score 1/34 (6/34 with `ANYOCT=1`); played correctly (no PLAY) 33/34 | `PLAY=55 python3 test_one_note_all_song.py <repo>` |
 | `chord_strings_static.py` | Per-string chord analysis on single snapshots of 9 open/barre chords, each string removed in turn | `python3 chord_strings_static.py <repo dir>` |
 
 Last results (v1.49): sweeps 108/108 at normal and quiet volume, 0/108 wrong notes counted, chord test
