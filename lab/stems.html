@@ -49,7 +49,10 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
   <p></p><b>Band without guitar</b><audio id="aRest" controls></audio><a id="dRest" download="band-no-guitar.wav">Download band-no-guitar.wav</a>
 </div>
 
-<div class="card" id="songOut" style="display:none"><b id="songMsg"></b><p><a href="../index.html">Open Fretline › My songs</a></p></div>
+<div class="card" id="songOut" style="display:none"><b id="songMsg"></b>
+  <div id="tempoBox" style="display:none"><div class="small" id="tempoNow" style="margin-top:8px"></div>
+    <div class="row"><div><button id="tHalf" type="button">Half</button></div><div><button id="tDouble" type="button">Double</button></div></div></div>
+  <p><a href="../index.html">Open Fretline › My songs</a></p></div>
 <div class="card"><b>Report</b> <span class="small">(📋 tap to copy and send it)</span><div id="log"></div></div>
 
 <script>
@@ -85,6 +88,7 @@ async function nativeSave(a,name){const blob=await (await fetch(a.href)).blob();
   const r=await NS.saveFinish({name,mime:blob.type||'audio/wav'});status('Saved to '+r.path);log('saved: '+r.path);}
 ['dGtr','dRest'].forEach(id=>$(id).addEventListener('click',ev=>{if(!NS||!NS.saveChunk)return;ev.preventDefault();
   const base=($('ttl').value||'song').trim().replace(/[^A-Za-z0-9 ()-]+/g,'_');nativeSave($(id),base+(id==='dGtr'?' - guitar.wav':' - band.wav')).catch(e=>{status('Could not save: '+(e.message||e));log('save: '+(e.message||e));});}));
+$('tHalf').onclick=()=>retime(0.5);$('tDouble').onclick=()=>retime(2);
 $('file').onchange=()=>{const f=$('file').files[0];if(f&&!$('ttl').value)$('ttl').value=f.name.replace(/\.[^.]+$/,'').replace(/[_]+/g,' ');$('go').disabled=!$('file').files.length;status($('file').files.length?'Ready.':'Choose a file.');};
 
 /* reads the names and types of the model's top-level nodes straight from the ONNX file (protobuf: ModelProto.graph=7,
@@ -168,15 +172,46 @@ function findBeats(mono22){const H=256,F=22050/H,n=Math.floor(mono22.length/H);c
   const L=best.L;let ph=0,bs=-1;for(let p=0;p<L;p+=0.5){let sc=0;for(let x=p;x<n;x+=L)sc+=d[Math.round(x)]||0;if(sc>bs){bs=sc;ph=p;}}
   let bar=0,bb=-1;for(let k=0;k<4;k++){let sc=0;for(let x=ph+k*L;x<n;x+=4*L)sc+=d[Math.round(x)]||0;if(sc>bb){bb=sc;bar=k;}}
   return {bpm:Math.round(best.bpm*4)/4,first:(ph+bar*L)/F,spb:60/best.bpm};}
+/* v1.81: Basic Pitch hears every ringing string, overtone and bit of bass; a fingerpicked part came out as 329 notes
+   on 176 steps where the guitar track has ~100-130 picks. Keep a note only if (1) the guitar track has a real attack
+   there (spectral flux ≥ 2× its local median within ±50 ms), (2) it lasts ≥ 0.1 s unless it's loud with a strong
+   attack, (3) high notes (above G5) are loud enough to be meant; and per pick (onsets within 60 ms) keep the loudest
+   note plus at most one more of a different note name that is at least 0.8× as loud. → 106 steps, 137 notes. */
+function fft(re,im){const n=re.length;for(let i=1,j=0;i<n;i++){let b=n>>1;for(;j&b;b>>=1)j^=b;j^=b;if(i<j){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t;}}
+  for(let len=2;len<=n;len<<=1){const a=-2*Math.PI/len,wr=Math.cos(a),wi=Math.sin(a);for(let i=0;i<n;i+=len){let cr=1,ci=0;for(let k=0;k<len/2;k++){const p=i+k,q=p+len/2;const xr=re[q]*cr-im[q]*ci,xi=re[q]*ci+im[q]*cr;re[q]=re[p]-xr;im[q]=im[p]-xi;re[p]+=xr;im[p]+=xi;const t=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=t;}}}}
+function attackCurve(x){const H=256,W=1024,n=Math.max(0,Math.floor((x.length-W)/H));const fl=new Float32Array(n),win=new Float32Array(W);for(let i=0;i<W;i++)win[i]=0.5-0.5*Math.cos(2*Math.PI*i/(W-1));
+  let prev=new Float32Array(W/2+1);const re=new Float32Array(W),im=new Float32Array(W);
+  for(let f=0;f<n;f++){for(let i=0;i<W;i++){re[i]=x[f*H+i]*win[i];im[i]=0;}fft(re,im);let s=0;for(let k=0;k<=W/2;k++){const m=Math.log1p(100*Math.hypot(re[k],im[k]));if(f)s+=Math.max(0,m-prev[k]);prev[k]=m;}fl[f]=s;}
+  const med=new Float32Array(n),R=43,buf=[];for(let f=0;f<n;f++){buf.length=0;for(let j=Math.max(0,f-R);j<=Math.min(n-1,f+R);j++)buf.push(fl[j]);buf.sort((a,b)=>a-b);med[f]=buf[buf.length>>1];}
+  return {fl,med,t0:W/2/22050,dt:H/22050};}
+function cleanNotes(notes,g22){const A=attackCurve(g22);
+  const str=t=>{const i0=Math.max(0,Math.floor((t-0.05-A.t0)/A.dt)),i1=Math.min(A.fl.length-1,Math.ceil((t+0.05-A.t0)/A.dt));let mx=0,md=0,c=0;for(let i=i0;i<=i1;i++){mx=Math.max(mx,A.fl[i]);md+=A.med[i];c++;}return c?mx/(md/c+1):0;};
+  const k=notes.map(n=>({...n,s:str(n.t)})).filter(n=>n.s>=2&&(n.d>=0.1||(n.a>=0.5&&n.s>=4))&&!(n.midi>79&&n.a<0.5)).sort((a,b)=>a.t-b.t);
+  const groups=[];for(const n of k){const g=groups[groups.length-1];if(g&&n.t-g[0].t<0.06)g.push(n);else groups.push([n]);}
+  const out=[];for(const g of groups){g.sort((a,b)=>b.a-a.a);const sel=[g[0]];for(const n of g.slice(1))if(sel.length<2&&n.a>=0.8*g[0].a&&n.midi%12!==g[0].midi%12)sel.push(n);out.push(...sel);}
+  log('notes: '+out.length+' kept on '+groups.length+' picks (of '+notes.length+': no real attack, too short, or extra notes in the same pick dropped)');return out;}
+// beats from times: bar 1 holds the first note (moved by whole beats), notes on a 16th grid
+function quantise(notes,bpm,b0){const spb=60/bpm,G=bpm<90?8:4; /* slow tempos: 32nd grid, so halving the tempo moves no note */const firstNote=Math.min(...notes.map(n=>n.t));while(b0+4*spb<=firstNote-0.05)b0+=4*spb;while(b0>firstNote+0.05)b0-=spb;
+  return {b0,recNotes:notes.map(n=>({midi:n.midi,beat:Math.round((n.t-b0)/spb*G)/G,dur:Math.max(1/G,Math.round(n.d/spb*G)/G),v:Math.round(n.a*100)/100})).filter(n=>n.beat>=0)};}
+let LAST=null; /* the last song made here, for the tempo buttons */
+function tempoButtons(){const box=$('tempoBox');if(!LAST){box.style.display='none';return;}box.style.display='';const b=LAST.def.bpm;
+  $('tempoNow').textContent='Tempo: '+Math.round(b)+' BPM. If the song feels like half or double that (count along), change it:';
+  $('tHalf').textContent='Use '+Math.round(b/2)+' BPM';$('tDouble').textContent='Use '+Math.round(b*2)+' BPM';$('tHalf').disabled=b/2<30;$('tDouble').disabled=b*2>300;}
+function retime(f){if(!LAST)return;const old=LAST.def,bpm=Math.round(old.bpm*f*1000)/1000,spbOld=60/old.bpm;let b0=old.recOffset;
+  if(f<1){/* the new beat is two old beats: put it on whichever old beat the notes lean on */const spb=60/bpm;let best=-1e9,pick=b0;for(const c of [b0,b0+spbOld]){let sc=0;for(const n of LAST.notes)sc+=n.a*Math.cos(2*Math.PI*(n.t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
+  const q=quantise(LAST.notes,bpm,b0);const def={...old,bpm,recNotes:q.recNotes,recOffset:q.b0};
+  const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');const i=songs.findIndex(x=>x.id===def.id);if(i>=0)songs[i]=def;else songs.unshift(def);localStorage.setItem('fretline:songs',JSON.stringify(songs));
+  LAST.def=def;window.__labSong=def;log('tempo: changed to '+Math.round(bpm*100)/100+' BPM, bar 1 at '+q.b0.toFixed(2)+' s');tempoButtons();status('Song updated: '+Math.round(bpm)+' BPM.');}
 async function makeSong(gL,gR,L,Rc,rL,rR,N){
   status('Finding the notes…');const g22=await toRate([gL,gR],22050),m22=await toRate([L,Rc],22050);
-  const notes=await transcribe(g22);if(!notes.length)throw new Error('no guitar notes were found');
-  const bt=findBeats(m22);let b0=bt.first;const firstNote=Math.min(...notes.map(n=>n.t));while(b0+4*bt.spb<=firstNote-0.05)b0+=4*bt.spb;while(b0>firstNote+0.05)b0-=bt.spb; /* first note in bar 1 (whole beats keep the grid) */
+  let notes=await transcribe(g22);if(!notes.length)throw new Error('no guitar notes were found');
+  notes=cleanNotes(notes,g22);if(!notes.length)throw new Error('no clear guitar notes were found');
+  const bt=findBeats(m22);let b0=quantise(notes,bt.bpm,bt.first).b0;
   log('tempo: '+bt.bpm+' BPM, bar 1 at '+b0.toFixed(2)+' s');
   // Basic Pitch places onsets a little late: measure the common lag against the 8th-note grid (circular mean) and remove it
   {let cx=0,sx=0;for(const n of notes){const ph=2*Math.PI*((n.t-b0)/bt.spb)*2;cx+=Math.cos(ph)*n.a;sx+=Math.sin(ph)*n.a;}
    const lag=Math.atan2(sx,cx)/(2*Math.PI)/2*bt.spb;if(Math.abs(lag)<0.2*bt.spb){b0+=lag;log('timing: notes shifted '+Math.round(-lag*1000)+' ms to the beat');}}
-  const recNotes=notes.map(n=>({midi:n.midi,beat:Math.round((n.t-b0)/bt.spb*4)/4,dur:Math.max(0.25,Math.round(n.d/bt.spb*4)/4),v:Math.round(n.a*100)/100})).filter(n=>n.beat>=0);
+  const q=quantise(notes,bt.bpm,b0);const recNotes=q.recNotes;b0=q.b0;
   const id='m-rec-'+Date.now(),key=location.origin+'/__fretline/rec/'+id+'.wav';
   status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
   const gkey=location.origin+'/__fretline/rec/'+id+'-gtr.wav';await c.put(gkey,new Response(wav(gL,gR),{headers:{'content-type':'audio/wav'}})); /* v1.80: the real guitar is the guide */
@@ -184,7 +219,7 @@ async function makeSong(gL,gR,L,Rc,rL,rR,N){
   const def={id,cat:'mine',kind:'rec',title,bpm:bt.bpm,bpb:4,recNotes,recAudio:key,recGuitar:gkey,recOffset:b0,credit:'Made from a recording in Fretline Lab'};
   const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');songs.unshift(def);localStorage.setItem('fretline:songs',JSON.stringify(songs));
   log('song: "'+title+'" saved to My songs ('+recNotes.length+' notes, '+Math.ceil((recNotes.length?Math.max(...recNotes.map(n=>n.beat)):0)/4)+' bars)');
-  $('songMsg').textContent='"'+title+'" is in My songs.';$('songOut').style.display='';window.__labSong=def;}
+  $('songMsg').textContent='"'+title+'" is in My songs.';$('songOut').style.display='';window.__labSong=def;LAST={def,notes};tempoButtons();}
 $('go').onclick=async()=>{
   $('go').disabled=true;R.length=0;prog(0);$('out').style.display='none';
   const t0=performance.now();

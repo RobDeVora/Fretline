@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.80, Android app rebuilt for v1.80 (native separator + save to Downloads))
+# Fretline: session handoff (18 Nov 2026, web v1.81, Android app rebuilt for v1.80 (native separator + save to Downloads))
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,21 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.81: cleaner notes from recordings; half/double tempo in the Lab
+
+Owner: the real-guitar guide works. But "Thought You Should Know" is 70 BPM with ~60-75 plucked notes in 30 s (per
+Google), and we made 300+ notes at 140. Measured on the real guitar stem: ~100-130 clear picks (16ths at 70 BPM in
+places; Google's count is a guess), so the transcription had ~2.5× too many notes and 1.6× too many steps.
+- **`cleanNotes(notes,g22)`** in the Lab: spectral flux of the guitar stem (`attackCurve`, own radix-2 FFT, 1024/256
+  at 22.05 kHz, running median over ±43 frames). Keep a note if the flux peak within ±50 ms is ≥ 2× the local median,
+  it lasts ≥ 0.1 s (or is loud ≥ 0.5 with a strong attack ≥ 4), and above G5 only if amplitude ≥ 0.5; per pick
+  (onsets within 60 ms) the loudest note plus at most one other of a different note name ≥ 0.8× as loud. TYSK clip:
+  329 notes / 176 steps → 147 / 112. Synthetic riff: 64/64, extras 7 → 0.
+- **Tempo**: the beat finder can't separate 70 from 140 on this song (raw autocorrelation 4.1 vs 5.8). After making
+  a song the Lab shows "Use ½ / Use 2×" buttons (`retime`, `LAST`): no re-splitting; exact tempo (not rounded, since
+  0.2% would drift 0.4 s over a song); for half it chooses which old beat becomes the new beat by where the notes
+  lean; `quantise()` uses a 32nd grid under 90 BPM so halving moves no notes. Updates the saved song in place.
 
 ## v1.80: recordings use the real guitar as the guide; Lab downloads work in the app
 
