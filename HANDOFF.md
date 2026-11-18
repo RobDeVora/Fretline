@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, v1.65 + APK from v1.63)
+# Fretline: session handoff (18 Nov 2026, v1.66 + APK from v1.63)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -325,6 +325,21 @@ overtones that the expected one doesn't share (`G.uHist`, rise 1.8x). A phantom 
 has no unshared overtones so it doesn't block. Result: G3-only 1/34 strict (6/34 with any octave), correct
 playing 33/34 (unchanged), fretboard sweeps A/G 18/18, wrong-note sweep 0 hits, song sim 17/17.
 `anyOctave` now defaults off, switched off once for existing settings (`settings.octV2`).
+
+## v1.66: more false-hit fixes (path 2 of `matchEvent`)
+
+Owner's next report (playing the lesson) still showed false hits at the end: G3 and D3 credited while D5 rang —
+open G/D strings ringing in sympathy (D5 is their overtone). Also found in sim: the block only ran when the
+tracker had settled, and the re-pick test reset per event. Now, in path 2, with the heard note `mh` (stable, or
+the raw `det.midi` right at a pick) really there (score >= 0.6):
+- strength of the expected note = its overtones that don't land on any of the heard note's (1.5%) — unless the
+  heard note is one of the last 3 expected notes (previous note ringing on) or the expected note sits on the
+  heard note's overtones (`up`); blocked if under 30% of the heard note's strength;
+- `up` (expected = heard's 2nd..8th overtone): blocked if the heard note's own unshared overtones jumped at least
+  half as much as the expected note (re-picked); history kept per heard note across events.
+Sim: one-note runs G3 1/34, D5 4/34 (exact), D4 4/34 (2 false: first note of the song, one D5); correct 33/34;
+fretboard sweeps A/G/e 18/18; wrong-note sweep 0; song sim 17/17. Sympathetic strings aren't in the sim (samples
+are single notes), so the owner's phone is the real test for that case.
 
 ## Idea: play along with an MP3
 
