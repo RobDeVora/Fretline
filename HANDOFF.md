@@ -1,4 +1,4 @@
-# Fretline: session handoff (17 Nov 2026, v1.55)
+# Fretline: session handoff (17 Nov 2026, v1.56)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -199,6 +199,16 @@ MIDI/MusicXML), `vocalMadeUp` (made-up melody for chord sheets). 🎤 Sing stays
   Listen), not in Wait mode. Real tunes shift only if the capo differs from the song's; made-up ones follow chord
   shapes + capo. With the guide on, the piano stops improvising its own melody (`S.noPianoTune`).
 - Not tested on the phone yet. Owner asked about MP3 + chord sheet play-along (see below).
+
+## v1.56: files recognised by their contents
+
+Owner's "Marlboro_Man_Test" (a MIDI they made by merging a lead tab and chords) had no extension, so
+`loadImportFile` treated it as a pasted chord sheet → "No chords found". `sniffExt` now checks the first bytes
+(MThd → MIDI, %PDF, Guitar Pro headers, zip → .mxl or GP7, `<score-partwise` → MusicXML). Their file then shows
+Rhythm Guitar (53 chords), Distortion guitar (24-note lead), Vocals (10 notes, used by the guide) and Bass. Note:
+everything in it is in the first ~25 beats (~6 bars); its 3-minute length is only a late tempo marker, so their
+merge probably exported just the opening. Parts play one at a time (no lead + rhythm in one part).
+🎤 Sing now also shows for songs with a tune but no words (`hasLyrics`).
 
 ## Idea: play along with an MP3
 

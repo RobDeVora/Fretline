@@ -2112,7 +2112,7 @@ async function prepBand(){
   if(!store.get('bandTip',false)){store.set('bandTip',true);showHint('🥁 Backing band on. Use headphones (and tick “I\'m using headphones” in Settings) so the mic only hears your guitar. Tap 🥁 Band to turn it off.',8000);}
   if(G.band.key){const t=setTimeout(()=>showHint('Loading the backing band (first time only)…',20000),400);try{await loadBandFonts();}catch(e){}clearTimeout(t);if(G.notice&&G.notice.startsWith('Loading the backing band'))showHint('');}
 }
-function hasLyrics(){return !!songLyrics(G.song);}
+function hasLyrics(){return !!(songLyrics(G.song)||songVocal(G.song));} // words or a tune to sing
 function syncSingBtn(){const b=$('#singBtn');if(!b)return;b.style.display=hasLyrics()?'':'none';b.classList.toggle('on',!!settings.sing);b.textContent=settings.sing?'🎤 Sing on':'🎤 Sing off';}
 $('#singBtn').onclick=()=>{settings.sing=!settings.sing;saveSettings();syncSingBtn();setupBand();};
 function syncBandBtn(){const b=$('#bandBtn');if(b){b.classList.toggle('on',!!settings.backing);b.textContent=settings.backing?'🥁 Band on':'🥁 Band off';}}
@@ -2986,13 +2986,26 @@ $('#impSites').querySelectorAll('button').forEach(b=>b.onclick=()=>{const q=enco
   if(!q){$('#impPreview').className='preview err';$('#impPreview').textContent='Type the song title first, then pick a site to search.';$('#impTitle').focus();return;}
   window.open(site[1](q),'_blank','noopener');});
 $('#impFile').onchange=e=>loadImportFile(e.target.files[0]);
+/* What a file really is, from its first bytes, so a file with no extension (or the wrong one) still opens
+   properly. Text-like extensions are kept unless the bytes say MIDI, PDF, Guitar Pro or a zip. */
+function sniffExt(buf,ext){
+  const s=String.fromCharCode(...buf.subarray(0,32));
+  if(s.startsWith('MThd'))return ext==='kar'?'kar':'mid';
+  if(s.startsWith('%PDF'))return 'pdf';
+  if(/FICHIER GUITAR PRO|FICHIER GUITARE PRO/.test(s))return /^gp[345]$/.test(ext)?ext:'gp5';
+  if(s.startsWith('BCF'))return 'gpx';
+  if(s.startsWith('PK\x03\x04'))return ext==='mxl'||/^gp/.test(ext)?ext:(new TextDecoder().decode(buf).includes('Content/score.gpif')?'gp':'mxl');
+  if(!/^(musicxml|xml)$/.test(ext)){const head=new TextDecoder().decode(buf.subarray(0,600));if(/<score-(partwise|timewise)/.test(head))return 'musicxml';}
+  return ext;
+}
 async function loadImportFile(f){
   if(!f)return;
-  const ext=(f.name.split('.').pop()||'').toLowerCase();const base=f.name.replace(/\.[^.]+$/,'');
+  let ext=/\.[a-z0-9]{1,8}$/i.test(f.name)?f.name.split('.').pop().toLowerCase():'';const base=f.name.replace(/\.[a-z0-9]{1,8}$/i,'');
   const p=$('#impPreview');p.className='preview';p.textContent='Reading '+f.name+'…';
   try{
     const buf=new Uint8Array(await f.arrayBuffer());
     let info=null,fmt='';
+    ext=sniffExt(buf,ext);
     if(ext==='mid'||ext==='midi'||ext==='kar'){info=parseMidi(buf);fmt='MIDI';}
     else if(ext==='mxl'){info=parseMusicXML(await readMxl(buf));fmt='MusicXML';}
     else if(ext==='musicxml'||(ext==='xml')){info=parseMusicXML(new TextDecoder().decode(buf));fmt='MusicXML';}
@@ -3484,7 +3497,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.55';
+const APP_VERSION='1.56';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
