@@ -1,0 +1,120 @@
+# Fretline: session handoff (17 Nov 2026, v1.50)
+
+Read this first in a new session. It covers how the project is set up, what was built in the last session, the
+problem still being worked on, and what to do next.
+
+## The project
+
+- **Repo:** `RobDeVora/Fretline` (public). Owner works on an Android phone; changes go **straight to `main`**
+  (no branches/PRs). They test on the phone and send screenshots and detection reports.
+- **Web app:** a single file, `index.html` (~3,250 lines: CSS, a `<script id="core">` with pure logic that's also
+  exported for Node, and a second `<script>` with UI, audio, detection and drawing). Served by GitHub Pages at
+  `https://robdevora.github.io/Fretline/`.
+- **Service worker:** `sw.js`, network-first.
+- **Android app:** `android-app/`, a Capacitor 7 wrapper that **loads the live site**, so web changes reach the app
+  without a new APK. Native code: `MainActivity.java` (share/open-with intents, back button → `window.fretlineBack()`),
+  `IncomingPlugin.java`. Any push touching `android-app/` triggers `.github/workflows/android.yml`, which builds and
+  publishes `Fretline.apk` to the `android-latest` release. The signing keystore is committed (owner knows; fine
+  for sideloading).
+
+### Release routine (every change)
+1. Edit `index.html`.
+2. Bump `const APP_VERSION='1.xx'` in `index.html` **and** `const CACHE = 'fretline-vNN'` in `sw.js`.
+3. Syntax check every script block, e.g.
+   `node -e "const h=require('fs').readFileSync('index.html','utf8');for(const x of h.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)){try{new Function(x[1])}catch(e){console.log('ERR',e.message)}}"`
+4. Test in headless Chrome (Playwright, `/usr/bin/google-chrome`); see `tools/detection-tests/`.
+5. Commit with a descriptive message and push to `main`. Pages deploys in ~1 min.
+6. The owner updates with **Settings › Check for updates** (compares the live `APP_VERSION`).
+
+## What exists now (features added in the last session, roughly in order)
+
+- Setting to hide the fretboard; remaining-time counter in the HUD; tip text kept clear of the HUD.
+- Strumming: pattern locked to the bar grid (no overlapping strums); double-time MIDI detection (130+ BPM with a
+  chord per bar → halved). Strums drawn as **chord fingering** (fret numbers on first strum of a chord, dots on
+  repeats, ▼/▲ direction arrows); Settings › "Strums show" switches back to big D/U arrows.
+- Hit zone: glowing line, notches, per-string target rings that light up; optional shaded timing band (off by
+  default). Timing window: a note counts once its edge touches its ring; Settings › Timing window
+  (Normal/Relaxed/Very relaxed).
+- **Colours & theme** settings (6 dark themes, note palettes incl. colour-blind and custom, hit line colour, highway
+  style, fretboard wood, live preview).
+- **Check for updates** button; phone **back button** support (web history guard + native handler).
+- **Backing band** (`buildBand`): drums (synth), bass and piano (General MIDI soundfonts, downloaded once), built
+  from the song's chords/key and the player's role per bar (melody → piano comping; chords → piano melody;
+  riffs → rock beat). Toggle "🥁 Band", volume in Settings.
+- **Written solos** (`genSolo`): pentatonic box, call/answer phrasing, chord tones on strong beats, techniques.
+  Blues → 12-bar. Solo style in Generate/Mix/quick-generate; course units "Your first solos" and "Solos across
+  the neck"; Slides and Bends lessons.
+- **Techniques:** notes can have `tech:'h'|'p'|'s'`, `bend:<semitones>`, `vib:true`. Drawn (arcs, slide lines, bend
+  arrows, vibrato), scored (bend counts up to its target, legato needs no pick), played in Listen, parsed from tabs
+  (`5h7`, `7p5`, `5/7`, `7b9`, `~`).
+- Playback: notes stop at their written length (no 4.5 s ringing hum).
+- **Detection** (see below), **dead-string / muted-string feedback for chords** (✓ ✕ ! per string, pop-ups,
+  results tally), "you played here" marker (green/red ring on the string you most likely played), "Wrong string".
+- Timing: **Sound delay** (output latency, Auto or set; tap test to measure it) so band/Listen/count-in are
+  scheduled early; **Latency compensation** up to 600 ms; results show how late notes reached the app and offer
+  "Set it to … ms".
+- **I'm using headphones** setting (disables speaker allowances: ignoring picks near band hits, deafness after
+  app sounds).
+- **Detection report** on the results card (📋 Copy detection report): per note expected / heard / picks / note
+  score / level vs cutoff, plus settings and (v1.50) the microphone in use.
+- **Settings › Microphone** (v1.50): choose the input device; shows mic name and whether noise suppression,
+  echo cancellation and auto volume are actually on.
+
+## How note detection works now (single notes)
+
+`detectFrame` (every animation frame, analyser fftSize 4096): level (RMS), YIN pitch on the last 2048 samples
+(`det.stableMidi` after 2 frames), pick onsets from (a) level jump while climbing, re-armed once the note fades,
+and (b) a burst of energy above 2.5 kHz (re-picks on a ringing string); pitch-change onsets; room noise
+(5th percentile of level over ~30 s). `gate()` = min(sensitivity cutoff, max(4×room noise, 0.0012)).
+
+`matchEvent` (single notes) counts a note when either:
+1. the pitch tracker's reading matches **and** is freshly picked **and** is confirmed by the targeted check
+   (exact ≥ 0.45; octave reading needs expected ≥ 0.55 or the octave note itself ≥ 0.7); "any octave" = ±1 octave;
+2. **targeted check** (`targetInfo` → Goertzel on each resolvable overtone vs. the semitone neighbours, min of
+   all-overtone and odd-overtone scores) ≥ 0.63 **and** the note's strength jumped 2.5× over the previous ~0.4 s
+   (or it's a quick repeat of the same note with a fresh pick), for 2 frames, at ≥ half the cutoff.
+
+Wrong-note sound: pitch reading wrong and expected note absent (< 0.5) 140 ms after a pick, or a fresh pick with
+no sign of the expected note (< 0.3) after 220 ms. Ignores pitches of the last few notes (still ringing).
+
+Chords/strums: strums count on a pick onset; chord events use `chordScore`. Per-string check (`chordStrings`,
+`chordCheck`) runs 130-340 ms after the strum is credited.
+
+## Current problem being worked on
+
+The owner (Android phone, **Bluetooth headphones**, playing "Melody in A blues · 0:59 #292482" at 65 BPM in
+Generate) gets ~69% with misses clustered on some notes. The latest detection report (v1.49) showed every miss as
+**"heard nothing · picks 0/0 · level 0.1/1.2"** while hits had levels 2-97, and room noise 0.1, i.e. the mic signal
+drops to near digital silence for whole notes. Timing readout also jumped 259 → 421 ms between runs with no change.
+
+**Diagnosis:** call-style processing is gating the input. Most likely Android is recording from the **Bluetooth
+headset's call microphone** (HFP/SCO: far from the guitar, voice-only noise suppression, variable latency), or the
+phone applies noise suppression despite the constraints. Simulations can't reproduce this; everything passes there.
+
+**v1.50 (just shipped) asks the owner to:**
+1. Open Settings and report the blue "mic: …" line (device name + whether noise suppression etc. are on).
+2. Choose the phone's own microphone in Settings › Microphone if listed, play the song again, send the report.
+3. If only "Automatic" exists, do one run with Bluetooth disconnected (speaker, untick headphones, or wired) and
+   compare reports. If the 0.1 levels disappear, the headset mic is the cause.
+4. Hold off on "Set it to 420 ms" until the mic is sorted, then recalibrate (tap test for sound delay, then the
+   results card's latency suggestion).
+
+### Next steps depending on the answer
+- **Headset mic confirmed and the phone mic can be chosen:** consider remembering/auto-preferring a built-in mic
+  when a Bluetooth input is detected (label contains "Bluetooth"/"Headset"/"Hands-free"), with a one-time tip.
+- **Web can't pick the phone mic:** the Android app could force it natively (e.g. in `MainActivity`, use
+  `AudioManager.setCommunicationDevice` / avoid SCO, or `AudioRecord` with `MediaRecorder.AudioSource.UNPROCESSED`
+  or `VOICE_RECOGNITION` routed to the built-in mic, streamed to the page via the plugin). This needs an APK
+  rebuild and real-device testing.
+- **Noise suppression shows ON despite constraints:** document it in the tip; the native route above also fixes it.
+- Then recalibrate timing (sound delay tap test, then latency suggestion) and ask for a fresh report.
+
+## Other open ideas mentioned but not done
+- Same-pitch-different-string detection (timbre/inharmonicity), labelled beta.
+- A "Jam" style: improvise over the band with the scale shown on the fretboard.
+
+## Testing
+See `tools/detection-tests/README.md`: real guitar recordings (`tonejs-instrument-guitar-acoustic-mp3` via
+`npm pack`) through the app's real per-frame code. Network in the workspace only allows package registries
+(npm works; GitHub Pages / jsdelivr / gleitz soundfonts are blocked), so the band's soundfonts can't be fetched
+there (tests used stand-in samples).
