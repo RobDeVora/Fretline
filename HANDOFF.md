@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.73, Android app from the v1.63 build)
+# Fretline: session handoff (18 Nov 2026, web v1.74, Android app from the v1.63 build)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,35 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.74: strums must be the right chord, strummed in their own window
+
+Owner's 1.73 report (their uploaded song "Thought You Should Know", strums D/A/Em/G, 72 BPM): 376/399, and playing Em
+throughout still counted everything. Two causes in the strum branch of `matchEvent`:
+1. Any onset < 300 ms old counted, with no check of what was played.
+2. No window start for strums: most hits were "okay -380 ms · picks 0/0": a strum took the previous step's onset and
+   the whole song slid one strum early.
+
+Now: the onset must be at/after the step's window start (`G._winAt`, −20 ms) and < 400 ms old, the early-window cap
+(half the gap to the previous step) applies to strums too, and the sound must fit the chord: `chordFit(pcs)` =
+cosine similarity of a per-note chroma (`strumChroma()`: Goertzel at every note E2..B5 on the 8192 buffer, folded to
+12 pitch classes) with a template that includes each chord note's overtones (5th 0.5, major 3rd 0.25, minor 7th 0.15).
+The expected chord (`strumPcs`: from `snotes`, else the label; capo applied) must score ≥ 0.5 and ≥ every other chord
+in the song (`songChords()`) − 0.015, on 2 frames. Muted (x) strums: timing only. `chordScore`'s spectrum is now read
+once per frame (`chromaC`).
+
+Things tried and dropped: the old note-name energy (`chordScore`) can't tell Em from D (the 4096 FFT's 11 Hz bins
+put E2 into D#/F and B2 into A#/C); judging only what a strum added (now minus before) and comparing with all 24
+triads both wrecked correct playing (27/104).
+
+Sim (`test_strums.py`: `CHORDS=` chart per step, `PLAYC=` what's strummed (one name or a list), voicings in `VO`,
+`STTOL=` tolerance; owner's pattern D×3 A×4 Em×6 … with G, `GAP=0.4167`): correct 100/104 (misses: 4 G strums right
+after a ringing Em); Em/D/A/G throughout → exactly their own strums (+ the first strum for Em and G). Known leak: a
+chord that isn't in the song (C) passes where it fits best among the song's chords (Em, A steps). Regressions unchanged:
+melody 17/17, double stops 95/96, arpeggio 64/64, boogie swapped 8, chord-string analysis (differences = the test's
+own random noise; v1.72 varies the same way).
+
+**Needs:** owner to play the song again correctly, then Em throughout.
 
 ## v1.73: notes picked over a ringing note; the right note played in time
 

@@ -1590,11 +1590,14 @@ function chordStrings(shape,cp,buf,sr){
   if(!hann||hann.length!==buf.length)targetScoreBuf(buf,sr,60);
   return plan.map(p=>{if(!p.hs.length)return {s:p.s,muted:p.muted,score:null};const inf={};const sc=strScore(buf,sr,p.m,p.hs,inf);return {s:p.s,muted:p.muted,score:sc,level:inf.level};});
 }
+let chromaAt=-1,chromaC=null,chromaTot=0;
 function chordScore(pcs){
-  analyser.getFloatFrequencyData(freqBuf);
+  if(chromaAt!==det.frame||!chromaC){analyser.getFloatFrequencyData(freqBuf);chromaAt=det.frame;
   const sr=actx.sampleRate,binHz=sr/analyser.fftSize;const c=new Float32Array(12);let tot=0;
   const k0=Math.ceil(70/binHz),k1=Math.min(freqBuf.length-1,Math.floor(1300/binHz));
   for(let k=k0;k<=k1;k++){const db=freqBuf[k];if(!(db>-100))continue;const p=Math.pow(10,db/10);const m=69+12*Math.log2(k*binHz/440);const pc=((Math.round(m)%12)+12)%12;c[pc]+=p;tot+=p;}
+  chromaC=c;chromaTot=tot;}
+  const c=chromaC,tot=chromaTot;
   if(tot<=0)return 0;
   let inS=0,present=0;for(const pc of pcs){inS+=c[pc];if(c[pc]/tot>0.04)present++;}
   return (inS/tot)*(present/pcs.length);
@@ -2331,7 +2334,7 @@ function hitWindow(e,b,gap,pgap){
   let wb=Math.max((e.strum?0.25:ch?0.3:0.25)*b*m,Math.min(G.ringBeats||0,0.5*b*m)+lat);
   // an early hit must not take the previous note's pick: the window opens no earlier than halfway from the previous
   // note (v1.69: at slow tempos the ring rule reached back a whole step, so a wrong note counted for the next one)
-  if(pgap!=null&&pgap>0&&!ch&&!e.strum)wb=Math.min(wb,Math.max(0.12*b,pgap*0.5));
+  if(pgap!=null&&pgap>0&&!ch)wb=Math.min(wb,Math.max(0.12*b,pgap*0.5));
   let wa=(e.strum?0.3:ch?0.6:0.35)*b*m;
   // a late hit must not eat the next note's on-time hit
   if(gap!=null&&!ch)wa=Math.min(wa,Math.max(0.15*b,gap*0.55));
@@ -2368,8 +2371,35 @@ function partnerOk(e,base,cp){if(e.notes.length<2)return true;const sr=actx.samp
     const i1={},i2={};const s1=targetScoreBuf(timeBuf,sr,tm,hs,i1),s2=targetScoreBuf(timeBuf,sr,tm,hs.filter(x=>ft*x>=150).slice(0,3),i2);
     if(!((s1>=0.6&&(i1.T||0)>=0.2*bT)||(s2>=0.6&&(i2.T||0)>=0.2*bT)))return false;}
   return true;}
+/* how well this frame's sound fits a chord, counting the overtones each chord note brings (its 5th from the 3rd
+   overtone, its major 3rd from the 5th, its minor 7th from the 7th): an E chord's overtones land on D, F# and A, so a
+   plain note-name count can't tell Em from D. Cosine similarity of the note-name energy (square roots) with the
+   chord's template; call chordScore first (it fills chromaC for this frame). */
+let noteChromaAt=-1,noteChroma=null;
+function strumChroma(){if(noteChromaAt===det.frame&&noteChroma)return noteChroma;noteChromaAt=det.frame;
+  let buf=timeBuf;if(analyserL&&longBuf){if(longFrame!==det.frame){analyserL.getFloatTimeDomainData(longBuf);longFrame=det.frame;}buf=longBuf;}
+  const sr=actx.sampleRate;targetScoreBuf(buf,sr,60,[1]);const w=hannBy[buf.length];const c=new Float32Array(12);
+  for(let m=40;m<=83;m++)c[m%12]+=Math.sqrt(goertzel(buf,w,sr,midiToFreq(m)));return (noteChroma=c);}
+function chordFit(pcs,cc){const c=cc||strumChroma();const t=new Float32Array(12);for(const r of pcs){t[r]+=1;t[(r+7)%12]+=0.5;t[(r+4)%12]+=0.25;t[(r+10)%12]+=0.15;}
+  let d=0,a=0,b=0;for(let j=0;j<12;j++){const x=c[j];d+=x*t[j];a+=x*x;b+=t[j]*t[j];}return a>0?d/Math.sqrt(a*b):0;}
+function strumPcs(e){const cp=G.capo||0;if(e._pcsFor!==cp){let p=null;const ns=e.snotes||[];
+    if(ns.length>=2)p=[...new Set(ns.map(n=>(((n.midi+cp)%12)+12)%12))];else if(e.label){const q=chordPCs(e.label);if(q)p=q.map(x=>(x+cp)%12);}
+    e._pcs=p&&p.length>=2?p:null;e._pcsFor=cp;}return e._pcs;}
+// every chord in the song (strums and chord steps), to compare the expected one against
+function songChords(){const ev=G.song.events,cp=G.capo||0;if(G._scFor===ev&&G._scCp===cp)return G._sc;const m=new Map();
+  for(const e of ev){const p=e.strum?(e.strum==='x'?null:strumPcs(e)):isChordEv(e)?(e.pcs||[]).map(x=>(x+cp)%12):null;if(p&&p.length>=2){const k=p.slice().sort().join(',');if(!m.has(k))m.set(k,{k,p});}}
+  G._sc=[...m.values()];G._scFor=ev;G._scCp=cp;return G._sc;}
 function matchEvent(e,i,now){
-  if(e.strum){if(det.onsetAt>G.usedOnset&&det.onsetAt>(G.ignoreOnsetUntil||0)&&now-det.onsetAt<300*(settings.timing||1)){G.usedOnset=det.onsetAt;return true;}return false;}
+  /* v1.74: a strum counts only if (1) it was strummed inside this step's window (before, a strum could take the
+     previous step's strum and the whole song slid one strum early, "okay -380 ms"), and (2) it sounds like this
+     chord: its notes' share of the sound is at least as big as any other chord's in the song, on 2 frames within
+     300 ms (before, any strum counted: Em throughout scored everything). Muted strums only need the timing. */
+  if(e.strum){if(!(det.onsetAt>G.usedOnset&&det.onsetAt>(G.ignoreOnsetUntil||0)&&now-det.onsetAt<400*(settings.timing||1)&&det.onsetAt>=(G._winAt!=null?G._winAt-20:-1e9)))return false;
+    const P=e.strum==='x'||!analyser?null:strumPcs(e);if(!P){G.usedOnset=det.onsetAt;return true;}
+    if(G.stOn!==det.onsetAt||G.stIdx!==i){G.stOn=det.onsetAt;G.stIdx=i;G.stOk=0;}
+    const sc=chordFit(P),k=P.slice().sort().join(',');let best=0;for(const q of songChords())if(q.k!==k)best=Math.max(best,chordFit(q.p));
+    if(window.__stLog)window.__stLog.push([i,+sc.toFixed(3),+best.toFixed(3)]);
+    if(sc>=0.5&&sc>=best-(window.__stTol!=null?window.__stTol:0.015))G.stOk++;if(G.stOk>=2){G.usedOnset=det.onsetAt;return true;}return false;}
   const key=evKey(e);
   if(key===G.lastHitKey&&!(det.onsetAt>G.lastHitAt))return false;
   if(G.cfIdx!==i){G.cfIdx=i;G.cf=0;}
@@ -3864,7 +3894,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.73';
+const APP_VERSION='1.74';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
