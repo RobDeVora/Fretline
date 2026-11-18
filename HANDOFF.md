@@ -394,6 +394,10 @@ running out while loading (fp16 weights are expanded to fp32; 'all' optimisation
 copy, plus memory arenas). Fix: runtime 1.31.1; "Loading" option, default **lean** = graphOptimizationLevel
 'disabled', no CPU arena / memory pattern, sequential; model copy released after load; ORT console messages and page
 errors captured into the report. An abort poisons the runtime: reload before trying another setting.
+Second phone run (lean, fp16 model, WebGPU and processor): no abort any more, but "Could not find an implementation for
+ConstantOfShape(9) node '/real_istft/ConstantOfShape'": in the fp16-weights export that node outputs fp16, which the
+web build's CPU kernel only gets past when constant folding removes it (i.e. optimised loading, which runs out of
+memory). Default model is now the fp32 export (258 MB) with lean loading; the page explains the error if it recurs.
 **Needs:** owner to run it on the phone (30 s first) and send the report + say how the guitar track sounds. Then:
 Basic Pitch (`@spotify/basic-pitch`, model inside the npm package) on the guitar stem → draft song; backing track =
 band without guitar.

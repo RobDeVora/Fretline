@@ -22,7 +22,7 @@ audio{width:100%;margin:6px 0}a{color:var(--accent)}
 <h1>🧪 Split a song</h1>
 <p class="small">Test of Demucs (Meta's open-source source-separation model, 6-stem version) running on this device: it pulls
 the guitar out of a recording, and leaves you the band without the guitar to practise over. Your audio never leaves
-the phone. The model is downloaded once (about 136 MB, so use Wi-Fi) and kept for next time.</p>
+the phone. The model is downloaded once (258 MB, so use Wi-Fi) and kept for next time.</p>
 
 <div class="card">
   <label for="file">Audio file (MP3, WAV, M4A…)</label>
@@ -34,7 +34,7 @@ the phone. The model is downloaded once (about 136 MB, so use Wi-Fi) and kept fo
   <label for="lean">Loading</label>
   <select id="lean"><option value="lean">Lean: least memory (try this first)</option><option value="basic">Some optimising</option><option value="all">Fully optimised (needs the most memory)</option></select>
   <label for="mdl">Model</label>
-  <select id="mdl"><option value="fp16">Half-size download (136 MB)</option><option value="fp32">Full (258 MB)</option></select>
+  <select id="mdl"><option value="fp32">Full (258 MB) — works with lean loading</option><option value="fp16">Half-size (136 MB) — needs fully optimised loading</option></select>
   <button id="go" disabled>Split it</button>
   <div class="bar"><div id="prog"></div></div>
   <div id="status" class="small">Choose a file.</div>
@@ -131,7 +131,7 @@ $('go').onclick=async()=>{
     log('guitar share of the sound: '+(100*eg/(eg+er||1)).toFixed(0)+'%');
     const bg=wav(gL,gR),br=wav(rL,rR);$('aGtr').src=URL.createObjectURL(bg);$('dGtr').href=$('aGtr').src;$('aRest').src=URL.createObjectURL(br);$('dRest').href=$('aRest').src;
     $('out').style.display='';status('Done. Listen below, then tap the report to copy it.');window.__labDone={used,tot,N,parts:nCh};
-  }catch(e){log('ERROR: '+(e&&e.message||e));if(CON.length)log('runtime messages:\n  '+CON.join('\n  '));log('(after an error like this, reload the page before trying another setting)');status('Something went wrong: '+(e&&e.message||e));window.__labDone={error:String(e&&e.message||e)};}
+  }catch(e){log('ERROR: '+(e&&e.message||e));if(CON.length)log('runtime messages:\n  '+CON.join('\n  '));if(/Could not find an implementation/.test(String(e&&e.message||e))&&$('mdl').value==='fp16')log('tip: the half-size model needs "Fully optimised" loading (which may run out of memory); use the Full model with Lean loading');log('(after an error like this, reload the page before trying another setting)');status('Something went wrong: '+(e&&e.message||e));window.__labDone={error:String(e&&e.message||e)};}
   $('go').disabled=false;};
 </script>
 </body>
