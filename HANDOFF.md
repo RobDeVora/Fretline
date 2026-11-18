@@ -1,4 +1,4 @@
-# Fretline: session handoff (17 Nov 2026, v1.58)
+# Fretline: session handoff (18 Nov 2026, v1.59)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -235,6 +235,27 @@ Owner wants to play the lead, the chords, or both from one imported file.
   by the same amount. Stored `def.parts` stay on the shared timeline.
 - Landscape: 🎸/🎤/🥁 show icons only on short screens (`.lbl` hidden at max-height 500px) and selects are capped,
   so the controls fit in two rows again.
+
+## v1.59: finger colours, finger guide, readable notes
+
+Owner asked for notes coloured by finger, a finger indicator at the bottom (its own setting, not tied to the
+fretboard) that anticipates the following notes, and said notes move too fast to read the numbers.
+- Fingering (`chordFingers`, `planFingers`, core script): chords lowest fret first, one finger per fret where it fits,
+  low string first at the same fret, barre with the index for 5+ fretted notes. Single notes: Viterbi over hand
+  positions (index finger's fret) for the whole song; moving costs 0.6+0.1/fret (less after 2+ beat gaps), pinky
+  slightly penalised, first position preferred for frets 1-4. Sets `n.fg`, `e.fgs` (per string, chords/strums),
+  `e.hand`. Re-planned whenever `G.song.events` changes (checked in `draw`).
+- `FCOL` open grey, 1 blue, 2 green, 3 yellow, 4 red. Settings › Colours "Colour notes by" (`settings.noteBy`,
+  default finger); `noteCol()` used for notes, strum fingering dots, chord labels, tech marks, fretboard dots (which
+  show finger numbers when colouring by finger).
+- `drawFingerGuide`: strip under the strings (above lyrics' row order: strings, lyrics, guide, fretboard): hand
+  position, fingers 1-4 (lit with the strings they press, else the fret they hover), open strings, then the next 6
+  fingers/chords with ↗/↘ position-change markers. `settings.fingerGuide` (Settings, under the fretboard tick).
+  Full / slim / overlaid depending on room.
+- Readability: the owner's screenshots showed quick notes overlapping and hiding each other's numbers. Spacing gets
+  up to 1.6x more room for dense songs (`G._gapQ` = 15th-percentile gap), and one note size per song small enough
+  for its quick passages. Canvas resolution capped at 2x (was 3x) to keep frames smooth; the detection report now
+  has "frames N/s, slow X%, worst Y ms" to see if the phone drops frames. Zoom label: "Highway speed / note spacing".
 
 ## Idea: play along with an MP3
 

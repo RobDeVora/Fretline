@@ -31,6 +31,8 @@ The scripts route the app's sample downloads (jsdelivr/unpkg) to these local fil
 | `test_import_no_extension.py` | v1.56: a MIDI file with no extension loads as MIDI (parts listed) instead of as text. Serve the repo on 8769 first | `python3 test_import_no_extension.py <some.mid>` |
 | `test_song_parts.py` | v1.57: import a multi-part MIDI with no extension, all parts saved on one timeline, "Which part?" chooser, Lead + rhythm (lead bars + rhythm elsewhere), 🎸 part button. Serve the repo on 8769 first | `python3 test_song_parts.py <multi-part.mid>` |
 | `test_combo_strum.py` | v1.58: Lead + rhythm with each strum pattern keeps every lead note and strums only the rhythm bars; screenshots to /tmp. Serve the repo on 8769 first | `python3 test_combo_strum.py <multi-part.mid>` |
+| `test_fingering.js` | v1.59 fingering: common chord shapes (C G D A E Am Em Dm F Bm B7 G7 C7, power chords) and single-note lines (pentatonic box, first position, a position shift) | `node test_fingering.js <repo>/index.html` |
+| `shot_finger_guide.py` | Screenshots of the finger guide strip, landscape/portrait, fretboard on/off, playing and not (to /tmp/mm/). Serve the repo on 8769 first | `python3 shot_finger_guide.py <multi-part.mid>` |
 | `chord_strings_static.py` | Per-string chord analysis on single snapshots of 9 open/barre chords, each string removed in turn | `python3 chord_strings_static.py <repo dir>` |
 
 Last results (v1.49): sweeps 108/108 at normal and quiet volume, 0/108 wrong notes counted, chord test
