@@ -1221,10 +1221,18 @@ function micInfo(){try{if(nativeMic){const i=nativeMic.info||{};return 'mic: '+(
 async function restartMic(){stopNativeMic();try{if(micStream)micStream.getTracks().forEach(t=>t.stop());}catch(e){}if(micSrc)try{micSrc.disconnect();}catch(e){}micStream=null;analyser=null;micSrc=null;return enableMic();}
 async function fillMicList(){const sel=$('#sMic');if(!sel||!navigator.mediaDevices||!navigator.mediaDevices.enumerateDevices)return;
   try{const ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput');
-    const nat=!!nativeMicPlugin();
-    sel.innerHTML=(nat?'<option value="">Phone\'s built-in microphone (recommended)</option><option value="web">Let the phone choose (old way)</option>':'<option value="">Automatic (phone\'s choice)</option>')+ds.filter(d=>d.deviceId&&d.deviceId!=='default').map((d,i)=>`<option value="${esc(d.deviceId)}">${esc(d.label||'Microphone '+(i+1))}</option>`).join('');
+    const nat=!!nativeMicPlugin();let natOpts='';
+    if(nat){let ins=null;try{ins=(await nativeMicPlugin().listInputs()).inputs||[];}catch(e){}
+      const nm=t=>{const d=ins&&ins.find(x=>x.type===t);return d&&d.name?' ('+esc(d.name)+')':'';};
+      natOpts='<option value="">Phone\'s built-in microphone (recommended)</option>'+
+        (ins?'<option value="n:bluetooth">Bluetooth headphones\' mic'+nm('bluetooth')+'</option>':'<option value="n:bluetooth" disabled>Bluetooth headphones\' mic (install the latest app)</option>')+
+        (ins&&ins.some(x=>x.type==='wired')?'<option value="n:wired">Wired headset mic'+nm('wired')+'</option>':'')+
+        (ins&&ins.some(x=>x.type==='usb')?'<option value="n:usb">USB microphone'+nm('usb')+'</option>':'')+
+        '<option value="web">Let the phone choose (old way)</option>';}
+    sel.innerHTML=(nat?natOpts:'<option value="">Automatic (phone\'s choice)</option>')+ds.filter(d=>d.deviceId&&d.deviceId!=='default').map((d,i)=>`<option value="${esc(d.deviceId)}">${esc(d.label||'Microphone '+(i+1))}</option>`).join('');
     sel.value=settings.micId||'';if(sel.value!==(settings.micId||''))sel.value='';
-    if(nat)$('#sMicHint').textContent='The app records from the phone\'s own microphone with no call-style processing, so Bluetooth headphones stay in music mode instead of switching to their call microphone. If you change this, play a song again and check the detection report.';
+    if(nat&&settings.micId==='n:bluetooth')$('#sMicHint').textContent='Bluetooth headphones\' mic: the headphones switch to call mode, so the band sounds like a phone call, the mic sits far from the guitar and it filters out sounds that aren\'t a voice. Expect missed notes; the phone\'s built-in mic works much better for guitar. If no headphones are connected, the built-in mic is used.';
+    else if(nat)$('#sMicHint').textContent='The app records from the phone\'s own microphone with no call-style processing, so Bluetooth headphones stay in music mode instead of switching to their call microphone. If you change this, play a song again and check the detection report.';
     else if(IS_APP)$('#sMicHint').innerHTML='With Bluetooth headphones the phone listens through the headset\'s call microphone, which silences guitar notes. <b>Install the latest Fretline app</b> to use the phone\'s own microphone instead: <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">download Fretline.apk</a>.';
     $('#sMicNow').textContent=micInfo();}catch(e){}}
 function attachAnalyser(src){micSrc=src;
@@ -1263,7 +1271,7 @@ async function startNativeMic(){
         while(p<y.length-1){const i=p|0,f=p-i;out.push(y[i]+(y[i+1]-y[i])*f);p+=nm.ratio;}
         nm.pos=p-(y.length-1);nm.last=x[x.length-1];x=Float32Array.from(out);}
       nm.node.port.postMessage(x,[x.buffer]);});
-    nm.info=await P.start({sampleRate:actx.sampleRate});
+    nm.info=await P.start({sampleRate:actx.sampleRate,type:settings.micId&&settings.micId.startsWith('n:')?settings.micId.slice(2):'builtin'});
     nm.ratio=(nm.info.sampleRate||actx.sampleRate)/actx.sampleRate;
     nativeMic=nm;nativeMicErr='';return nm.node;
   }catch(e){
@@ -1281,7 +1289,7 @@ async function enableMic(){
   if(analyser)return true;
   try{
     // Android app: record from the phone's built-in mic natively (keeps Bluetooth headphones out of call mode)
-    if(nativeMicPlugin()&&!settings.micId){const node=await startNativeMic();if(node){attachAnalyser(node);return true;}}
+    if(nativeMicPlugin()&&(!settings.micId||settings.micId.startsWith('n:'))){const node=await startNativeMic();if(node){attachAnalyser(node);return true;}}
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('unsupported');
     // ask for the raw sound: no call-style processing (it silences anything that isn't a voice); use the chosen mic
     const want={echoCancellation:false,noiseSuppression:false,autoGainControl:false,voiceIsolation:false,channelCount:1};
@@ -3272,7 +3280,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.52';
+const APP_VERSION='1.53';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

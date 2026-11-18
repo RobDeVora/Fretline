@@ -1,4 +1,4 @@
-# Fretline: session handoff (17 Nov 2026, v1.52)
+# Fretline: session handoff (17 Nov 2026, v1.53)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -153,6 +153,16 @@ After recalibrating (latency 150 ms, sound delay 190): 32/32 again, every note w
   report says `cancelled wrong:…`. If the note is missed while a wrong note is pending, the pop-up says "Wrong
   note"/"Wrong string" instead of "Miss". Wrong-note sweep (G string) flags exactly as before. The ghost-note sim
   couldn't reproduce the phone's false pick, so this needs the owner's next report to confirm.
+
+## v1.53: choose Bluetooth headphones' mic (new APK)
+
+Owner asked for a Bluetooth option alongside built-in and "old way". `NativeMicPlugin.listInputs()` returns
+inputs by kind (builtin / bluetooth / wired / usb); `start({type})` records from that kind. For Bluetooth it
+enters call mode (MODE_IN_COMMUNICATION + `setCommunicationDevice` on Android 12+, else `startBluetoothSco`), uses
+the VOICE_COMMUNICATION source, and leaves call mode on stop/pause or when switching back. Settings values:
+`''` built-in, `n:bluetooth`, `n:wired`, `n:usb` (shown only if present), `web` old way. The Bluetooth hint warns
+it's call quality and will miss notes; if no headset is connected the built-in mic is used. With the v1.51 APK
+(no `listInputs`) the Bluetooth option is shown disabled with "install the latest app". Not tested on a device.
 
 ## Other open ideas mentioned but not done
 - Same-pitch-different-string detection (timbre/inharmonicity), labelled beta.
