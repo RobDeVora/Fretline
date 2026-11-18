@@ -29,6 +29,7 @@ The scripts route the app's sample downloads (jsdelivr/unpkg) to these local fil
 | `test_made_up_melody.py` | Shape of the made-up melody for two sheets: range, repeats, leaps, chord tones on downbeats | `python3 test_made_up_melody.py` (server on 8768) |
 | `check_library_tunes.js` | Library tunes (`tunes.json` = what's in `library/index.json`): bar lengths, length vs chords, chord tones on downbeats | `node check_library_tunes.js <repo>/index.html <repo>/library/index.json` (run from this folder) |
 | `test_import_no_extension.py` | v1.56: a MIDI file with no extension loads as MIDI (parts listed) instead of as text. Serve the repo on 8769 first | `python3 test_import_no_extension.py <some.mid>` |
+| `test_song_parts.py` | v1.57: import a multi-part MIDI with no extension, all parts saved on one timeline, "Which part?" chooser, Lead + rhythm (lead bars + rhythm elsewhere), 🎸 part button. Serve the repo on 8769 first | `python3 test_song_parts.py <multi-part.mid>` |
 | `chord_strings_static.py` | Per-string chord analysis on single snapshots of 9 open/barre chords, each string removed in turn | `python3 chord_strings_static.py <repo dir>` |
 
 Last results (v1.49): sweeps 108/108 at normal and quiet volume, 0/108 wrong notes counted, chord test

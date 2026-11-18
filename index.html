@@ -141,6 +141,7 @@ header h1 span{color:var(--accent)}
     <select id="capoSel" title="Digital capo" style="padding:6px 8px"></select>
     <select id="simpSel" title="Simplify chords" style="padding:6px 8px;display:none"></select>
     <select id="strumSel" title="Strumming pattern" style="padding:6px 8px;display:none"></select>
+    <button id="partBtn" title="Play another part of this song" style="padding:6px 10px;display:none;max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎸 Part</button>
     <button id="singBtn" title="Lyrics on screen while you play" style="padding:6px 10px;display:none">🎤 Sing</button>
     <button id="bandBtn" title="Backing band: drums, bass and piano that fit what you're playing" style="padding:6px 10px">🥁 Band</button>
     <div class="speed"><button id="spDown">−</button><span id="spVal">100%</span><button id="spUp">+</button></div>
@@ -820,7 +821,7 @@ function eventsFromNotes(notes,opt){
   const groups=[];
   for(const n of ns){const g=groups[groups.length-1];if(g&&Math.abs(g.beat-n.beat)<1e-6)g.notes.push(n);else groups.push({beat:n.beat,notes:[n]});}
   if(!groups.length)return [];
-  const shift=Math.floor(groups[0].beat/bpb)*bpb;
+  const shift=opt.shift!=null?opt.shift:Math.floor(groups[0].beat/bpb)*bpb;
   const labs=(opt.labels||[]).slice().sort((a,b)=>a.beat-b.beat);
   const ev=[];let prevF=0;
   for(let i=0;i<groups.length&&ev.length<4000;i++){
@@ -888,8 +889,10 @@ function parseMidi(bytes){
   tsList.sort((a,b)=>a.tick-b.tick);const tsDur=new Map();
   tsList.forEach((x,i)=>{const nx=i+1<tsList.length?tsList[i+1].tick:Math.max(endTick,x.tick);const k=Math.max(1,Math.round(x.n*4/x.d));tsDur.set(k,(tsDur.get(k)||0)+(nx-x.tick));});
   let bpb=4,bestDur=-1;for(const [k,dd] of tsDur)if(dd>bestDur){bestDur=dd;bpb=k;}
+  // that short first bar is a pickup: move everything later so the real bars start on the bar lines
+  let pad=0;if(tsList.length>1&&tsList[0].tick===0){const p=tsList[0].n*4/tsList[0].d;if(p<bpb&&Math.abs(tsList[1].tick-p*div)<1)pad=bpb-p;}
   const groups=new Map();
-  for(const n of raw){if(n.ch===9)continue;const key=n.track+':'+n.ch;if(!groups.has(key))groups.set(key,[]);groups.get(key).push({beat:n.tick/div,dur:n.dur/div,midi:n.midi});}
+  for(const n of raw){if(n.ch===9)continue;const key=n.track+':'+n.ch;if(!groups.has(key))groups.set(key,[]);groups.get(key).push({beat:n.tick/div+pad,dur:n.dur/div,midi:n.midi});}
   const parts=[];
   for(const [key,notes] of groups){
     const [tr,ch]=key.split(':').map(Number);const pr=progs[key]!=null?progs[key]:(progs[tr+':'+ch]);
@@ -904,7 +907,7 @@ function parseMidi(bytes){
   const words=[];let nl=false;
   for(const x of le.sort((a,b)=>a.tick-b.tick)){let s=x.text.replace(/[^\x20-\x7e\r\n\/\\]/g,'');if(/^[\/\\]/.test(s)){nl=true;s=s.slice(1);}
     const endNl=/[\r\n]\s*$/.test(s);s=s.replace(/[\r\n]+/g,'');if(/-$/.test(s))s=s.slice(0,-1);
-    if(s.trim())words.push({beat:x.tick/div,text:s,nl});nl=endNl;}
+    if(s.trim())words.push({beat:x.tick/div+pad,text:s,nl});nl=endNl;}
   const vp=vocalPart(parts,words.length>=8?words:null);
   const vocal=vp?{label:vp.label,notes:monoLine(vp.notes),words:words.length>=8?words:null}:null;
   parts.sort((a,b)=>(b.isGuitar-a.isGuitar)||(b.count-a.count));
@@ -969,9 +972,9 @@ function parseMusicXML(text){
   parts.sort((a,b)=>(b.isGuitar-a.isGuitar));
   return {bpm:bpm||100,bpb:bpb||4,parts,title,vocal};
 }
-function chordEventsFromSymbols(harm,bpb){
+function chordEventsFromSymbols(harm,bpb,sh){
   const hs=harm.slice().sort((a,b)=>a.beat-b.beat);if(!hs.length)return [];
-  const shift=Math.floor(hs[0].beat/bpb)*bpb;const ev=[];
+  const shift=sh!=null?sh:Math.floor(hs[0].beat/bpb)*bpb;const ev=[];
   for(let i=0;i<hs.length;i++){const nx=i+1<hs.length?hs[i+1].beat:hs[i].beat+bpb;const d=Math.max(0.5,Math.min(8,nx-hs[i].beat));if(i&&Math.abs(hs[i].beat-hs[i-1].beat)<1e-6)continue;ev.push(chordEvent(hs[i].name,hs[i].beat-shift,d));}
   return ev;
 }
@@ -1987,7 +1990,7 @@ function renderList(){
   L.innerHTML=h;
   L.querySelectorAll('.item[data-id]').forEach(el=>el.onclick=ev=>{
     if(ev.target.closest('.del'))return;
-    const id=el.dataset.id;const def=LIB.find(x=>x.id===id)||mySongs.find(x=>x.id===id);if(def)openSong(def);
+    const id=el.dataset.id;const def=LIB.find(x=>x.id===id)||mySongs.find(x=>x.id===id);if(def){if(def.parts&&def.parts.length>1)pickPart(def,()=>openSong(def));else openSong(def);}
   });
   L.querySelectorAll('.item[data-gen]').forEach(el=>el.onclick=()=>{quickGen(el.dataset.gen);});
   L.querySelectorAll('.item[data-lesson]').forEach(el=>el.onclick=()=>openLesson(findLesson(el.dataset.lesson)));
@@ -2052,9 +2055,32 @@ document.querySelectorAll('#libLvl button').forEach(b=>b.onclick=()=>{libLvl=+b.
 /* ================= Game ================= */
 const G={def:null,song:null,state:null,clock:0,playing:false,mode:'play',speed:1,listen:false,hits:0,misses:0,streak:0,best:0,scan:0,playedIdx:0,lastClickBeat:-99,lastHitAt:-1,lastHitKey:null,cf:0,cfIdx:-1,pops:[],waiting:false,finished:false};
 function bps(){return G.song.bpm*G.speed/60;}
+/* ---- songs with several parts (imported files) ---- */
+// is a part mostly chords (2+ notes at once) or single notes?
+function partChordiness(ev){const n=ev.filter(e=>!e.rest&&e.notes&&e.notes.length);return n.length?n.filter(e=>e.notes.length>=2||e.chord).length/n.length:0;}
+// "Lead + rhythm": the lead where it has notes, the rhythm part in every other bar
+function comboPair(def){const P=(def.parts||[]).map((p,i)=>({i,p,c:partChordiness(p.events),n:p.events.length})).filter(x=>x.n&&!/bass|vocal|voice|drum|melody|sing/i.test(x.p.label));
+  const rh=P.filter(x=>x.c>=0.5).sort((a,b)=>b.n-a.n)[0];const ld=P.filter(x=>x.c<0.5&&(!rh||x.i!==rh.i)).sort((a,b)=>b.n-a.n)[0];return rh&&ld?{lead:ld.i,rhythm:rh.i}:null;}
+function comboEvents(def,pair){const bpb=def.bpb||4;const L=def.parts[pair.lead].events,R=def.parts[pair.rhythm].events;
+  const leadBars=new Set();for(const e of L){if(e.rest)continue;const a=Math.floor(e.t/bpb+1e-6),b=Math.floor((e.t+Math.max(e.d,0.01))/bpb-1e-6);for(let k=a;k<=b;k++)leadBars.add(k);}
+  return [...L.filter(e=>leadBars.has(Math.floor(e.t/bpb+1e-6))),...R.filter(e=>!leadBars.has(Math.floor(e.t/bpb+1e-6)))].sort((a,b)=>a.t-b.t).map(e=>({...e}));}
+function partChoices(def){const ch=(def.parts||[]).map((p,i)=>p.events.length?{v:String(i),label:p.label,sub:p.events.length+(partChordiness(p.events)>=0.5?' chords':' notes')}:null).filter(Boolean);
+  const pr=comboPair(def);if(pr)ch.unshift({v:'combo',label:'Lead + rhythm',sub:def.parts[pr.lead].label+' where it plays, '+def.parts[pr.rhythm].label+' in the other bars'});return ch;}
+function usePart(def,v){const pr=comboPair(def);let ev,src;
+  if(v==='combo'&&pr){ev=comboEvents(def,pr);src=def.parts[pr.rhythm];}else{src=def.parts[+v]||def.parts.find(p=>p.events.length);ev=src.events.map(e=>({...e}));v=String(def.parts.indexOf(src));}
+  def.events=ev;def.capo=src.capo||0;def.strumAuto=src.strumAuto||null;def.partSel=v;delete def._built;
+  const cs=store.get('capo',{});if(cs[def.id]!=null){delete cs[def.id];store.set('capo',cs);}
+  if(def.cat==='mine')store.set('songs',mySongs);}
+function partLabel(def){const v=def.partSel||'0';if(v==='combo')return 'Lead + rhythm';const p=def.parts&&def.parts[+v];return p?p.label:'';}
+function pickPart(def,then){
+  const ch=partChoices(def);if(ch.length<2){then();return;}
+  showMsg('Which part?','<p class="small" style="margin-top:0">'+esc(def.title)+' has several parts.</p>'+ch.map(c=>`<button class="partPick${c.v===(def.partSel||'0')?' primary':''}" data-v="${c.v}" style="display:block;width:100%;text-align:left;margin:6px 0;padding:10px 12px"><b>${esc(c.label)}</b><br><span class="small">${esc(c.sub)}</span></button>`).join(''));
+  document.querySelectorAll('#msgBody .partPick').forEach(b=>b.onclick=()=>{$('#msg').classList.remove('show');if(b.dataset.v!==(def.partSel||'0')||!def.events)usePart(def,b.dataset.v);then();});
+}
+function syncPartBtn(){const b=$('#partBtn');if(!b)return;const n=G.def&&G.def.parts?partChoices(G.def).length:0;b.style.display=n>1?'':'none';if(n>1)b.textContent='🎸 '+partLabel(G.def);}
 function openSong(def){
   if(def.libFile&&!def.events){showHint('Loading '+def.title+'…',4000);loadLibEvents(def).then(()=>openSong(def)).catch(()=>showMsg('Could not load the song','<p>Fretline couldn’t load this song. Connect to the internet and try again (after the first time, it works offline).</p>'));return;}
-  G.def=def;G.base=buildSong(def);G.song=G.base;syncSingBtn();
+  G.def=def;G.base=buildSong(def);G.song=G.base;syncSingBtn();syncPartBtn();
   {const cs=store.get('capo',{});G.origCapo=G.capo=cs[def.id]!=null?cs[def.id]:(def.capo||0);}
   setupStrum();syncCapo();G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);
   $('#pTitle').textContent=G.song.title;
@@ -2113,6 +2139,7 @@ async function prepBand(){
   if(G.band.key){const t=setTimeout(()=>showHint('Loading the backing band (first time only)…',20000),400);try{await loadBandFonts();}catch(e){}clearTimeout(t);if(G.notice&&G.notice.startsWith('Loading the backing band'))showHint('');}
 }
 function hasLyrics(){return !!(songLyrics(G.song)||songVocal(G.song));} // words or a tune to sing
+$('#partBtn').onclick=()=>{const d=G.def;if(!d)return;if(G.playing&&typeof stopPlay==='function')stopPlay();pickPart(d,()=>openSong(d));};
 function syncSingBtn(){const b=$('#singBtn');if(!b)return;b.style.display=hasLyrics()?'':'none';b.classList.toggle('on',!!settings.sing);b.textContent=settings.sing?'🎤 Sing on':'🎤 Sing off';}
 $('#singBtn').onclick=()=>{settings.sing=!settings.sing;saveSettings();syncSingBtn();setupBand();};
 function syncBandBtn(){const b=$('#bandBtn');if(b){b.classList.toggle('on',!!settings.backing);b.textContent=settings.backing?'🥁 Band on':'🥁 Band off';}}
@@ -2838,20 +2865,26 @@ function setFileMode(on){$('#impFileBox').style.display=on?'':'none';$('#impText
 function impStrumValue(){return $('#impStrumField').style.display==='none'?'':$('#impStrum').value;}
 function openImport(){impCustom='';$('#impUrl').value='';$('#impUrlNote').textContent='A direct link to a MIDI, MusicXML, Guitar Pro, ChordPro or text file.';G.impStrumTouched=false;$('#impStrum').innerHTML='';impFile=null;setFileMode(false);$('#impFile').value='';$('#impTitle').value='';$('#impText').value='';$('#impPreview').textContent='';$('#impPreview').className='preview';show('import');}
 $('#impBack').onclick=$('#impCancel').onclick=()=>{show('home');renderList();};
-function fileEvents(){
-  const part=impFile.parts[+$('#impPart').value]||impFile.parts[0];
-  if(part.chords){setImpHalf(false);return {kind:'file',events:chordEventsFromSymbols(part.chords,impFile.bpb)};}
-  const mode=$('#impNotes').value;
-  if(mode==='chords'){const raw=eventsFromNotes(part.notes,{bpb:impFile.bpb});const cc=chordChart(raw,impFile.bpb,impFile.bpm);setImpHalf(cc.half);return {kind:'file',events:cc.events,capo:cc.capo,half:cc.half,strumAuto:cc.half?null:detectPattern(raw,impFile.bpb)};}
-  setImpHalf(false);
-  return {kind:'file',events:eventsFromNotes(part.notes,{bpb:impFile.bpb,topOnly:mode==='top',labels:part.harm})};
-}
+// where all of the file's parts start (its first bar with anything playing), so parts stay lined up with each other
+function fileShift(){if(impFile._shift!=null)return impFile._shift;const bpb=impFile.bpb||4;let m=Infinity;
+  for(const p of impFile.parts){for(const x of (p.chords||p.notes||[]))if(x.beat<m)m=x.beat;}
+  return impFile._shift=isFinite(m)?Math.floor(m/bpb)*bpb:0;}
+function partEvents(part,mode,sel){const bpb=impFile.bpb,shift=fileShift();
+  if(part.chords){if(sel)setImpHalf(false);return {kind:'file',events:chordEventsFromSymbols(part.chords,bpb,shift)};}
+  if(mode==='chords'){const raw=eventsFromNotes(part.notes,{bpb,shift});const cc=chordChart(raw,bpb,impFile.bpm);if(sel)setImpHalf(cc.half);return {kind:'file',events:cc.events,capo:cc.capo,half:cc.half,strumAuto:cc.half?null:detectPattern(raw,bpb)};}
+  if(sel)setImpHalf(false);
+  return {kind:'file',events:eventsFromNotes(part.notes,{bpb,shift,topOnly:mode==='top',labels:part.harm})};}
+function fileEvents(){const part=impFile.parts[+$('#impPart').value]||impFile.parts[0];return partEvents(part,$('#impNotes').value,true);}
+// every part of the file, so you can pick (or combine) parts when you open the song. The one you chose here uses
+// your settings; the others are read as written. Parts at double speed are left out (they don't line up).
+function allFileParts(r){if(!impFile||impFile.parts.length<2||r.half)return null;const sel=+$('#impPart').value||0;
+  const out=impFile.parts.map((p,i)=>{const e=i===sel?r:partEvents(p,'all',false);return e.events.length&&!e.half?{label:p.label,events:e.events,capo:e.capo||0,strumAuto:e.strumAuto||null}:null;});
+  return out.filter(Boolean).length>1?{parts:out.map(x=>x||{label:'',events:[]}),partSel:String(sel)}:null;}
 // chord files counted at double speed (Chordify: 143 for a 72 BPM song) are shown at half the tempo
 function setImpHalf(h){if(!impFile||!!impFile.halved===!!h)return;impFile.halved=!!h;$('#impBpm').value=h?Math.round(impFile.bpm/2):impFile.bpm;}
 // the file's melody and words, lined up with the part you'll play (which starts at its first bar)
 function importVocal(r){const V=impFile&&impFile.vocal;if(!V)return {};
-  const bpb=impFile.bpb||4;const part=impFile.parts[+$('#impPart').value]||impFile.parts[0];
-  const first=part.chords?Math.min(...part.chords.map(x=>x.beat)):Math.min(...part.notes.map(n=>n.beat));const shift=isFinite(first)?Math.floor(first/bpb)*bpb:0;
+  const bpb=impFile.bpb||4;const shift=fileShift();
   const k=r.half?0.5:1;const T=b=>(b-shift)*k;
   const vocal=V.notes.map(n=>({t:T(n.beat),d:n.dur*k,midi:n.midi})).filter(n=>n.t>=-bpb);
   const lyrics=V.words?wordsToLyrics(V.words.map(w=>({...w,beat:T(w.beat)})).filter(w=>w.beat>=-bpb)):null;
@@ -3015,7 +3048,7 @@ async function loadImportFile(f){
     else{const text=new TextDecoder().decode(buf);impFile=null;setFileMode(false);$('#impText').value=text;
       const meta=/^(cho|chordpro|chopro|crd|pro)$/.test(ext)?chordProMeta(text):{title:''};
       if(!$('#impTitle').value)$('#impTitle').value=meta.title||base;refreshPreview();return;}
-    impFile={...info,fmt,name:f.name};
+    impFile={...info,fmt,name:f.name,_shift:null};
     $('#impFileName').textContent=f.name+' · '+fmt;
     $('#impPart').innerHTML=info.parts.map((pt,i)=>`<option value="${i}">${esc(pt.label)} (${pt.count} ${pt.chords?'chords':'notes'})</option>`).join('');
     $('#impBpm').value=info.bpm;
@@ -3028,7 +3061,7 @@ $('#impSave').onclick=()=>{
   const title=$('#impTitle').value.trim()||'Untitled song';const bpm=Math.max(30,Math.min(240,+$('#impBpm').value||90));
   let d;
   if(impFile){d={id:'m-'+Date.now(),cat:'mine',kind:'file',fmt:impFile.fmt,title,bpm,bpb:impFile.bpb||4,events:r.events,capo:r.capo||0,strum:impStrumValue(),strumAuto:r.strumAuto||detectPattern(r.events,impFile.bpb||4)||null};
-    Object.assign(d,importVocal(r));}
+    Object.assign(d,importVocal(r));const ap=allFileParts(r);if(ap)Object.assign(d,ap);}
   else d={id:'m-'+Date.now(),cat:'mine',title,bpm,bpb:4,kind:r.kind,cb:r.cb,src:$('#impText').value,capo:capoFromText($('#impText').value),strum:r.kind==='chords'?impStrumValue():''};
   mySongs.unshift(d);
   try{localStorage.setItem('fretline:songs',JSON.stringify(mySongs));}catch(e){showMsg('Not saved','<p>This song is too large to store on your phone, but you can still play it now.</p>');mySongs.shift();}
@@ -3497,7 +3530,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.56';
+const APP_VERSION='1.57';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

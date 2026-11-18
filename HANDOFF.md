@@ -1,4 +1,4 @@
-# Fretline: session handoff (17 Nov 2026, v1.56)
+# Fretline: session handoff (17 Nov 2026, v1.57)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -209,6 +209,21 @@ Rhythm Guitar (53 chords), Distortion guitar (24-note lead), Vocals (10 notes, u
 everything in it is in the first ~25 beats (~6 bars); its 3-minute length is only a late tempo marker, so their
 merge probably exported just the opening. Parts play one at a time (no lead + rhythm in one part).
 🎤 Sing now also shows for songs with a tune but no words (`hasLyrics`).
+
+## v1.57: choose the part (or Lead + rhythm) when opening a song
+
+Owner wants to play the lead, the chords, or both from one imported file.
+- Import keeps every part (`allFileParts` → `def.parts=[{label,events,capo,strumAuto}]`, `def.partSel`), all on one
+  timeline (`fileShift`: the file's first bar with anything playing; `eventsFromNotes`/`chordEventsFromSymbols`
+  take a shared shift). The part picked in the import box uses its settings; others are read as written. Skipped
+  if the chosen part is at double speed.
+- Tapping such a song in the list shows "Which part?" (`pickPart`, via the message box); the player's 🎸 button
+  switches. `usePart` swaps `def.events`/capo/strumAuto and saves the choice; per-song capo override is cleared.
+- "Lead + rhythm" (`comboPair`/`comboEvents`): the busiest mostly-single-note part (not bass/vocals) is the lead,
+  the busiest mostly-chord part the rhythm; each bar uses the lead if it has notes there, else the rhythm part.
+- `parseMidi`: a short first time signature followed by the main one is a pickup bar; everything is moved later
+  by (bpb - pickup) so bars line up (owner's file: 1/4 then 4/4). Affects Chordify-style 3/4-then-4/4 files too.
+- Tested with the owner's file: Lead + rhythm = lead in bars 1-4, chords in 5-6.
 
 ## Idea: play along with an MP3
 
