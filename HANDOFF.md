@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.70, Android app from the v1.63 build)
+# Fretline: session handoff (18 Nov 2026, web v1.71, Android app from the v1.63 build)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,32 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.71: second note judged on its low overtones (8192-sample analyser)
+
+Owner's 1.70 reports (correct playing, boogie; 80% = 56 BPM with latency 0 after the results card's suggestion, and
+100% = 70 BPM with latency 100): 42/96 and 27/96. Most misses are E+B steps "heard E2 · picks 2/0" (the tracker never
+flicks to B2) and, at 100%, every A step. The 1.68 "27/28 E+B" was inflated: playing E+B on every step kept B2 in
+`heardRecent`. The `odd` octave numbers for correct E+C# were 0.6-3.1 (sim octave case 0.4-0.5): no usable threshold,
+so the octave idea is dropped (`lowOddR`/`lowOddOk` removed).
+
+Cause: `partnerOk`'s overtone fallback uses `targetScoreBuf`, which skips everything under ~433 Hz at 48 kHz
+(semitone neighbours blur in 4096 samples). The partner's telling overtones are all there (B2 370, C#3 277, F#3 370,
+G#3 415), so only weak high ones (B2's 5th/7th) were checked. A plain Goertzel with wider neighbours on the 4096 buffer
+was tried and leaked (E2's 247 Hz smears into 277): E+B-throughout 36 → 63 false.
+
+Now: a second analyser `analyserL` (fftSize 8192, created in `attachAnalyser`, `longBuf`, read once per frame) and
+`lowPartner(n,base,cp)`: the normal targeted score on the long buffer for the partner's unshared overtones between
+~215 Hz and ~433 Hz (lowest two). In `partnerOk` it can accept the **upper** note only (`n.midi>base.midi`; letting it
+confirm the low E let path 2 pass C#3 phantoms: +10 false), at ≥ 0.75, and only ≥ 110 ms after this step's own pick
+(`G._winAt` back, used only here; the long buffer still holds the previous step for ~170 ms). Sim (`test_window_steal.py`,
+now with a second analyser, `LPT=` threshold, `LP=` low-pass): measured 110-260 ms after a pick, correct 0.81-0.95,
+wrong 0.11-0.64. Hit counts unchanged from 1.70: correct 95/96, E+B throughout 36, E+C# throughout 45, swapped 7; melody
+17/17. The sim's sampled notes already passed via the tracker, so the gain only shows on the phone. The report shows
+`2nd x.xx` (best low-overtone score 110-260 ms after a pick) per two-note step.
+
+**Needs:** a correct run on 1.71 at 100%; check E+B and A steps now count, and read the `2nd` values (correct should
+be ≥ 0.75). Also the owner's runs drift onto the wrong strings later in the song (B section): misses there may be real.
 
 ## v1.70: undo 1.69's strict checks; fixed highway speed
 

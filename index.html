@@ -1376,6 +1376,7 @@ let mySongs=store.get('songs',[]);
 
 /* ================= Audio ================= */
 let micSrc=null;
+let analyserL=null,longBuf=null,longFrame=-1; /* v1.71: 8192-sample buffer for the second note's low overtones */
 let actx=null,analyser=null,micStream=null,timeBuf=null,freqBuf=null,micState='off',muteUntil=0;
 async function ensureAudio(){
   if(!actx){const AC=window.AudioContext||window.webkitAudioContext;actx=new AC();}
@@ -1387,7 +1388,7 @@ function micInfo(){try{if(nativeMic){const i=nativeMic.info||{};return 'mic: '+(
   const on=k=>st[k]===undefined?'?':st[k]?'ON':'off';
   return 'mic: '+(nativeMicErr?'(app mic failed: '+nativeMicErr+') ':'')+(t.label||'unnamed')+' · noise suppression '+on('noiseSuppression')+' · echo cancel '+on('echoCancellation')+' · auto volume '+on('autoGainControl')+' · '+(st.sampleRate||actx&&actx.sampleRate||'?')+' Hz';}catch(e){return 'mic: ?';}}
 // switch to another microphone (Settings › Microphone)
-async function restartMic(){stopNativeMic();try{if(micStream)micStream.getTracks().forEach(t=>t.stop());}catch(e){}if(micSrc)try{micSrc.disconnect();}catch(e){}micStream=null;analyser=null;micSrc=null;return enableMic();}
+async function restartMic(){stopNativeMic();try{if(micStream)micStream.getTracks().forEach(t=>t.stop());}catch(e){}if(micSrc)try{micSrc.disconnect();}catch(e){}micStream=null;analyser=null;analyserL=null;longBuf=null;micSrc=null;return enableMic();}
 async function fillMicList(){const sel=$('#sMic');if(!sel||!navigator.mediaDevices||!navigator.mediaDevices.enumerateDevices)return;
   try{const ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput');
     const nat=!!nativeMicPlugin();let natOpts='';
@@ -1407,6 +1408,7 @@ async function fillMicList(){const sel=$('#sMic');if(!sel||!navigator.mediaDevic
 function attachAnalyser(src){micSrc=src;
   analyser=actx.createAnalyser();analyser.fftSize=4096;analyser.smoothingTimeConstant=0;
   src.connect(analyser);
+  try{analyserL=actx.createAnalyser();analyserL.fftSize=8192;analyserL.smoothingTimeConstant=0;src.connect(analyserL);longBuf=new Float32Array(8192);}catch(e){analyserL=null;longBuf=null;}
   timeBuf=new Float32Array(analyser.fftSize);freqBuf=new Float32Array(analyser.frequencyBinCount);
   micState='on';updateMicBanner();}
 /* ---- Android app: the phone's built-in mic, recorded natively (NativeMicPlugin.java) ----
@@ -1528,8 +1530,9 @@ function detectFrame(now){
    that's really there stands out from its neighbours even when another string rings at the same time. */
 let hann=null;
 function goertzel(buf,w,sr,f){const k=2*Math.cos(2*Math.PI*f/sr);let s1=0,s2=0;for(let i=0;i<buf.length;i++){const s0=buf[i]*w[i]+k*s1-s2;s2=s1;s1=s0;}return s1*s1+s2*s2-k*s1*s2;}
+const hannBy={};
 function targetScoreBuf(buf,sr,midi,hs,info){
-  if(!hann||hann.length!==buf.length){hann=new Float32Array(buf.length);for(let i=0;i<buf.length;i++)hann[i]=0.5-0.5*Math.cos(2*Math.PI*i/(buf.length-1));}
+  if(!hann||hann.length!==buf.length){const H=hannBy[buf.length];if(H)hann=H;else{hann=new Float32Array(buf.length);for(let i=0;i<buf.length;i++)hann[i]=0.5-0.5*Math.cos(2*Math.PI*i/(buf.length-1));hannBy[buf.length]=hann;}}
   const f0=midiToFreq(midi);const minF=Math.max(150,2.2*sr/buf.length/0.0595);// a semitone apart must be >~2 bins
   let T=0,Lo=0,Hi=0,n=0;
   for(const h of hs||[1,2,3,4,5,6,7,8,9,10]){const f=f0*h;if(f<minF)continue;if(f>3000||n>=5)break;n++;const wt=1/Math.sqrt(h);
@@ -2336,22 +2339,23 @@ function firstPending(){for(let i=G.scan;i<G.song.events.length;i++)if(!G.state[
    own overtones can't pass for the B or C# above it); it must stand out from its neighbours and be reasonably strong. */
 // notes the pitch tracker reported in the last half second (two notes sounding together make it flick between them)
 function recentHeard(now){const R=G.heardRecent||(G.heardRecent=[]);while(R.length&&R[0].at<now-500)R.shift();return new Set(R.map(x=>x.m));}
-/* v1.69 (measured only since v1.70): is the step's lowest note that note, or its octave? E3 (D string, 2nd fret) has all of open E's even
-   overtones, so A4+D2 passed for E0+A4. The low note's 3rd overtone (which its octave doesn't have) must be at least
-   0.15 of its 2nd and 4th. Measured directly (the targeted check skips everything under ~400 Hz). Only when the other
-   note doesn't share the 3rd (E+B, A+E can't be told apart this way); the best reading during the step counts.
-   Sim: real E0+A4 ~2.6, A4+D2 ~0.08; real A0+D4 ~0.18. */
-function lowOddR(e,cp){const lo=e.notes.reduce((a,b)=>b.midi<a.midi?b:a);const ft=midiToFreq(lo.midi+cp),sr=actx.sampleRate;
-  const others=e.notes.filter(x=>x!==lo).map(x=>midiToFreq(x.midi+cp));const sh=f=>others.some(fo=>{const k=Math.round(f/fo);return k>=1&&Math.abs(f-k*fo)/f<0.03;});
-  if(sh(ft*3))return null;if(!hann||hann.length!==timeBuf.length)targetScoreBuf(timeBuf,sr,lo.midi+cp,[1]);
-  const A=h=>Math.sqrt(goertzel(timeBuf,hann,sr,ft*h));const ev=[2,4].filter(h=>!sh(ft*h)).map(A);if(!ev.length)return null;
-  return A(3)/Math.max(1e-9,ev.reduce((a,b)=>a+b,0)/ev.length);}
-/* v1.70: not used to judge yet (it missed real notes on the owner's phone in 1.69); the report shows each step's best
-   ratio as 'odd x.xx' so a threshold can be set from real playing */
+/* v1.71: is the other note of a two-note step there, judged on its low overtones? The targeted check skips everything
+   under ~430 Hz (semitone neighbours blur in the 4096-sample buffer), yet those are the ones that tell B2 (370 Hz),
+   C#3 (277), F#3 (370), G#3 (415) from the low string's overtones. Here they're scored the same way on an 8192-sample
+   buffer (its own analyser; reaches down to ~215 Hz): only overtones not shared with the base note, the lowest two in
+   that range. Returns the score (0.5 = no better than a neighbouring note, near 1 = clearly there) or null. */
+function lowPartner(n,base,cp,at){if(!analyserL||!longBuf)return null;
+  {const pk=Math.max(det.onsetAt,det.pitchOnsetAt||-1);if((at!=null?at:(G._mNow||performance.now()))-pk<110)return null;if(at==null&&G._winAt!=null&&pk<G._winAt)return null;} /* and the pick must be this step's, not the one before */ /* the buffer still holds the step before */
+  if(longFrame!==det.frame){analyserL.getFloatTimeDomainData(longBuf);longFrame=det.frame;}
+  const sr=actx.sampleRate,ft=midiToFreq(n.midi+cp),fb=midiToFreq(base.midi+cp);
+  const lo=Math.max(150,2.2*sr/longBuf.length/0.0595),hi=Math.max(150,2.2*sr/timeBuf.length/0.0595);
+  const hs=[1,2,3,4,5].filter(h=>{const f=ft*h,k=Math.round(f/fb);return f>=lo&&f<hi&&!(k>=1&&Math.abs(f-k*fb)/f<0.015);}).slice(0,2);
+  if(!hs.length)return null;return targetScoreBuf(longBuf,sr,n.midi+cp,hs);}
 function partnerOk(e,base,cp){if(e.notes.length<2)return true;const sr=actx.sampleRate,bm=base.midi+cp,fb=midiToFreq(bm);const bT=targetInfo(base,cp).T||1e-9;
   const heard=recentHeard(G._mNow||performance.now());
   for(const n of e.notes){if(n===base)continue;const tm=n.midi+cp,ft=midiToFreq(tm);
     if(heard.has(tm))continue; // the tracker itself heard this note: it's there
+    if(n.midi>base.midi){const lp=lowPartner(n,base,cp);if(lp!=null&&lp>=(window.__lpT!=null?window.__lpT:0.75))continue;} /* v1.71: the upper note, on its low overtones (only confirms the upper note: the low string itself is judged by the tracker / targeted check) */
     const hs=[1,2,3,4,5,6,7,8].filter(x=>{const f=ft*x,k=Math.round(f/fb);return !(k>=1&&Math.abs(f-k*fb)/f<0.015);});
     if(!hs.length){if(targetScore(n,cp)<0.55)return false;continue;}
     // its lowest unshared overtones are the telling ones (A2's 2nd at 220 Hz is strong when it's played, absent if not)
@@ -2467,7 +2471,7 @@ function chordCheck(now){
    For each note: what was expected, what the pitch tracker heard while waiting, how many picks registered, how
    strongly the expected note showed up, and how it ended. Lets problems on a real phone be seen exactly. */
 function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]={heard:[],picks:0,ts:0,t0:now,lastOn:det.onsetAt,lastPo:det.pitchOnsetAt,notes:[],lv:0,gt:gate()};}
-  if(e.notes&&e.notes.length===2&&!isChordEv(e)&&analyser&&timeBuf&&det.rms>=gate()&&det.onsetAt>=d.t0&&now-det.onsetAt<150){const R=lowOddR(e,G.capo||0);if(R!=null)d.odd=Math.max(d.odd||0,R);}
+  if(e.notes&&e.notes.length===2&&!isChordEv(e)&&analyser&&timeBuf&&det.rms>=gate()&&det.onsetAt>=d.t0&&now-det.onsetAt<260){const lo=e.notes[0].midi<=e.notes[1].midi?0:1;const R=lowPartner(e.notes[1-lo],e.notes[lo],G.capo||0,now);if(R!=null)d.lp=Math.max(d.lp||0,R);}
   if(det.rms>d.lv){d.lv=det.rms;d.gt=gate();}
   const m=det.stableMidi;if(m!=null&&d.heard[d.heard.length-1]!==m&&d.heard.length<8)d.heard.push(m);
   if(det.onsetAt!==d.lastOn){d.picks++;d.lastOn=det.onsetAt;}if(det.pitchOnsetAt!==d.lastPo){d.pp=(d.pp||0)+1;d.lastPo=det.pitchOnsetAt;}
@@ -2478,7 +2482,7 @@ function diagReport(){
   const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+') · '+G.hits+'/'+S.events.length];
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
-    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.odd!=null?' · odd '+d.odd.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.notes.length?' · '+d.notes.join(','):''));});
+    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.notes.length?' · '+d.notes.join(','):''));});
   return L.join('\n');}
 function techWords(n){return n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
 // "any octave" means one octave either way: two octaves off is almost always the pitch tracker locking onto a
@@ -2506,6 +2510,7 @@ function update(dt,now){
     if(st[i]){if(i===G.scan)G.scan++;continue;}
     const e=ev[i];const ch=isChordEv(e);const {wb,wa}=hitWindow(e,b,ev[i+1]?ev[i+1].t-e.t:null,i>0?e.t-ev[i-1].t:null);
     if(e.t-wb>eff)break;
+    G._winAt=now-(eff-(e.t-wb))/b*1000; /* when this step's window opened (v1.71: used only by lowPartner) */
     diagFrame(e,i,now);
     if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){diagEnd(i,'miss',now);st[i]=2;G.misses++;G.streak=0;const w=G.wp&&G.wp.i===i?G.wp:null;if(w){G.wp=null;diagNote(i,w.txt);}addPop(w?w.pop:'Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
     if(!ch&&!e.strum&&analyser&&det.onsetAt>G.lastHitAt&&det.onsetAt>(G.wrongOnset||0)&&now-det.onsetAt<700){
@@ -3836,7 +3841,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.70';
+const APP_VERSION='1.71';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
