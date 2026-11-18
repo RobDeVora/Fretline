@@ -405,7 +405,12 @@ StemSplit exports carry float64 in `real_istft`, so they can't run in the browse
 inputs/outputs now read by position and logged. Other route if that fails too: demucs-rs (Rust/Burn, WebGPU, Apache-2.0,
 6s = 84 MB, demo https://nikhilunni.github.io/demucs-rs/), or the 4-stem split build `monteslu/htdemucs-web-onnx`
 (needs our own STFT/iSTFT).
-**Needs:** owner to run it on the phone (30 s first) and send the report + say how the guitar track sounds. Then:
+**First success (SonicDemixer build, lean, processor, single thread):** 246 MB download, session in 3.2 s, ~14-16 s per
+7.8 s part = 2.43× the audio length (a 3.6-min song ≈ 9 min); guitar share 60%. An earlier download failed with
+"network error" when the owner switched to Chrome (WebView backgrounded). Download is now in 16 MB Range pieces, each
+retried up to 5×, saved as `?fretline-piece=N` cache keys (not `#`: the Cache API ignores fragments, which made every
+piece "resume" piece 0 forever and crashed the tab in testing), so a reload resumes.
+**Needs:** owner to try the graphics chip (WebGPU), and say how the guitar track sounds and send the report + say how the guitar track sounds. Then:
 Basic Pitch (`@spotify/basic-pitch`, model inside the npm package) on the guitar stem → draft song; backing track =
 band without guitar.
 
