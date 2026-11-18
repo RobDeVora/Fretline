@@ -1,4 +1,4 @@
-# Fretline: session handoff (17 Nov 2026, v1.57)
+# Fretline: session handoff (17 Nov 2026, v1.58)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -224,6 +224,17 @@ Owner wants to play the lead, the chords, or both from one imported file.
 - `parseMidi`: a short first time signature followed by the main one is a pickup bar; everything is moved later
   by (bpb - pickup) so bars line up (owner's file: 1/4 then 4/4). Affects Chordify-style 3/4-then-4/4 files too.
 - Tested with the owner's file: Lead + rhythm = lead in bars 1-4, chords in 5-6.
+
+## v1.58: fixes for parts
+
+- Owner: Lead + rhythm with a strum pattern left the highway empty. `applyStrum` rebuilt the whole song from
+  `chordSegments` (lead turned into guessed chords, rhythm bars dropped). Now lead events are tagged `ld` in
+  `comboEvents`; patterns and simpler chords apply to the rhythm bars only and the lead is kept as written.
+- v1.57 regression: parts on the shared timeline could start with long silence (the owner's Vocals part: 10 s).
+  `trimLead` starts the played part at its first bar with notes (`def.trim`); `buildSong` moves file words/melody
+  by the same amount. Stored `def.parts` stay on the shared timeline.
+- Landscape: 🎸/🎤/🥁 show icons only on short screens (`.lbl` hidden at max-height 500px) and selects are capped,
+  so the controls fit in two rows again.
 
 ## Idea: play along with an MP3
 
