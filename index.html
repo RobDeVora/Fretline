@@ -1197,7 +1197,7 @@ function saveSettings(){store.set('settings',settings);}
 // The level below which sound is treated as silence. The sensitivity setting sets the most it can be; in a quiet room
 // it drops to just above the room's own noise (measured between notes), so soft notes on a quiet phone mic still count.
 function gateMax(){return 0.04*Math.pow(0.65,settings.sens-1);}
-function gate(){const b=gateMax();const nf=typeof det!=='undefined'&&det.noise;return nf?Math.min(b,Math.max(nf*3,0.0012)):b;}
+function gate(){const b=gateMax();const nf=typeof det!=='undefined'&&det.noise;return nf?Math.min(b,Math.max(nf*4,0.0012)):b;}
 let bests=store.get('best',{});
 let mySongs=store.get('songs',[]);
 
@@ -1245,7 +1245,7 @@ const det={midi:null,stableMidi:null,count:0,freq:0,cents:0,rms:0,onsetAt:-1,his
 function detectFrame(now){
   analyser.getFloatTimeDomainData(timeBuf);det.frame=(det.frame||0)+1;
   {const sub0=timeBuf.subarray(timeBuf.length-2048);let q=0;for(let i=0;i<sub0.length;i+=4)q+=sub0[i]*sub0[i];const lv=Math.sqrt(q/(sub0.length/4));
-    if(!det.nfAt||now-det.nfAt>100){det.nfAt=now;const L=det.nfL||(det.nfL=[]);L.push(lv);if(L.length>50)L.shift();if(L.length>=10){const so=L.slice().sort((a,b)=>a-b);det.noise=so[Math.floor(so.length*0.15)];}}}
+    if(!det.nfAt||now-det.nfAt>100){det.nfAt=now;const L=det.nfL||(det.nfL=[]);L.push(lv);if(L.length>300)L.shift();if(L.length>=10){const so=L.slice().sort((a,b)=>a-b);det.noise=so[Math.floor(so.length*0.05)];}}}
   const sub=timeBuf.subarray(timeBuf.length-2048);
   let s=0;for(let i=0;i<sub.length;i++)s+=sub[i]*sub[i];const rms=Math.sqrt(s/sub.length);det.rms=rms;
   const g=gate();const minPrev=det.hist.length?Math.min(...det.hist):0;det.hist.push(rms);if(det.hist.length>6)det.hist.shift();
@@ -1978,7 +1978,10 @@ function matchEvent(e,i,now){
   const pick=Math.max(det.onsetAt,det.pitchOnsetAt||-1);
   const fresh=legato||(pick>G.lastHitAt&&now-pick<700);
   // 1) the pitch tracker heard exactly this note, freshly played (not one that was already ringing)
-  if(m!=null&&fresh&&e.notes.some(n=>noteOk(n,m,cp)))return true;
+  //    A reading is confirmed by the targeted check (the tracker can report a note that isn't there when two
+  //    notes ring together). An octave reading only counts if it's confirmed more strongly: the expected note itself is clearly there, or the octave
+  //    note really is (two notes ringing together can make the tracker report a phantom note an octave down)
+  if(m!=null&&fresh&&e.notes.some(n=>noteOk(n,m,cp)&&(((m===n.midi+cp||(n.bend&&m>n.midi+cp&&m<=n.midi+cp+n.bend))&&targetScore(n,cp)>=0.45)||targetScore(n,cp)>=0.55||targetScore({midi:m-cp},cp)>=0.7)))return true;
   // 2) or the note is clearly present even though something else rang too (e.g. a grazed second string, or the
   //    previous note still ringing). It must have just been played: its strength has to jump compared with the
   //    moment before (a note that was already ringing, or an open string humming along, doesn't jump).
@@ -1986,11 +1989,12 @@ function matchEvent(e,i,now){
   if(G.tcIdx!==i){G.tcIdx=i;G.tcf=0;G.tHist=[];G.tRiseAt=null;}
   let ti={score:0,T:0};for(const n of e.notes){const x=targetInfo(n,cp);if(x.score>ti.score)ti=x;}
   const hist=G.tHist;hist.push({at:now,T:ti.T});while(hist.length&&hist[0].at<now-600)hist.shift();
-  if(det.rms<gate()){G.tcf=0;G.tRiseAt=null;return false;}
+  // the note's strength jumping after a pick can't be noise, so this check also accepts somewhat quieter sound
+  if(det.rms<gate()*0.5){G.tcf=0;G.tRiseAt=null;return false;}
   const before=hist.filter(h=>h.at<=now-60&&h.at>=now-450).map(h=>h.T);
   const repick=evKey(e)===G.lastHitKey&&det.onsetAt>G.lastHitAt&&now-det.onsetAt<350;
   const rose=(before.length>=3&&ti.T>=2.5*Math.min(...before)+1e-9)||repick;
-  if(ti.score>=0.68&&(rose||legato)){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){G.tHist=[];return true;}return false;}
+  if(ti.score>=0.63&&(rose||legato)){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){G.tHist=[];return true;}return false;}
   G.tcf=0;G.tRiseAt=null;return false;
 }
 // the right pitch (any octave if allowed); a bent note counts anywhere from the fretted pitch up to its target
@@ -2007,8 +2011,9 @@ function playedPos(m,want){const cp=G.capo||0;let best=null,bc=1e9;
 // app can't hear well in a particular chord is never blamed).
 const SNAME=['low E','A','D','G','B','high e'];
 function chordCheck(now){
-  const c=G.cc;if(!c||!analyser||!timeBuf)return;const age=now-c.onset;if(age<90)return;
-  if(age<=300){const r=chordStrings(c.e.shape,G.capo||0,timeBuf,actx.sampleRate);
+  const c=G.cc;if(!c||!analyser||!timeBuf)return;const age=now-c.onset;if(age<130)return;
+  // skip the pick's noisy first moment, then listen for ~0.2 s
+  if(age<=340){const r=chordStrings(c.e.shape,G.capo||0,timeBuf,actx.sampleRate);
     // keep each string's best and average score, and its loudest level, over the window
     if(!c.best)c.best=r.map(x=>({...x,sum:x.score||0,n:1}));else r.forEach((x,k)=>{const b=c.best[k];if(x.score==null)return;b.sum+=x.score;b.n++;if(x.score>b.score)b.score=x.score;if(x.level>b.level)b.level=x.level;});return;}
   G.cc=null;if(!c.best)return;
@@ -2016,7 +2021,7 @@ function chordCheck(now){
   // how loud a played string typically is in this strum (for telling a struck muted string from one humming along)
   const lv=c.best.filter(x=>!x.muted&&x.score!=null&&x.score>=0.5).map(x=>x.level).sort((a,b)=>a-b);const typical=lv.length?lv[Math.floor(lv.length/2)]:0;
   for(const x of c.best){if(x.score==null){res.push({s:x.s,st:null});continue;}const hk=name+'/'+x.s;const seen=hist[hk]||0;const avg=x.sum/x.n;
-    if(x.muted){const wasOpen=c.prevShape&&c.prevShape[x.s]===0;if(x.score>=0.7&&typical&&x.level>=0.35*typical&&!wasOpen){res.push({s:x.s,st:'ring'});ring.push(x.s);}else res.push({s:x.s,st:null});continue;}
+    if(x.muted){const wasOpen=c.prevShape&&c.prevShape[x.s]===0;if(x.score>=0.7&&typical&&x.level>=0.5*typical&&!wasOpen){res.push({s:x.s,st:'ring'});ring.push(x.s);}else res.push({s:x.s,st:null});continue;}
     if(x.score>seen)hist[hk]=x.score;
     if(avg<0.25||(avg<0.4&&seen>=0.6)){res.push({s:x.s,st:'dead'});dead.push(x.s);}else res.push({s:x.s,st:x.score>=0.5?'ok':null});}
   G.strFb={at:performance.now(),res};
@@ -2042,8 +2047,10 @@ function diagReport(){
     L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.notes.length?' · '+d.notes.join(','):''));});
   return L.join('\n');}
 function techWords(n){return n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
-function noteOk(n,m,cp){const a=n.midi+cp;if(m===a||(settings.anyOctave&&(((a-m)%12)+12)%12===0))return true;
-  if(n.bend){for(let k=1;k<=n.bend;k++){if(m===a+k||(settings.anyOctave&&(((a+k-m)%12)+12)%12===0))return true;}}return false;}
+// "any octave" means one octave either way: two octaves off is almost always the pitch tracker locking onto a
+// lower overtone of a note that's still ringing, not something you played
+function noteOk(n,m,cp){const a=n.midi+cp;const oct=x=>settings.anyOctave&&Math.abs(x-m)===12;if(m===a||oct(a))return true;
+  if(n.bend){for(let k=1;k<=n.bend;k++){if(m===a+k||oct(a+k))return true;}}return false;}
 function addPop(text,color){G.pops.push({text,color,t:performance.now()});if(G.pops.length>6)G.pops.shift();}
 function update(dt,now){
   if(!G.playing)return;
@@ -2067,6 +2074,12 @@ function update(dt,now){
     if(e.t-wb>eff)break;
     diagFrame(e,i,now);
     if(G.mode==='play'&&e.t+Math.max(wa,ch?Math.min(e.d*0.6,1.5):0)<eff){diagEnd(i,'miss',now);st[i]=2;G.misses++;G.streak=0;addPop('Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
+    if(!ch&&!e.strum&&analyser&&det.onsetAt>G.lastHitAt&&det.onsetAt>(G.wrongOnset||0)&&now-det.onsetAt<700){
+      if(G.wnPick!==det.onsetAt){G.wnPick=det.onsetAt;G.wnMax=0;}
+      const cp=G.capo||0;G.wnMax=Math.max(G.wnMax,...e.notes.map(n=>targetScore(n,cp)));
+      const yinOk=det.stableMidi!=null&&e.notes.some(n=>noteOk(n,det.stableMidi,cp));
+      if(settings.fx!=='off'&&now-det.onsetAt>220&&now>muteUntil&&det.rms>=gate()&&G.wnMax<0.3&&!yinOk){
+        G.wrongOnset=det.onsetAt;G.wrongAt=now;diagNote(i,'wrong:absent');fxMiss(e,now);addPop('Wrong note','#ff5d73');break;}}
     if(settings.fx!=='off'&&!ch&&!e.strum&&det.stableMidi!=null&&det.onsetAt>(G.wrongOnset||0)&&det.onsetAt>G.lastHitAt&&now-det.onsetAt>140&&now>muteUntil&&!ringingPrev(det.stableMidi,ev,i)){
       const m=det.stableMidi,cp=G.capo||0;
       if(!e.notes.some(n=>noteOk(n,m,cp))&&!e.notes.some(n=>targetScore(n,cp)>=0.5)){G.wrongOnset=det.onsetAt;G.wrongAt=now;diagNote(i,'wrong:'+midiToName(m));fxMiss(e,now);const pp=playedPos(m,e.notes[0]);addPop(pp&&pp.f===e.notes[0].f&&pp.s!==e.notes[0].s?'Wrong string':'Wrong note','#ff5d73');break;}
@@ -2077,7 +2090,7 @@ function update(dt,now){
       diagEnd(i,'hit',now);
       fxHit(e,now);
       if(settings.deadStrings&&e.shape&&e.strum!=='x'&&analyser){const pv=ev[i-1];const first=e.chord||!(pv&&pv.label===e.label)||now-(G.ccAt||0)>650;
-        if(first){const pk=Math.max(det.onsetAt,det.pitchOnsetAt||-1);G.cc={e,i,onset:now-pk<400?pk:now-60,best:null,prevShape:pv&&pv.shape};G.ccAt=now;}}
+        if(first){G.cc={e,i,onset:now,best:null,prevShape:pv&&pv.shape};G.ccAt=now;}/* timed from when the strum was credited, so the previous chord can't leak in */}
       st[i]=1;G.hits++;G.streak++;G.best=Math.max(G.best,G.streak);G.lastHitAt=now;G.lastHitKey=evKey(e);
       const early=e.t-eff;addPop(G.streak>=10&&G.streak%10===0?G.streak+' streak!':Math.abs(early)<0.12*b?'Perfect':'Good','#5ce1a6');
     }
@@ -3165,7 +3178,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.48';
+const APP_VERSION='1.49';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
