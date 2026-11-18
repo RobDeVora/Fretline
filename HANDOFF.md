@@ -423,7 +423,18 @@ Download is back to one continuous fetch (as in the working run) that continues 
 connection drops, retried up to 6×; files under 97% of the expected size (`EXPECT`) are never cached, and an incomplete
 saved copy is discarded. Isolation also showed "threads no" on the phone: COEP is now `require-corp` (script loaded
 with crossOrigin=anonymous), up to 2 reload attempts, report logs whether the SW is in charge.
-**Needs:** owner to run processor (now multi-core) and graphics chip again and send the report + say how the guitar track sounds. Then:
+Phone run after that: download + processor fine (13.9 s/part); **WebView never becomes cross-origin isolated** even with
+the SW in charge and COEP require-corp (multi-core not available inside the app). GPU: 4.5 s first part, then device
+lost before every later part (rebuild 2 s), and **GPU parts came out silent** (guitar share 25% vs 60%): NaN from the
+input-normalisation prologue on WebGPU (same as monteslu's notes). Now: `onnxNodes` (minimal protobuf walker) reads
+node names from the model; top-level `/Op(_n)` arithmetic/reduce nodes go to `forceCpuNodeNames` for WebGPU; every GPU
+output is checked for non-finite values → that part and the rest run on the processor; after the first device loss the
+GPU session is rebuilt before every part (cap 6 losses); `navigator.storage.persist()` requested and logged. Tested with
+a fake WebGPU session (reset on run 2, NaN from run 4): exact output.
+Owner asked to keep the model safe from cache clears: Cache Storage survives Android "Clear cache" but not "Clear
+data"; true protection = a native file in the app (APK). Bigger next step proposed: run Demucs natively in the APK
+(onnxruntime-android: all cores + NNAPI/GPU), model stored as an app file.
+**Needs:** owner to rerun graphics chip and send the report + say how the guitar track sounds. Then:
 Basic Pitch (`@spotify/basic-pitch`, model inside the npm package) on the guitar stem → draft song; backing track =
 band without guitar.
 

@@ -71,6 +71,26 @@ window.addEventListener('error',e=>{CON.push('page error: '+(e.message||e));});w
 logEl.onclick=()=>{try{navigator.clipboard.writeText(R.join('\n'));status('Report copied.');}catch(e){}};
 $('file').onchange=()=>{$('go').disabled=!$('file').files.length;status($('file').files.length?'Ready.':'Choose a file.');};
 
+/* reads the names and types of the model's top-level nodes straight from the ONNX file (protobuf: ModelProto.graph=7,
+   GraphProto.node=1, NodeProto.name=3, op_type=4); big fields like weights are skipped by length */
+function onnxNodes(b){let p=0;const out=[];
+  const vint=()=>{let x=0,m=1,c;do{c=b[p++];x+=(c&127)*m;m*=128;}while(c&128);return x;};
+  const skip=w=>{if(w===0)vint();else if(w===1)p+=8;else if(w===2){const n=vint();p+=n;}else if(w===5)p+=4;else throw new Error('wire '+w);};
+  const str=(a,e)=>new TextDecoder().decode(b.subarray(a,e));
+  while(p<b.length){const k=vint(),f=Math.floor(k/8),w=k%8;
+    if(f===7&&w===2){const n=vint(),end=p+n;
+      while(p<end){const k2=vint(),f2=Math.floor(k2/8),w2=k2%8;
+        if(f2===1&&w2===2){const n2=vint(),e2=p+n2;let name='',op='';
+          while(p<e2){const k3=vint(),f3=Math.floor(k3/8),w3=k3%8;if(w3===2&&(f3===3||f3===4)){const n3=vint();const v=str(p,p+n3);p+=n3;if(f3===3)name=v;else op=v;}else skip(w3);}
+          out.push({name,op});p=e2;}
+        else skip(w2);}
+      p=end;}
+    else skip(w);}
+  return out;}
+/* on WebGPU, Demucs' input normalisation gives NaN (known, see monteslu/htdemucs-web-onnx): keep the model's top-level
+   (un-nested) arithmetic and reduction nodes on the processor */
+const CPU_OPS=new Set(['ReduceMean','Sub','Pow','Clip','Sqrt','Add','Div','Mul']);
+function cpuNodeNames(bytes){try{return onnxNodes(bytes).filter(n=>CPU_OPS.has(n.op)&&/^\/[A-Za-z]+(_\d+)?$/.test(n.name)).map(n=>n.name);}catch(e){log('model: could not read node names ('+e.message+')');return [];}}
 function loadScript(src){return new Promise((ok,bad)=>{const s=document.createElement('script');s.crossOrigin='anonymous';s.src=src;s.onload=ok;s.onerror=()=>bad(new Error('could not load '+src));document.head.appendChild(s);});}
 /* downloads the model in one go; if the connection drops it continues from where it stopped (HTTP Range); a file
    smaller than the model should be is never kept */
@@ -86,7 +106,7 @@ async function getModel(url){
     try{const r=await fetch(url,got?{headers:{Range:'bytes='+got+'-'}}:{});
       if(got&&r.status!==206){log('model: could not continue (HTTP '+r.status+'), starting over');parts=[];got=0;if(r.status!==200)throw new Error('HTTP '+r.status);}
       else if(!r.ok)throw new Error('HTTP '+r.status);
-      if(a===1)log('model: downloading'+(r.headers.get('content-length')?' '+(+r.headers.get('content-length')/1e6).toFixed(0)+' MB':''));
+      if(a===1){const cl=+r.headers.get('content-length');log('model: downloading'+(Number.isFinite(cl)&&cl>0?' '+(cl/1e6).toFixed(0)+' MB':''));}
       const rd=r.body.getReader();
       for(;;){const {done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;prog(Math.min(0.3,got/(want||2.5e8)*0.3));status('Downloading the model… '+Math.round(got/1e6)+(want?' / ~'+Math.round(want/1e6):'')+' MB');}
       break;
@@ -117,12 +137,14 @@ $('go').onclick=async()=>{
     status('Loading the AI runtime…');
     if(!window.ort)await loadScript(ORT_BASE+'ort.webgpu.min.js');
     ort.env.wasm.wasmPaths=ORT_BASE;ort.env.wasm.numThreads=self.crossOriginIsolated?Math.min(6,navigator.hardwareConcurrency||2):1;log('processor threads: '+ort.env.wasm.numThreads);
-    let model=await getModel(MODELS[$('mdl').value]);const lean=$('lean').value;
+    try{if(navigator.storage&&navigator.storage.persist){const ok=await navigator.storage.persist();const est=navigator.storage.estimate?await navigator.storage.estimate():null;
+      log('storage: '+(ok?'kept permanently':'may be cleared by the phone if space runs low')+(est?' · '+(est.usage/1e6).toFixed(0)+' MB used of '+(est.quota/1e9).toFixed(1)+' GB':''));}}catch(e){}
+    let model=await getModel(MODELS[$('mdl').value]);const lean=$('lean').value;const cpuNames=cpuNodeNames(model);log('model: '+cpuNames.length+' normalisation steps kept on the processor when using the graphics chip');
     log('loading: '+lean+' · runtime '+ORT_VER);ort.env.logLevel='warning';
     status('Starting the model…');
     let session=null,used='';const want=$('be').value;
-    const opts=ep=>Object.assign({executionProviders:[ep],graphOptimizationLevel:lean==='lean'?'disabled':lean,executionMode:'sequential',logSeverityLevel:2},lean==='all'?{}:{enableCpuMemArena:false,enableMemPattern:false});
-    let gpuLost=0;const tryEp=async(ep,mm)=>{const ts=performance.now();status('Loading the model into the '+(ep==='webgpu'?'graphics chip':'processor')+'…');const s=await ort.InferenceSession.create(mm||model||await getModel(MODELS[$('mdl').value]),opts(ep));log('runtime: '+ep+' ready in '+((performance.now()-ts)/1000).toFixed(1)+' s');return s;};
+    const opts=ep=>Object.assign({executionProviders:[ep==='webgpu'&&cpuNames.length?{name:'webgpu',forceCpuNodeNames:cpuNames}:ep],graphOptimizationLevel:lean==='lean'?'disabled':lean,executionMode:'sequential',logSeverityLevel:2},lean==='all'?{}:{enableCpuMemArena:false,enableMemPattern:false});
+    let gpuLost=0,gpuFresh=false;const tryEp=async(ep,mm)=>{const ts=performance.now();status('Loading the model into the '+(ep==='webgpu'?'graphics chip':'processor')+'…');const s=await ort.InferenceSession.create(mm||model||await getModel(MODELS[$('mdl').value]),opts(ep));log('runtime: '+ep+' ready in '+((performance.now()-ts)/1000).toFixed(1)+' s');return s;};
     if(want==='auto'&&('gpu' in navigator)){try{session=await tryEp('webgpu');used='webgpu';}catch(e){log('runtime: graphics chip not usable ('+String(e.message||e).slice(0,140)+'), using the processor');}}
     if(!session){session=await tryEp('wasm');used='wasm';}
     model=null; /* the runtime has its own copy now */
@@ -137,21 +159,26 @@ $('go').onclick=async()=>{
     const inp=new Float32Array(2*SEG);const times=[];
     for(let c=0;c<nCh;c++){
       const st=c*stride;inp.fill(0);for(let i=0;i<SEG&&st+i<N;i++){inp[i]=(L[st+i]-mean)/sd;inp[SEG+i]=(Rc[st+i]-mean)/sd;}
-      const tc=performance.now();let res=null;
-      for(let tries=0;!res;tries++){try{res=await session.run({[session.inputNames[0]]:new ort.Tensor('float32',inp,[1,2,SEG])});}
+      const tc=performance.now();let res=null,ot=null;
+      const rebuild=async ep=>{try{session.release&&await session.release();}catch(_){}const m2=await getModel(MODELS[$('mdl').value]);session=await tryEp(ep,m2);used=ep;};
+      if(used==='webgpu'&&gpuFresh)await rebuild('webgpu');
+      for(let tries=0;!ot;tries++){
+        try{res=await session.run({[session.inputNames[0]]:new ort.Tensor('float32',inp,[1,2,SEG])});ot=res[session.outputNames[0]];
+          if(used==='webgpu'){const d=ot.data;let bad=0;for(let q=0;q<d.length;q+=101)if(!Number.isFinite(d[q]))bad++;
+            if(bad){log('part '+(c+1)+': the graphics chip gave invalid numbers; redoing it on the processor, and the rest too');ot=null;await rebuild('wasm');}}}
         catch(e){const msg=String(e&&e.message||e);if(used!=='webgpu'||!/lost|mapAsync|Device/i.test(msg)||tries>3)throw e;
-          gpuLost++;log('part '+(c+1)+': graphics chip reset ('+msg.slice(-60)+')');try{session.release&&await session.release();}catch(_){}
-          const m2=await getModel(MODELS[$('mdl').value]);
-          if(gpuLost<=2){try{session=await tryEp('webgpu',m2);}catch(e2){log('graphics chip unusable now, switching to the processor');session=await tryEp('wasm',m2);used='wasm';}}
-          else{log('graphics chip keeps resetting: finishing on the processor');session=await tryEp('wasm',m2);used='wasm';}
-          await new Promise(z=>setTimeout(z,300));}}const dt=performance.now()-tc;times.push(dt);
-      const ot=res[session.outputNames[0]];if(c===0)log('model: in '+session.inputNames.join(',')+' → out '+session.outputNames.join(',')+' '+JSON.stringify(ot.dims));const S=ot.data;/* [1,6,2,SEG] */
+          gpuLost++;log('part '+(c+1)+': graphics chip reset'+(gpuFresh?'':' (from now on it is restarted before every part)'));
+          if(gpuLost>6||tries>=2){log('graphics chip keeps resetting: finishing on the processor');await rebuild('wasm');}
+          else{gpuFresh=true;try{await rebuild('webgpu');}catch(e2){log('graphics chip unusable now, switching to the processor');await rebuild('wasm');}}
+          await new Promise(z=>setTimeout(z,300));}}
+      const dt=performance.now()-tc;times.push(dt);
+      if(c===0)log('model: in '+session.inputNames.join(',')+' → out '+session.outputNames.join(',')+' '+JSON.stringify(ot.dims));const S=ot.data;/* [1,6,2,SEG] */
       for(let i=0;i<SEG&&st+i<N;i++){const w=W[i];ws[st+i]+=w;
         for(let ch=0;ch<2;ch++){let rest=0;for(let k=0;k<6;k++){const v=S[(k*2+ch)*SEG+i];if(k===GTR){if(ch===0)gL[st+i]+=w*v;else gR[st+i]+=w*v;}else rest+=v;}
           if(ch===0)rL[st+i]+=w*rest;else rR[st+i]+=w*rest;}}
       if(ot.dispose)ot.dispose();
       prog(0.3+0.7*(c+1)/nCh);status('Splitting… part '+(c+1)+' of '+nCh+' ('+(dt/1000).toFixed(1)+' s for 7.8 s of audio)');
-      log('part '+(c+1)+'/'+nCh+': '+(dt/1000).toFixed(1)+' s');}
+      log('part '+(c+1)+'/'+nCh+': '+(dt/1000).toFixed(1)+' s'+(used==='webgpu'?' (graphics chip)':' (processor)'));}
     for(let i=0;i<N;i++){const w=ws[i]||1;gL[i]=gL[i]/w*sd+mean;gR[i]=gR[i]/w*sd+mean;rL[i]=rL[i]/w*sd+5*mean;rR[i]=rR[i]/w*sd+5*mean;}
     const tot=times.reduce((a,b)=>a+b,0)/1000;
     log('done on '+used+(gpuLost?' (graphics chip reset '+gpuLost+'×)':'')+': '+tot.toFixed(1)+' s of model time for '+(N/SR).toFixed(1)+' s of audio ('+(tot/(N/SR)).toFixed(2)+'× the song length); whole run '+((performance.now()-t0)/1000).toFixed(1)+' s');
