@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.72, Android app from the v1.63 build)
+# Fretline: session handoff (18 Nov 2026, web v1.73, Android app from the v1.63 build)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,31 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.73: notes picked over a ringing note; the right note played in time
+
+Owner's 1.72 boogie report: 73/96, bars 1-4 32/32, E/A bars 63/64; owner considers the boogie fixed. Two new asks.
+
+**Arpeggios** ("Arpeggios in A minor", 145/160): owner saw other strings lit in the strike zone and correct notes
+missed (e.g. open B after open G: #7, #23 "heard G3>G2"). Sim with the arpeggio as played (strings ring until
+re-picked; `SEQ=` in `test_window_steal.py`, 56 BPM eighths = `GAP=0.536`): 61/64, G3 (open G) after E3 missed.
+Cause in path 2 of `matchEvent`: while the previous note rang, the block returned before the strength history
+(`G.tHist`) was written, so after the pick there was no "before" and `rose` never fired. Now `G.tHist` is written every
+frame (before the block); the old after-block history is kept as `G.tHistOK` for the re-pick test (`tb`) and as a
+first `rose` source. The every-frame history only counts if the note that blocked before (`G.blkBy`, its strength in
+`G.blkH`) wasn't itself re-picked (≥ 1.8× jump): without that, D4 played over G4 steps passed (its re-pick lifts G4's
+3rd; D4-throughout 4 → 7). Sim: arpeggio 64/64; wrong notes in it (G/B a semitone sharp, C played as B) 0 false;
+one-note lesson correct 33, G3 1, D5 4, D4 4 (all unchanged); melody 17/17; double stops 95; boogie E+B 38, swapped
+8, late 0.15 96; sweeps G and B strings 18/18, wrong 0/18.
+
+**Hit sound.** Owner: the "play the right note" sound sounds like an inexperienced player. It was played on credit
+(`fxHit`), 50-300 ms after the pick and uneven, plus Bluetooth delay. Now with headphones in Play mode (`fxInTime()`),
+notes are scheduled on the beat like Listen (`G.fxIdx`, `soundDelay()` + 50 ms lookahead, `playEvent`); `G.fxOn` turns
+off on a miss (`fxCut` damps only that note's own voices, matched by start time `voices[s].t`) and on again at the
+next hit. Without headphones, or in Wait mode, it stays on credit. Option text: "Also play the right note, in time,
+while you hit (use headphones)". Sim: 95 notes scheduled exactly on the beat, 1 cut for the 1 miss; detection unchanged.
+
+**Needs:** owner to try the arpeggio lesson and the in-time sound (Settings › sound effects › the third option).
 
 ## v1.72: late first step after a fret change
 

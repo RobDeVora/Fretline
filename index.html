@@ -345,7 +345,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
       <span class="small" id="sSoundStatus"></span>
       <span class="small" id="sDiag" style="color:var(--warn)"></span></div>
     <div class="field"><label>Hit &amp; miss sounds</label>
-      <select id="sFx"><option value="off">Off</option><option value="miss">Sour sound on wrong or missed notes</option><option value="all">Also play the right note when you hit it (use headphones)</option></select>
+      <select id="sFx"><option value="off">Off</option><option value="miss">Sour sound on wrong or missed notes</option><option value="all">Also play the right note, in time, while you hit (use headphones)</option></select>
       <span class="small">Uses the guitar sound above. Without headphones the phone's mic can hear the app, so “play the right note” works best with headphones.</span></div>
     <div class="field"><label>Backing band volume: <span id="sBandV"></span></label><input type="range" id="sBandVol" min="0" max="1" step="0.05"><span class="small">Drums, bass and piano that fit what you're playing. Turn the band on or off with 🥁 Band while playing a song. Use headphones so the mic only hears your guitar.</span></div>
     <div class="field inline"><label>I'm using headphones</label><input type="checkbox" id="sPhones"></div>
@@ -1733,7 +1733,7 @@ function pluck(midi,when,vol,dur,cents,lp,s,fx){
     if(fx.bend){const up=Math.min(0.22,hold*0.4);pr.setValueAtTime(r0,t+0.04);pr.linearRampToValueAtTime(r0*Math.pow(2,fx.bend/12),t+0.04+up);}
     if(fx.vib&&hold>0.35){const o=actx.createOscillator(),og=actx.createGain();o.frequency.value=5.5;og.gain.setValueAtTime(0,t);og.gain.linearRampToValueAtTime(fx.bend?30:22,t+0.3);o.connect(og);og.connect(src.detune);o.start(t+0.1);o.stop(t+hold+0.4);}}
   src.connect(g);g.connect(out());src.start(t);src.stop(t+end+0.05);
-  if(ring){dampString(s,t);const me={src,g,v};voices[s]=me;src.onended=()=>{if(voices[s]===me)delete voices[s];};}
+  if(ring){dampString(s,t);const me={src,g,v,t};voices[s]=me;src.onended=()=>{if(voices[s]===me)delete voices[s];};}
 }
 // stop whatever is ringing on string s at time t (fast fade, no click)
 function dampString(s,t){const old=voices[s];if(!old)return;try{old.g.gain.cancelScheduledValues(t);old.g.gain.setValueAtTime(old.v*0.6,t);old.g.gain.linearRampToValueAtTime(0.0001,t+0.05);old.src.stop(t+0.07);}catch(e){}delete voices[s];}
@@ -1966,8 +1966,13 @@ function bandSound(now){if(settings.headphones||!(settings.backing&&G.band||voxA
 function bandSeek(){const E=G.band?G.band.events:[];let i=0;while(i<E.length&&E[i].t<G.clock-1e-6)i++;G.bandIdx=i;voxSeek();}
 function setupBand(){setupVox();if(G.song)G.song.noPianoTune=voxActive();G.band=G.song?buildBand(G.song,G.capo||0):null;bandSeek();}
 /* ---- hit / miss feedback sounds ---- */
-function fxHit(e,now){
+function fxInTime(){return settings.fx==='all'&&settings.headphones&&G.mode==='play'&&!G.listen&&!!actx;}
+function fxCut(e,i){G.fxOn=false;if(!fxInTime()||!G.fxSched||G.fxSched[i]==null)return;delete G.fxSched[i];
+  const t0=G.fxSched[i];delete G.fxSched[i];const ns=e.strum?(e.snotes||[]):e.notes;const t=actx.currentTime;
+  ns.forEach(n=>{const v=voices[n.s];if(v&&v.t>=t0-0.01&&v.t<=t0+0.15)dampString(n.s,t);});} /* only this note's sound, not a later one already scheduled on that string */
+function fxHit(e,now,i){
   if(settings.fx!=='all'||!actx)return;
+  if(fxInTime()){G.fxOn=true;return;} /* already playing on the beat (or silent after a miss until this hit) */
   const cp=G.capo||0;const sec=Math.min(1.5,e.d*60/(G.song.bpm*G.speed));
   const ns=e.strum?(e.strum==='x'?[]:(e.snotes||[])):e.notes;const many=ns.length>=3;
   ns.slice().sort((a,b)=>e.strum==='U'?b.s-a.s:a.s-b.s).forEach((n,i)=>pluck(n.midi+cp,many?i*0.012:0,many?0.14:0.28,sec,0,0,n.s));
@@ -2181,7 +2186,7 @@ function resetRun(){
   stopVoices();
   if(!G.song)return;
   G.state=new Uint8Array(G.song.events.length);
-  G.clock=-G.song.bpb;G.hits=0;G.misses=0;G.streak=0;G.best=0;G.scan=0;G.playedIdx=0;G.lastClickBeat=Math.floor(G.clock)-1;
+  G.clock=-G.song.bpb;G.hits=0;G.misses=0;G.streak=0;G.best=0;G.scan=0;G.playedIdx=0;G.fxIdx=0;G.fxOn=true;G.fxSched={};G.lastClickBeat=Math.floor(G.clock)-1;
   G.playing=false;G.listen=false;G.finished=false;G.pops=[];G.lastHitKey=null;G.lastHitAt=-1;G.cf=0;G.cfIdx=-1;G.usedOnset=performance.now();G.wrongOnset=performance.now();G.wrongAt=0;G.wp=null;G.frames=null;G.grades={perfect:0,good:0,okay:0};G.ignoreOnsetUntil=0;G.offs=[];G.diag={};G.cc=null;G.strFb=null;G.deadStats=null;
   $('#results').classList.remove('show');G.bandIdx=0;updateButtons();
 }
@@ -2388,14 +2393,21 @@ function matchEvent(e,i,now){
   //    previous note still ringing). It must have just been played: its strength has to jump compared with the
   //    moment before (a note that was already ringing, or an open string humming along, doesn't jump).
   if(!analyser)return false;
-  if(G.tcIdx!==i){G.tcIdx=i;G.tcf=0;G.tHist=[];G.tRiseAt=null;}
+  if(G.tcIdx!==i){G.tcIdx=i;G.tcf=0;G.tHist=[];G.tHistOK=[];G.tRiseAt=null;G.blkBy=null;G.blkH=[];}
   let ti={score:0,T:0},tm=null,tn=null;for(const n of e.notes){const x=targetInfo(n,cp);if(x.score>ti.score){ti=x;tm=n.midi+cp;tn=n;}}
 
   // ...unless the pitch tracker hears a different note that's really there (its odd overtones stand out, so it
   // isn't a phantom), and the expected note is just one of its overtones (G3 rings at D5, its 3rd) or much weaker
   // than it (an open string humming in sympathy). A played note is at least half as strong as what's ringing.
   // (right at a pick the tracker may not have settled yet: use its raw reading then)
+  /* v1.73: the strength history is kept every frame, also while the check below blocks the note (a ringing
+     previous note): otherwise there was no "before" to compare with and a new note picked over it never rose */
+  G.tHist.push({at:now,T:ti.T});while(G.tHist.length&&G.tHist[0].at<now-600)G.tHist.shift();
   const mh=m!=null?m:det.midi;
+  // the note that blocked this one before (a ringing previous note): follow its strength, to tell a new note picked
+  // over it (it keeps fading) from that same note being picked again (it jumps; then the expected note's rise may
+  // only be their shared overtones: D4 re-picked lifts G4's 3rd)
+  if(G.blkBy!=null){const T=targetInfo({midi:G.blkBy-cp},cp).T||0;G.blkH.push({at:now,T});while(G.blkH.length&&G.blkH[0].at<now-600)G.blkH.shift();}
   if(mh!=null&&tm!=null&&!e.notes.some(n=>noteOk(n,mh,cp))){const mi=targetInfo({midi:mh-cp},cp);
     if(mi.score>=0.6){const d=tm-mh,sr=actx.sampleRate;const HN=[[12,2],[19,3],[24,4],[28,5],[31,6],[34,7],[36,8]];
       const up=HN.find(x=>x[0]===d),down=HN.find(x=>x[0]===-d);
@@ -2414,24 +2426,25 @@ function matchEvent(e,i,now){
       // has none; a note that's only ringing on doesn't jump). History is kept per heard note, across notes.
       if(!block&&up){const inf={};const us=targetScoreBuf(timeBuf,sr,mh,[1,2,3,4,5,6,7,8].filter(x=>x%up[1]),inf);
         const uh=G.uHist&&G.uHist.k===mh+'/'+up[1]?G.uHist:(G.uHist={k:mh+'/'+up[1],h:[]});uh.h.push({at:now,T:inf.T||0});while(uh.h.length&&uh.h[0].at<now-600)uh.h.shift();
-        const ub=uh.h.filter(x=>x.at<=now-60&&x.at>=now-450).map(x=>x.T);const tb=(G.tHist||[]).filter(x=>x.at<=now-60&&x.at>=now-450).map(x=>x.T);
+        const ub=uh.h.filter(x=>x.at<=now-60&&x.at>=now-450).map(x=>x.T);const tb=(G.tHistOK||[]).filter(x=>x.at<=now-60&&x.at>=now-450).map(x=>x.T);
         // re-picked if its own overtones jumped at least half as much as the expected note did
         const uR=ub.length>=3?(inf.T||0)/Math.max(1e-9,Math.min(...ub)):1,tR=tb.length>=3?ti.T/Math.max(1e-9,Math.min(...tb)):1;
         if(us>=0.6&&uR>=Math.max(1.3,0.5*tR))block=true;}
-      if(block){G.tcf=0;G.tRiseAt=null;return false;}}}
-  const hist=G.tHist;hist.push({at:now,T:ti.T});while(hist.length&&hist[0].at<now-600)hist.shift();
+      if(block){if(G.blkBy!==mh){G.blkBy=mh;G.blkH=[];}G.tcf=0;G.tRiseAt=null;return false;}}}
+  const hist=G.tHist;G.tHistOK.push({at:now,T:ti.T});while(G.tHistOK.length&&G.tHistOK[0].at<now-600)G.tHistOK.shift(); /* frames that got past the block (the re-pick test above compares with these, as before v1.73) */
   // the note's strength jumping after a pick can't be noise, so this check also accepts somewhat quieter sound
   if(det.rms<gate()*0.5){G.tcf=0;G.tRiseAt=null;return false;}
-  const before=hist.filter(h=>h.at<=now-60&&h.at>=now-450).map(h=>h.T);
+  const blkRose=()=>{if(G.blkBy==null)return false;const H=G.blkH,bb=H.filter(x=>x.at<=now-60&&x.at>=now-450).map(x=>x.T);return bb.length>=3&&H[H.length-1].T>=1.8*Math.min(...bb);};
+  const before=hist.filter(h=>h.at<=now-60&&h.at>=now-450).map(h=>h.T),beforeOK=G.tHistOK.filter(h=>h.at<=now-60&&h.at>=now-450).map(h=>h.T);
   const repick=evKey(e)===G.lastHitKey&&det.onsetAt>G.lastHitAt&&now-det.onsetAt<350;
-  const rose=(before.length>=3&&ti.T>=2.5*Math.min(...before)+1e-9)||repick;
+  const rose=(beforeOK.length>=3&&ti.T>=2.5*Math.min(...beforeOK)+1e-9)||(!blkRose()&&before.length>=3&&ti.T>=2.5*Math.min(...before)+1e-9)||repick;
   // two notes at once, while the tracker clearly hears a note that's in neither: each of them has to stand out on its
   // own against that note (E3 is only E2's octave, so it can't, and the step isn't credited)
   if(e.notes.length>1&&mh!=null&&!e.notes.some(n=>noteOk(n,mh,cp))){const mi=targetInfo({midi:mh-cp},cp);
     if(mi.score>=0.6){const fm=midiToFreq(mh);for(const n of e.notes){const t=n.midi+cp,ft=midiToFreq(t);
       const hs=[1,2,3,4,5,6,7,8].filter(x=>{const f=ft*x,k=Math.round(f/fm);return ft*x>=150&&!(k>=1&&Math.abs(f-k*fm)/f<0.015);}).slice(0,4);
       const inf={};const sc=hs.length?targetScoreBuf(timeBuf,actx.sampleRate,t,hs,inf):0;if(sc<0.6||(inf.T||0)<0.2*mi.T){G.tcf=0;G.tRiseAt=null;return false;}}}}
-  if(ti.score>=0.63&&(rose||legato)&&(!tn||e.notes.length<2||partnerOk(e,tn,cp))){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){G.tHist=[];return true;}return false;}
+  if(ti.score>=0.63&&(rose||legato)&&(!tn||e.notes.length<2||partnerOk(e,tn,cp))){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){G.tHist=[];G.tHistOK=[];return true;}return false;}
   G.tcf=0;G.tRiseAt=null;return false;
 }
 // the right pitch (any octave if allowed); a bent note counts anywhere from the fretted pitch up to its target
@@ -2506,6 +2519,13 @@ function update(dt,now){
     return;
   }
   const eff=G.mode==='wait'?G.clock:G.clock-settings.latency/1000*b;
+  /* v1.73: "also play the right note" with headphones in Play mode: each note is played exactly on the beat
+     (scheduled early by the sound delay, like Listen and the band) while you're hitting notes; a miss cuts it and the
+     sound comes back after your next hit. Played on credit instead, it came 50-300 ms late and uneven, which sounded
+     like a sloppy player. Without headphones it stays on credit (the mic would hear an on-time note as your own). */
+  if(fxInTime()){const D=soundDelay();if(G.fxIdx==null)G.fxIdx=0;
+    while(G.fxIdx<ev.length&&ev[G.fxIdx].t<=G.clock+(D+0.05)*b){const j=G.fxIdx++;const e=ev[j];if(e.rest||st[j]===2)continue;
+      if(G.fxOn||st[j]===1){const off=Math.max(0,(e.t-G.clock)/b-D);playEvent(e,off);(G.fxSched||(G.fxSched={}))[j]=actx.currentTime+off;}}}
   for(let i=G.scan;i<ev.length;i++){
     if(st[i]){if(i===G.scan)G.scan++;continue;}
     const e=ev[i];const ch=isChordEv(e);const {wb,wa}=hitWindow(e,b,ev[i+1]?ev[i+1].t-e.t:null,i>0?e.t-ev[i-1].t:null);
@@ -2515,7 +2535,7 @@ function update(dt,now){
     /* v1.72: a two-note step picked inside its window gets up to 300 ms after that pick to be confirmed (the second
        note's check needs a moment; a slightly late first step after a fret change used to run out of window) */
     let waX=wa;if(!ch&&!e.strum&&e.notes.length>=2&&G.mode==='play'){const pk=Math.max(det.onsetAt,det.pitchOnsetAt||-1);if(pk>G.lastHitAt){const pc=eff-(now-pk)/1000*b;const gp=ev[i+1]?ev[i+1].t-e.t:9;if(pc>=e.t-wb&&pc<=e.t+Math.min(wa+0.12*b,gp*0.9))waX=Math.max(wa,pc-e.t+0.3*b);}} /* picks are detected up to ~110 ms late on a fret change over a ringing string */
-    if(G.mode==='play'&&e.t+Math.max(waX,ch?Math.min(e.d*0.6,1.5):0)<eff){diagEnd(i,'miss',now);st[i]=2;G.misses++;G.streak=0;const w=G.wp&&G.wp.i===i?G.wp:null;if(w){G.wp=null;diagNote(i,w.txt);}addPop(w?w.pop:'Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
+    if(G.mode==='play'&&e.t+Math.max(waX,ch?Math.min(e.d*0.6,1.5):0)<eff){fxCut(e,i);diagEnd(i,'miss',now);st[i]=2;G.misses++;G.streak=0;const w=G.wp&&G.wp.i===i?G.wp:null;if(w){G.wp=null;diagNote(i,w.txt);}addPop(w?w.pop:'Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
     if(!ch&&!e.strum&&analyser&&det.onsetAt>G.lastHitAt&&det.onsetAt>(G.wrongOnset||0)&&now-det.onsetAt<700){
       if(G.wnPick!==det.onsetAt){G.wnPick=det.onsetAt;G.wnMax=0;}
       const cp=G.capo||0;G.wnMax=Math.max(G.wnMax,...e.notes.map(n=>targetScore(n,cp)));
@@ -2531,7 +2551,7 @@ function update(dt,now){
       const cands=[det.onsetAt,po,G.tRiseAt].filter(x=>x!=null&&x>G.lastHitAt&&now-x<600&&(G.clock-(now-x)/1000*b)>=e.t-wb);const pk=cands.length?Math.min(...cands):-1;G.tRiseAt=null;if(G.mode==='play'&&pk>0){const clockAtPick=G.clock-(now-pk)/1000*b;(G.offs=G.offs||[]).push((clockAtPick-e.t)/b*1000);}
       G.hitOff=G.mode!=='play'?null:pk>0?((G.clock-(now-pk)/1000*b)-e.t)/b*1000-settings.latency:(eff-e.t)/b*1000;}
       diagEnd(i,'hit',now);
-      fxHit(e,now);
+      fxHit(e,now,i);
       if(settings.deadStrings&&e.shape&&e.strum!=='x'&&analyser){const pv=ev[i-1];const first=e.chord||!(pv&&pv.label===e.label)||now-(G.ccAt||0)>650;
         if(first){G.cc={e,i,onset:now,best:null,prevShape:pv&&pv.shape};G.ccAt=now;}/* timed from when the strum was credited, so the previous chord can't leak in */}
       st[i]=1;G.hits++;G.streak++;G.best=Math.max(G.best,G.streak);G.lastHitAt=now;G.lastHitKey=evKey(e);
@@ -3844,7 +3864,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.72';
+const APP_VERSION='1.73';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
