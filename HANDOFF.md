@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.81, Android app rebuilt for v1.80 (native separator + save to Downloads))
+# Fretline: session handoff (18 Nov 2026, web v1.82, Android app rebuilt for v1.80 (native separator + save to Downloads))
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,17 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.82: set a recording song's tempo by hand
+
+Owner asked to enter a BPM manually when it's known for sure.
+- **My songs**: recording songs show "♩ <bpm>" beside ✕ → `#tempoEd` overlay: number box (2 decimals shown; an
+  unchanged value keeps the exact stored tempo), ½ / 2×, "Tap the beat" (median of the last ≤16 tap intervals,
+  resets after a 2.5 s pause), Save. `recRetime(def,bpm)`: notes keep their times in the recording and are re-placed
+  on the new grid (32nds < 90 BPM, else 16ths); exact halving picks the old beat the notes lean on; otherwise bar 1
+  stays put (then the first note is pulled into bar 1 by whole beats). Uses `def.recRaw` (exact times, saved by the
+  Lab from 1.82) or rebuilds times from beats for older songs. Test: TYSK 139.75 → 69.875, 329/329 notes, 0 ms moved.
+- **Lab**: "Or type the exact tempo" + Set tempo next to Half/Double (`retime(1,bpm)`), 30-300 BPM.
 
 ## v1.81: cleaner notes from recordings; half/double tempo in the Lab
 

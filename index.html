@@ -43,6 +43,7 @@ header h1 span{color:var(--accent)}
 .item .s{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .item .best{font-size:12px;color:var(--accent);text-align:right;flex:none}
 .item .del{padding:6px 9px;font-size:13px;background:transparent}
+.item .tmp{padding:6px 8px;font-size:12px;background:transparent;border:1px solid var(--line,#333);border-radius:8px;margin-right:4px;white-space:nowrap}
 .item .del.armed{background:var(--bad);color:#fff}
 .note-txt{color:var(--muted);font-size:13px;padding:4px 2px 12px}
 .links a{display:block;padding:9px 0;border-top:1px solid var(--line);color:var(--accent2);text-decoration:none;font-weight:600}.links a span{color:var(--muted);font-weight:400;font-size:13px}
@@ -382,6 +383,17 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
       <span class="small" id="sUpdMsg"></span></div>
     </div>
     <div class="row end"><button class="primary" id="sClose">Done</button></div>
+  </div>
+</div>
+<div class="overlay" id="tempoEd" style="position:fixed;z-index:9">
+  <div class="card">
+    <h2>Tempo</h2>
+    <p class="small" id="teSong"></p>
+    <label class="small" for="teBpm">Beats per minute</label>
+    <input type="number" id="teBpm" step="0.01" min="30" max="300" inputmode="decimal" style="width:100%;font-size:20px;padding:8px;border-radius:10px">
+    <div class="row"><button id="teHalf" type="button">½</button><button id="teDouble" type="button">2×</button><button id="teTap" type="button">Tap the beat</button></div>
+    <p class="small" id="teInfo">Notes stay where they are in the recording; only the beat grid (bar lines, count-in, metronome) changes. Bar 1 stays where it starts.</p>
+    <div class="row end"><button id="teCancel" type="button">Cancel</button><button class="primary" id="teSave" type="button">Save</button></div>
   </div>
 </div>
 <div class="overlay" id="tapTest" style="position:fixed;z-index:9">
@@ -2082,6 +2094,28 @@ function itemHTML(d,ic,extra){
   const best=bests[d.id]!=null?'Best '+bests[d.id]+'%':'';
   return `<div class="item" data-id="${esc(d.id)}"><div class="ic" style="background:${CAT_COLOR[d.cat]||'#888'}">${ic}</div><div class="tx"><div class="t">${esc(d.title)}</div><div class="s">${esc(d.sub||'')}${d.lvl?' · '+LVL[d.lvl]:''}</div></div><div class="best">${best}</div>${extra||''}</div>`;
 }
+/* v1.82: set a recording song's tempo by hand (typed, ½ / 2×, or tapped). Notes keep their times in the recording;
+   they are re-placed on the new beat grid (32nds under 90 BPM, 16ths above). Songs made from 1.82 keep the exact note
+   times (recRaw); older ones are re-timed from their saved beats. Halving picks which old beat becomes the new beat
+   by where the notes lean; any other change keeps bar 1 where it was. */
+function recRetime(def,bpm){const spbO=60/def.bpm,spb=60/bpm,G=bpm<90?8:4;
+  const raw=def.recRaw||def.recNotes.map(n=>({midi:n.midi,t:(def.recOffset||0)+n.beat*spbO,d:n.dur*spbO,a:n.v!=null?n.v:0.6}));
+  let b0=def.recOffset||0;
+  if(Math.abs(bpm*2-def.bpm)<0.02){let best=-1e9,pick=b0;for(const c of [b0,b0+spbO]){let sc=0;for(const n of raw)sc+=n.a*Math.cos(2*Math.PI*(n.t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
+  const first=Math.min(...raw.map(n=>n.t));while(b0+4*spb<=first-0.05)b0+=4*spb;while(b0>first+0.05)b0-=spb;
+  const recNotes=raw.map(n=>({midi:n.midi,beat:Math.round((n.t-b0)/spb*G)/G,dur:Math.max(1/G,Math.round(n.d/spb*G)/G),v:Math.round(n.a*100)/100})).filter(n=>n.beat>=0);
+  const out={...def,bpm,recNotes,recOffset:b0};delete out._built;return out;}
+let teId=null,teTaps=[];
+function openTempoEd(id){const d=mySongs.find(x=>x.id===id);if(!d)return;teId=id;teTaps=[];$('#teSong').textContent=d.title+' · now '+(Math.round(d.bpm*100)/100)+' BPM';$('#teBpm').value=Math.round(d.bpm*100)/100;$('#teTap').textContent='Tap the beat';$('#tempoEd').classList.add('show');}
+$('#teHalf').onclick=()=>{const v=+$('#teBpm').value;if(v)$('#teBpm').value=Math.round(v/2*1000)/1000;};
+$('#teDouble').onclick=()=>{const v=+$('#teBpm').value;if(v)$('#teBpm').value=Math.round(v*2*1000)/1000;};
+$('#teTap').onclick=()=>{const now=performance.now();if(teTaps.length&&now-teTaps[teTaps.length-1]>2500)teTaps=[];teTaps.push(now);if(teTaps.length>16)teTaps.shift();
+  if(teTaps.length<3){$('#teTap').textContent='Keep tapping… '+teTaps.length;return;}
+  const iv=[];for(let i=1;i<teTaps.length;i++)iv.push(teTaps[i]-teTaps[i-1]);iv.sort((a,b)=>a-b);const m=iv[iv.length>>1];const bpm=Math.round(60000/m*10)/10;$('#teBpm').value=bpm;$('#teTap').textContent='Tap ('+teTaps.length+'): '+bpm;};
+$('#teCancel').onclick=()=>$('#tempoEd').classList.remove('show');
+$('#teSave').onclick=()=>{const d=mySongs.find(x=>x.id===teId);let bpm=+$('#teBpm').value;if(d&&Math.abs(bpm-d.bpm)<0.006)bpm=d.bpm; /* the box shows 2 decimals */
+  if(!d||!(bpm>=30&&bpm<=300)){$('#teInfo').textContent='Enter a tempo between 30 and 300 BPM.';return;}
+  const nd=recRetime(d,bpm);mySongs=mySongs.map(x=>x.id===teId?nd:x);store.set('songs',mySongs);$('#tempoEd').classList.remove('show');renderList();showHint('Tempo set to '+(Math.round(bpm*100)/100)+' BPM',2500);};
 function renderList(){
   const L=$('#list');let h='';
   if(curCat==='course'){
@@ -2119,14 +2153,14 @@ function renderList(){
         <a href="https://imslp.org/" target="_blank" rel="noopener">IMSLP <span>(huge library; use pieces that offer MIDI or MusicXML, as most PDFs are scans)</span></a>
       </div></div>`;
     if(!mySongs.length)h+=`<div class="note-txt">Load a Guitar Pro, MIDI, MusicXML, ChordPro or PDF file, or paste a tab or chord sheet, for a song you're learning, and it becomes a scrolling track. Saved songs are stored on this device.</div>`;
-    for(const d of mySongs)h+=itemHTML({...d,cat:'mine',sub:d.kind==='rec'?'From a recording':d.kind==='tab'?'Tab':d.kind==='gen'?'Generated':d.kind==='file'?(d.fmt||'File'):'Chords'},d.kind==='rec'?'🎙':d.kind==='tab'?'T':d.kind==='gen'?'G':d.kind==='file'?'F':'♪',`<button class="del" data-del="${esc(d.id)}">✕</button>`);
+    for(const d of mySongs)h+=itemHTML({...d,cat:'mine',sub:d.kind==='rec'?'From a recording':d.kind==='tab'?'Tab':d.kind==='gen'?'Generated':d.kind==='file'?(d.fmt||'File'):'Chords'},d.kind==='rec'?'🎙':d.kind==='tab'?'T':d.kind==='gen'?'G':d.kind==='file'?'F':'♪',(d.kind==='rec'?`<button class="tmp" data-tempo="${esc(d.id)}" aria-label="Tempo">♩ ${Math.round(d.bpm)}</button>`:'')+`<button class="del" data-del="${esc(d.id)}">✕</button>`);
   }else{
     if(curCat==='song')h+=`<button class="addbtn" data-lib="1">📚 Browse the free song library (300+ songs)</button>`;
     for(const d of LIB.filter(x=>x.cat===curCat))h+=itemHTML(d,d.cat==='lesson'?'L':d.cat==='song'?'♫':'#');
   }
   L.innerHTML=h;
   L.querySelectorAll('.item[data-id]').forEach(el=>el.onclick=ev=>{
-    if(ev.target.closest('.del'))return;
+    if(ev.target.closest('.del')||ev.target.closest('.tmp'))return;
     const id=el.dataset.id;const def=LIB.find(x=>x.id===id)||mySongs.find(x=>x.id===id);if(def){if(def.parts&&def.parts.length>1)pickPart(def,()=>openSong(def));else openSong(def);}
   });
   L.querySelectorAll('.item[data-gen]').forEach(el=>el.onclick=()=>{quickGen(el.dataset.gen);});
@@ -2136,6 +2170,7 @@ function renderList(){
   const ql=$('#quickLen');if(ql)ql.onchange=()=>{genOpt.quickLen=ql.value;store.set('gen',genOpt);};
   const cc=$('#cContinue');if(cc)cc.onclick=()=>{const nx=firstOpenLesson(courseTier);if(nx)openLesson(nx);};
   const cr=$('#cRandom');if(cr)cr.onclick=()=>openLesson(randomLesson(courseTier));
+  L.querySelectorAll('.tmp').forEach(b=>b.onclick=ev=>{ev.stopPropagation();openTempoEd(b.dataset.tempo);});
   L.querySelectorAll('.del').forEach(b=>b.onclick=ev=>{
     ev.stopPropagation();
     if(!b.classList.contains('armed')){b.classList.add('armed');b.textContent='Delete';setTimeout(()=>{b.classList.remove('armed');b.textContent='✕';},2500);return;}
@@ -3963,7 +3998,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.81';
+const APP_VERSION='1.82';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

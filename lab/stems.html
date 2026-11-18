@@ -51,7 +51,9 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
 
 <div class="card" id="songOut" style="display:none"><b id="songMsg"></b>
   <div id="tempoBox" style="display:none"><div class="small" id="tempoNow" style="margin-top:8px"></div>
-    <div class="row"><div><button id="tHalf" type="button">Half</button></div><div><button id="tDouble" type="button">Double</button></div></div></div>
+    <div class="row"><div><button id="tHalf" type="button">Half</button></div><div><button id="tDouble" type="button">Double</button></div></div>
+    <div class="row" style="align-items:end"><div><label for="tBpm">Or type the exact tempo</label><input type="number" id="tBpm" step="0.01" min="30" max="300" inputmode="decimal" style="width:100%;font-size:16px;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text)"></div><div><button id="tSet" type="button">Set tempo</button></div></div>
+    <div class="small">You can also change it later: Fretline › My songs › ♩ next to the song.</div></div>
   <p><a href="../index.html">Open Fretline › My songs</a></p></div>
 <div class="card"><b>Report</b> <span class="small">(📋 tap to copy and send it)</span><div id="log"></div></div>
 
@@ -89,6 +91,7 @@ async function nativeSave(a,name){const blob=await (await fetch(a.href)).blob();
 ['dGtr','dRest'].forEach(id=>$(id).addEventListener('click',ev=>{if(!NS||!NS.saveChunk)return;ev.preventDefault();
   const base=($('ttl').value||'song').trim().replace(/[^A-Za-z0-9 ()-]+/g,'_');nativeSave($(id),base+(id==='dGtr'?' - guitar.wav':' - band.wav')).catch(e=>{status('Could not save: '+(e.message||e));log('save: '+(e.message||e));});}));
 $('tHalf').onclick=()=>retime(0.5);$('tDouble').onclick=()=>retime(2);
+$('tSet').onclick=()=>{const v=+$('tBpm').value;if(!(v>=30&&v<=300)){status('Enter a tempo between 30 and 300 BPM.');return;}retime(1,v);};
 $('file').onchange=()=>{const f=$('file').files[0];if(f&&!$('ttl').value)$('ttl').value=f.name.replace(/\.[^.]+$/,'').replace(/[_]+/g,' ');$('go').disabled=!$('file').files.length;status($('file').files.length?'Ready.':'Choose a file.');};
 
 /* reads the names and types of the model's top-level nodes straight from the ONNX file (protobuf: ModelProto.graph=7,
@@ -196,9 +199,9 @@ function quantise(notes,bpm,b0){const spb=60/bpm,G=bpm<90?8:4; /* slow tempos: 3
 let LAST=null; /* the last song made here, for the tempo buttons */
 function tempoButtons(){const box=$('tempoBox');if(!LAST){box.style.display='none';return;}box.style.display='';const b=LAST.def.bpm;
   $('tempoNow').textContent='Tempo: '+Math.round(b)+' BPM. If the song feels like half or double that (count along), change it:';
-  $('tHalf').textContent='Use '+Math.round(b/2)+' BPM';$('tDouble').textContent='Use '+Math.round(b*2)+' BPM';$('tHalf').disabled=b/2<30;$('tDouble').disabled=b*2>300;}
-function retime(f){if(!LAST)return;const old=LAST.def,bpm=Math.round(old.bpm*f*1000)/1000,spbOld=60/old.bpm;let b0=old.recOffset;
-  if(f<1){/* the new beat is two old beats: put it on whichever old beat the notes lean on */const spb=60/bpm;let best=-1e9,pick=b0;for(const c of [b0,b0+spbOld]){let sc=0;for(const n of LAST.notes)sc+=n.a*Math.cos(2*Math.PI*(n.t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
+  $('tHalf').textContent='Use '+Math.round(b/2)+' BPM';$('tDouble').textContent='Use '+Math.round(b*2)+' BPM';$('tBpm').value=Math.round(b*100)/100;$('tHalf').disabled=b/2<30;$('tDouble').disabled=b*2>300;}
+function retime(f,target){if(!LAST)return;const old=LAST.def,bpm=target||Math.round(old.bpm*f*1000)/1000,spbOld=60/old.bpm;let b0=old.recOffset;
+  if(Math.abs(bpm*2-old.bpm)<0.02){/* the new beat is two old beats: put it on whichever old beat the notes lean on */const spb=60/bpm;let best=-1e9,pick=b0;for(const c of [b0,b0+spbOld]){let sc=0;for(const n of LAST.notes)sc+=n.a*Math.cos(2*Math.PI*(n.t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
   const q=quantise(LAST.notes,bpm,b0);const def={...old,bpm,recNotes:q.recNotes,recOffset:q.b0};
   const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');const i=songs.findIndex(x=>x.id===def.id);if(i>=0)songs[i]=def;else songs.unshift(def);localStorage.setItem('fretline:songs',JSON.stringify(songs));
   LAST.def=def;window.__labSong=def;log('tempo: changed to '+Math.round(bpm*100)/100+' BPM, bar 1 at '+q.b0.toFixed(2)+' s');tempoButtons();status('Song updated: '+Math.round(bpm)+' BPM.');}
@@ -216,7 +219,7 @@ async function makeSong(gL,gR,L,Rc,rL,rR,N){
   status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
   const gkey=location.origin+'/__fretline/rec/'+id+'-gtr.wav';await c.put(gkey,new Response(wav(gL,gR),{headers:{'content-type':'audio/wav'}})); /* v1.80: the real guitar is the guide */
   const title=($('ttl').value||'Recording').trim()+(+$('secs').value?' (first '+$('secs').value+' s)':'');
-  const def={id,cat:'mine',kind:'rec',title,bpm:bt.bpm,bpb:4,recNotes,recAudio:key,recGuitar:gkey,recOffset:b0,credit:'Made from a recording in Fretline Lab'};
+  const def={id,cat:'mine',kind:'rec',title,bpm:bt.bpm,bpb:4,recNotes,recRaw:notes.map(n=>({midi:n.midi,t:Math.round(n.t*1000)/1000,d:Math.round(n.d*1000)/1000,a:Math.round(n.a*100)/100})),recAudio:key,recGuitar:gkey,recOffset:b0,credit:'Made from a recording in Fretline Lab'};
   const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');songs.unshift(def);localStorage.setItem('fretline:songs',JSON.stringify(songs));
   log('song: "'+title+'" saved to My songs ('+recNotes.length+' notes, '+Math.ceil((recNotes.length?Math.max(...recNotes.map(n=>n.beat)):0)/4)+' bars)');
   $('songMsg').textContent='"'+title+'" is in My songs.';$('songOut').style.display='';window.__labSong=def;LAST={def,notes};tempoButtons();}
