@@ -305,7 +305,8 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field inline"><label>Show the timing window as a shaded band</label><input type="checkbox" id="sBand"></div>
     <div class="small" style="margin-top:-6px">Off: just aim for the rings on the hit line. The window still works the same.</div>
     <div class="field"><label>Strums show</label><select id="sStrumView"><option value="fingers">Chord fingering (fret numbers on each string)</option><option value="arrows">Big D / U arrows</option></select></div>
-    <div class="field"><label>Sound delay: <span id="sDelV"></span></label><input type="range" id="sDel" min="-10" max="400" step="10"><span class="small">How long the app's sound takes to reach your ears. Bluetooth headphones add 150–300 ms; slide left to the end for Auto. The band, Listen and the count-in play this much early so you hear them right on the line.</span></div>
+    <div class="field"><label>Sound delay: <span id="sDelV"></span></label><input type="range" id="sDel" min="-10" max="400" step="10"><span class="small">How long the app's sound takes to reach your ears. Bluetooth headphones add 150–300 ms; slide left to the end for Auto. The band, Listen and the count-in play this much early so you hear them right on the line.</span>
+      <button id="sDelTest" style="margin-top:6px">🎧 Measure with a tap test</button></div>
     <div class="field"><label>Note spacing (zoom): <span id="sZoomV"></span></label><input type="range" id="sZoom" min="0.6" max="2" step="0.1"></div>
     <div class="field inline"><label>Accept the right note in any octave</label><input type="checkbox" id="sOct"></div>
     <div class="field inline"><label>Show note names instead of fret numbers</label><input type="checkbox" id="sNames"></div>
@@ -338,6 +339,14 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field"><div class="row" style="margin:0;align-items:center;gap:8px"><span class="small" id="appVer" style="flex:1"></span><button id="sUpd">Check for updates</button></div>
       <span class="small" id="sUpdMsg"></span></div>
     <div class="row end"><button class="primary" id="sClose">Done</button></div>
+  </div>
+</div>
+<div class="overlay" id="tapTest" style="position:fixed;z-index:9">
+  <div class="card" style="text-align:center;touch-action:manipulation" id="tapArea">
+    <h2>Tap along</h2>
+    <p id="tapMsg">Put your headphones on. You'll hear 4 clicks to get the beat, then tap anywhere on this box in time with the clicks you <b>hear</b>.</p>
+    <div class="big" id="tapCount" style="margin:10px 0">–</div>
+    <div class="row" style="justify-content:center"><button id="tapCancel">Cancel</button><button class="primary" id="tapGo">Start</button></div>
   </div>
 </div>
 <div class="overlay" id="msg" style="position:fixed">
@@ -2441,6 +2450,36 @@ $('#sUpd').onclick=async()=>{
   }catch(e){msg.textContent='Couldn’t reach GitHub. Check your internet connection and try again.';}
   btn.disabled=false;
 };
+/* ---- tap test: measure the sound delay (e.g. Bluetooth) ----
+   Clicks are scheduled at known audio times. People tap in time with what they hear, so the gap between when a
+   click was sent and when you tap to it is how long the sound took to reach you. */
+let tapRun=null;
+$('#sDelTest').onclick=async()=>{await ensureAudio();$('#tapTest').classList.add('show');$('#tapCancel').textContent='Cancel';$('#tapGo').textContent='Start';$('#tapMsg').innerHTML='Put your headphones on. You\'ll hear 4 clicks to get the beat, then tap anywhere on this box in time with the clicks you <b>hear</b>.';$('#tapCount').textContent='–';$('#tapGo').style.display='';};
+$('#tapCancel').onclick=()=>{tapRun=null;$('#tapTest').classList.remove('show');};
+$('#tapGo').onclick=async()=>{
+  await ensureAudio();$('#tapGo').style.display='none';const n=16,iv=0.6,t0=actx.currentTime+0.6;const sent=[];
+  const p0=performance.now(),c0=actx.currentTime;
+  for(let i=0;i<n;i++){const t=t0+i*iv;const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=i%4===0?1600:1100;
+    g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.35,t+0.002);g.gain.exponentialRampToValueAtTime(0.0001,t+0.05);o.connect(g);g.connect(actx.destination);o.start(t);o.stop(t+0.06);
+    sent.push(p0+(t-c0)*1000);}
+  tapRun={sent,taps:[]};$('#tapMsg').textContent='Listen to the first 4 clicks, then tap along…';
+  const tick=()=>{if(!tapRun)return;const k=tapRun.taps.length;$('#tapCount').textContent=k?k+' taps':'…';
+    if(performance.now()>sent[n-1]+900){finishTap();return;}requestAnimationFrame(tick);};tick();
+};
+$('#tapArea').addEventListener('pointerdown',e=>{if(!tapRun||e.target.tagName==='BUTTON')return;tapRun.taps.push(e.timeStamp||performance.now());});
+function finishTap(){
+  const r=tapRun;tapRun=null;if(!r)return;
+  // match each tap to the nearest click after the first four, and use the middle value
+  const offs=[];for(const t of r.taps){let best=null;for(let i=4;i<r.sent.length;i++){const d=t-r.sent[i];if(best===null||Math.abs(d)<Math.abs(best))best=d;}if(best!==null&&best>-250&&best<550)offs.push(best);}
+  offs.sort((a,b)=>a-b);
+  if(offs.length<6){$('#tapMsg').textContent='Not enough taps in time with the clicks. Try again and tap on every click you hear.';$('#tapCount').textContent='–';$('#tapGo').style.display='';return;}
+  const med=offs[Math.floor(offs.length/2)];const spread=offs[Math.floor(offs.length*0.8)]-offs[Math.floor(offs.length*0.2)];
+  // a touch screen adds ~20 ms of its own
+  const v=Math.max(0,Math.min(400,Math.round((med-20)/10)*10));
+  settings.soundDelay=v;saveSettings();syncSettingsUI();
+  $('#tapMsg').innerHTML='Your sound arrives about <b>'+v+' ms</b> late'+(spread>120?' (your taps varied quite a bit; running the test again may give a steadier result)':'')+'. Sound delay is now set to '+v+' ms.<br><br>Next: play a track all the way through in Play mode and use the timing suggestion on the results.';
+  $('#tapCount').textContent=v+' ms';$('#tapGo').style.display='';$('#tapGo').textContent='Test again';$('#tapCancel').textContent='Done';
+}
 function meterUpdate(){const v=analyser?Math.min(1,det.rms/(gate()*4)):0;const el=$('#sMeter');el.style.width=(v*100)+'%';el.style.background=det.rms>gate()?'#5ce1a6':'#555';}
 
 /* ---- import ---- */
@@ -3064,6 +3103,7 @@ requestAnimationFrame(loop);
 function handleBack(){
   const vis=id=>{const el=$('#'+id);return !!(el&&el.classList.contains('show'));};
   if(vis('msg')){$('#msgOk').click();return true;}
+  if(vis('tapTest')){$('#tapCancel').click();return true;}
   if(vis('settings')){$('#sClose').click();return true;}
   if(curScreen==='player'){if(vis('strumEd')){$('#seCancel').click();return true;}$('#btnBack').click();return true;}
   const backs={library:'libBack',tuner:'tunBack',import:'impBack',gen:'genBack'};
@@ -3085,7 +3125,7 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-const APP_VERSION='1.44';
+const APP_VERSION='1.45';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
