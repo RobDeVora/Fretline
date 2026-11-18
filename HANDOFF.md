@@ -132,6 +132,12 @@ gone. Then recalibrate: with headphones in music mode (A2DP) the output delay ch
 tap test and then use the results card's latency suggestion. Not tested on a real device; Java not compiled
 locally (no Android SDK in the workspace), so check the Actions build.
 
+**Result (owner, Samsung SM-S948U1, new APK):** 32/32 (was 24/32). Mic line: `built-in mic (SM-S948U1) via
+the app · voice recognition · float · 48000 Hz · gaps 2` (UNPROCESSED isn't offered on this phone). Room noise
+0.7, no 0.1-level notes. Mic problem solved. Next: recalibrate timing (tap test, then latency suggestion; latency
+was still 250 ms / sound delay 70 from the call-mode days). Worth watching: #6, #22, #29 counted with picks 0/0 at
+levels 2-5 (quick repeats / soft notes); could be ringing from the previous note being credited.
+
 ## Other open ideas mentioned but not done
 - Same-pitch-different-string detection (timbre/inharmonicity), labelled beta.
 - A "Jam" style: improvise over the band with the scale shown on the fretboard.
