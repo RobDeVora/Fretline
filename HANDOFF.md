@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, v1.59)
+# Fretline: session handoff (18 Nov 2026, v1.60)
 
 Read this first in a new session. It covers how the project is set up, what was built in the last session, the
 problem still being worked on, and what to do next.
@@ -256,6 +256,18 @@ fretboard) that anticipates the following notes, and said notes move too fast to
   up to 1.6x more room for dense songs (`G._gapQ` = 15th-percentile gap), and one note size per song small enough
   for its quick passages. Canvas resolution capped at 2x (was 3x) to keep frames smooth; the detection report now
   has "frames N/s, slow X%, worst Y ms" to see if the phone drops frames. Zoom label: "Highway speed / note spacing".
+
+## v1.60: a drawn hand, bigger numbers, Listen timing
+
+- Owner: Listen notes sound before reaching the rings. Listen schedules each note `soundDelay` early (190 ms, set
+  with Bluetooth headphones); through the speaker that's far too much. Added a "Sound − / +" control (`#lsTune`,
+  ±10 ms, saved as the sound delay) that shows only while Listen plays. Idea not done: remember the delay per
+  output (speaker / Bluetooth / wired) — the native plugin could report the output route.
+- Numbers: larger (1.35× radius for one digit), heavier, with an outline. Owner still finds them hard to read in
+  landscape where the strings are short; turning the fretboard off gives the strings much more room.
+- Finger guide: `drawHand` draws the back of a fretting hand (thumb left, fingers 1-4 in `FCOL`, active fingers
+  lit with a glow); beside it the position and a badge per finger used ("③ E3", "0 A open"), then the queue.
+  Strip 76k tall (48+ slim); on short screens with the guide on, the fretboard shrinks (min 46 px) first.
 
 ## Idea: play along with an MP3
 
