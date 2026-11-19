@@ -308,7 +308,10 @@ function tuningFromText(t){const x=t.slice(0,3000).toLowerCase();const has=r=>r.
   if(has(/whole.?step\s*down|d\s*standard|tuning\s*:?\s*d\s*g\s*c\s*f/))return 'dstd';if(has(/c\s*standard/))return 'cstd';return null;}
 function capoFromText(t){const m=/\bcapo\b\s*(?:on|at)?\s*:?\s*(?:fret)?\s*(\d{1,2})/i.exec(t)||/(\d{1,2})(?:st|nd|rd|th)\s+fret\s+capo/i.exec(t);const n=m?parseInt(m[1],10):0;return n>0&&n<=12?n:0;}
 let SHEETFILE=null; /* {info:{bpm,bpb,parts},fmt,name} for MIDI / MusicXML / Guitar Pro */
-function fileSheet(core,sf,partIdx,asChords,tunIn){sf=sf||SHEETFILE;const info=sf.info,part=info.parts[partIdx!=null?partIdx:+$('sheetPart').value]||info.parts[0],bpb=info.bpb||4;let kind='tab',events,capo=0;
+function fileSheet(core,sf,partIdx,asChords,tunIn,allGuitars){sf=sf||SHEETFILE;const info=sf.info,pIdx=partIdx!=null?partIdx:+$('sheetPart').value;let part=info.parts[pIdx]||info.parts[0];const bpb=info.bpb||4;
+  /* v1.103: every guitar in the tab together (rhythm + lead), for the "Tab only" version */
+  if(allGuitars){const gp=info.parts.filter(q=>q.isGuitar&&!q.chords);if(gp.length>1)part={...part,notes:gp.flatMap(q=>q.notes),label:gp.map(q=>q.label.replace(/ \(.*\)$/,'')).join(' + '),tuning:part.tuning||gp[0].tuning};}
+ let kind='tab',events,capo=0;
   const tun=part.tuning||tunIn||userTuning();core.setTuning(tun);if(asChords==null)asChords=$('sheetAs').value==='chords';
   if(part.chords){kind='chords';events=core.chordEventsFromSymbols(part.chords,bpb,0);}
   else if(asChords){/* v1.91: in another tuning (E♭), name the chords by the shapes you play: the notes as heard, moved
@@ -319,7 +322,7 @@ function fileSheet(core,sf,partIdx,asChords,tunIn){sf=sf||SHEETFILE;const info=s
   // a short clip only needs the start of the file (its own tempo says roughly how much)
   const secs=+$('secs').value;if(secs&&info.bpm){const lim=secs*info.bpm/60*1.6+4*bpb,t0=events.length?events[0].t:0;events=events.filter(e=>e.t-t0<=lim);}
   core.setTuning(userTuning());
-  return {kind,events,capo,bpm:info.bpm,bpb,fromFile:sf.fmt+' · '+part.label,tuning:part.tuning||null,builtTuning:tun};}
+  return {kind,events,capo,bpm:info.bpm,bpb,fromFile:sf.fmt+' · '+part.label,tuning:part.tuning||null,builtTuning:tun,src:sf,partIdx:pIdx};}
 /* v1.90-91: the second box (the other kind of sheet). A file there is read as the other kind; chords are built for
    the tab's tuning (and a chord sheet in the first box is read again for it: a chords file next to an E♭ tab) */
 function readSecond(core,sheet,sheetText){let s2=null;
@@ -531,6 +534,14 @@ async function makeSheetSong(sheet,gL,gR,L,Rc,rL,rR,N){
     else{const w=findTabWindow(sec.tab,alC.placed,g22,cache);if(w)alT=w.al;else{log('merge: could not tell where the tab goes; lined up on the whole recording instead. Type from / to times under "And the other one" to place it.');alT=alignSheet(sec.tab,g22,null,cache);}}
     if(!alT.placed.length)throw new Error('the tab could not be lined up with this recording');
     const PT=prepPlaced(sec.tab,alT,core);
+    /* v1.103: a tab with a rhythm and a lead guitar: "Tab only" is every guitar in it, so there are no silent stretches where only
+       the rhythm guitar plays; "Lead only" is the single part picked above */
+    let PA=null;
+    if(alTf&&sec.tab.src&&sec.tab.src.info.parts.filter(q=>q.isGuitar&&!q.chords).length>1){try{
+      const tabAll=fileSheet(core,sec.tab.src,sec.tab.partIdx,false,sec.tab.builtTuning,true);core.setTuning(userTuning());
+      if(tabAll.events.length>sec.tab.events.length){status('Lining up every guitar in the tab…');const alA=alignSheet(tabAll,g22,null,cache);
+        if(alA.placed.length){PA=prepPlaced(tabAll,alA,core);log('merge: every guitar in the tab (' +tabAll.fromFile.replace(/^[^·]*· /,'')+'): '+PA.placed.length+' steps, against '+PT.placed.length+' in the picked part alone');}}}
+      catch(e){log('merge: could not line up every guitar ('+String(e&&e.message||e).slice(0,80)+')');}}
     /* one song has one capo: the tab's notes are fixed, so the chords are renamed to the shapes that sound right with
        the tab's capo (chord sheet heard 4 semitones up = capo 4; with the tab's capo 0 the names move up 4) */
     if((PC.capo||0)!==(PT.capo||0)){const d=(PC.capo||0)-(PT.capo||0);core.setTuning(sec.tab.builtTuning||userTuning());
@@ -538,7 +549,7 @@ async function makeSheetSong(sheet,gL,gR,L,Rc,rL,rR,N){
       log('merge: chords renamed for capo '+(PT.capo||0)+' (they were for capo '+(PC.capo||0)+')');PC.capo=PT.capo||0;}
     placed=mergeTabChords(PT.placed,PC.placed,$('mergeWin').value);capo=PT.capo||0;
     /* v1.93: three versions of the one song: both together, the chords alone, the tab alone (switch in the song) */
-    variants=[{label:'Chords + lead',sub:'the chords strummed, the tab where it plays a lead line',placed},{label:'Chords only',sub:PC.placed.length+' chords',placed:PC.placed},{label:'Tab only',sub:PT.placed.length+' steps, all the tab\'s notes',placed:PT.placed}]
+    variants=[{label:'Chords + lead',sub:'the chords strummed, the tab where it plays a lead line',placed},{label:'Chords only',sub:PC.placed.length+' chords',placed:PC.placed},PA?{label:'Tab only',sub:PA.placed.length+' steps, every guitar in the tab',placed:PA.placed}:{label:'Tab only',sub:PT.placed.length+' steps, all the tab\'s notes',placed:PT.placed},...(PA?[{label:'Lead only',sub:PT.placed.length+' steps, just the lead line',placed:PT.placed}]:[])]
       .filter((v,i,a)=>v.placed.length&&a.findIndex(w=>w.placed.length===v.placed.length&&w.placed[0].t===v.placed[0].t&&w.placed[w.placed.length-1].t===v.placed[v.placed.length-1].t)===i);tabSheet=sec.tab;ftAl=alT.fileTempo?alT:alC;}
   if(!placed.length)throw new Error('nothing was lined up');
   const firstT=Math.min(placed[0].t,...(variants||[]).map(v=>v.placed[0].t));
