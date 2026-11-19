@@ -29,5 +29,5 @@ with sync_playwright() as p:
   pg2=b.new_page(service_workers='block');pg2.add_init_script(MOCK+"localStorage.setItem('fretline:songs',"+json.dumps(json.dumps(songs))+");")
   pg2.goto('http://localhost:8769/lab/stems.html');pg2.wait_for_timeout(1500)
   print(pg2.evaluate("""async()=>{SRCFILES=[{kind:'tab',name:'song_tab.mid',bytes:new Uint8Array([77,84,104,100,1,2,3])},{kind:'chords',name:'Chords.txt',text:'G D Em C'}];
-    const d=pickSongDir('Same Name');await saveSources(d);return JSON.stringify([d,pickSongDir('Lab Song'),window.__w.map(o=>o.dir+' | '+o.name+' | '+(o.text||o.data))]);}"""))
+    const d=await pickSongDir('Same Name');await saveSources(d);return JSON.stringify([d,await pickSongDir('Lab Song'),window.__w.map(o=>o.dir+' | '+o.name+' | '+(o.text||o.data))]);}"""))
   b.close()

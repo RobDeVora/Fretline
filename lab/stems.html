@@ -81,6 +81,7 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
   <p><a href="../index.html">Open Fretline › My songs</a></p></div>
 <div class="card"><b>Report</b> <span class="small">(📋 tap to copy and send it)</span><div id="log"></div></div>
 
+<script src="../songdb.js"></script>
 <script>
 /* Fretline Lab: Demucs htdemucs_6s (ONNX export by StemSplit, MIT, original by facebookresearch/demucs; Rouard,
    Massa & Défossez, ICASSP 2023). Input "mix" [1,2,343980] (7.8 s stereo at 44.1 kHz), output "stems"
@@ -267,7 +268,7 @@ function retimeEvents(f,target){const old=LAST.def,bpm=target||Math.round(old.bp
   const spb=60/bpm;const t0=Math.min(T[0],...(old.parts||[]).filter(p=>p.recEvT&&p.recEvT.length).map(p=>p.recEvT[0]));while(b0+4*spb<=t0-0.05)b0+=4*spb;while(b0>t0+0.05)b0-=spb;
   const events=strumDirs(placeEvents(old.events.map((e,i)=>({e,t:T[i]})),bpm,b0));const def={...old,bpm,events,recOffset:b0};
   if(old.parts)def.parts=old.parts.map(p=>p.recEvT?{...p,events:strumDirs(placeEvents(p.events.map((e,i)=>({e,t:p.recEvT[i]})),bpm,b0))}:p);
-  const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');const i=songs.findIndex(x=>x.id===def.id);if(i>=0)songs[i]=def;localStorage.setItem('fretline:songs',JSON.stringify(songs));
+  SongDB.update(def).catch(e=>log('ERROR: could not save the new tempo ('+String(e&&e.message||e)+')'));
   LAST.def=def;window.__labSong=def;log('tempo: changed to '+Math.round(bpm*100)/100+' BPM, bar 1 at '+b0.toFixed(2)+' s');tempoButtons();status('Song updated: '+Math.round(bpm)+' BPM.');} /* the last song made here, for the tempo buttons */
 function tempoButtons(){const box=$('tempoBox');if(!LAST){box.style.display='none';return;}box.style.display='';const b=LAST.def.bpm;
   $('tempoNow').textContent='Tempo: '+Math.round(b)+' BPM. If the song feels like half or double that (count along), change it:';
@@ -275,7 +276,7 @@ function tempoButtons(){const box=$('tempoBox');if(!LAST){box.style.display='non
 function retime(f,target){if(!LAST)return;if(LAST.def.events)return retimeEvents(f,target);const old=LAST.def,bpm=target||Math.round(old.bpm*f*1000)/1000,spbOld=60/old.bpm;let b0=old.recOffset;
   if(Math.abs(bpm*2-old.bpm)<0.02){/* the new beat is two old beats: put it on whichever old beat the notes lean on */const spb=60/bpm;let best=-1e9,pick=b0;for(const c of [b0,b0+spbOld]){let sc=0;for(const n of LAST.notes)sc+=n.a*Math.cos(2*Math.PI*(n.t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
   const q=quantise(LAST.notes,bpm,b0);const def={...old,bpm,recNotes:q.recNotes,recOffset:q.b0};
-  const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');const i=songs.findIndex(x=>x.id===def.id);if(i>=0)songs[i]=def;else songs.unshift(def);localStorage.setItem('fretline:songs',JSON.stringify(songs));
+  SongDB.update(def).catch(e=>log('ERROR: could not save the new tempo ('+String(e&&e.message||e)+')'));
   LAST.def=def;window.__labSong=def;log('tempo: changed to '+Math.round(bpm*100)/100+' BPM, bar 1 at '+q.b0.toFixed(2)+' s');tempoButtons();status('Song updated: '+Math.round(bpm)+' BPM.');}
 /* ---- v1.83: line a tab or chord sheet up with the recording ----
    The sheet is read by Fretline's own tab / chord-sheet reader (the "core" script of index.html, run in its own
@@ -559,7 +560,7 @@ async function grabSource(fileEl,sf,text,kind){ /* keep what the person gave: th
   try{const f=sf&&fileEl.files&&fileEl.files[0];
     if(f)return {kind,name:f.name,bytes:new Uint8Array(await f.arrayBuffer())};
     if(text&&text.trim())return {kind,name:(kind==='tab'?'Tab':'Chords')+'.txt',text};}catch(e){}return null;}
-function pickSongDir(title){const st=JSON.parse(localStorage.getItem('fretline:songFiles')||'{}'),songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');
+async function pickSongDir(title){await SongDB.load();const st=JSON.parse(localStorage.getItem('fretline:songFiles')||'{}'),songs=SongDB.songs();
   const taken=new Set([...Object.values(st).map(r=>r.dir),...songs.map(x=>x.dir).filter(Boolean)]);let dir=sfSeg(title),n=2;const base=dir;while(taken.has(dir)){dir=base+' ('+n+')';n++;}return dir;}
 async function saveSources(dir){
   if(!SFP||!SRCFILES.length)return;let on=true;try{on=(JSON.parse(localStorage.getItem('fretline:settings')||'{}')).saveFiles!==false;}catch(e){}if(!on)return;
@@ -572,14 +573,14 @@ async function saveRecSong(extra,gL,gR,rL,rR,notes){
   const gkey=location.origin+'/__fretline/rec/'+id+'-gtr.wav';await c.put(gkey,new Response(wav(gL,gR),{headers:{'content-type':'audio/wav'}}));
   const title=($('ttl').value||'Recording').trim()+(+$('secs').value?' (first '+$('secs').value+' s)':'');
   const def={id,cat:'mine',kind:'rec',title,bpb:4,recAudio:key,recGuitar:gkey,credit:'Made from a recording in Fretline Lab',...extra};
-  if(SFP){def.dir=pickSongDir(title);}
-  {let used=0;try{for(const k of Object.keys(localStorage))used+=(localStorage.getItem(k)||'').length;}catch(e){}log('storage: Fretline\'s saved data is '+Math.round(used/1024)+' KB before this song; the song is '+Math.round(JSON.stringify(def).length/1024)+' KB');}
-  const put=d=>{const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');songs.unshift(d);localStorage.setItem('fretline:songs',JSON.stringify(songs));};
-  try{put(def);}catch(e1){
+  if(SFP){def.dir=await pickSongDir(title);}
+  {let used=0;try{for(const k of Object.keys(localStorage))used+=(localStorage.getItem(k)||'').length;}catch(e){}log('storage: '+(SongDB.ok?'songs are kept in the phone\'s own storage':'songs are kept in the browser (about 5 MB)')+'; the settings use '+Math.round(used/1024)+' KB; this song is '+Math.round(JSON.stringify(def).length/1024)+' KB');}
+  let saved=false;
+  try{await SongDB.add(def);saved=true;}catch(e1){
     log('storage: could not save the song ('+String(e1&&e1.name||e1)+'); trying a lighter copy');
-    try{delete def.recRaw;put(def);log('storage: saved without the raw note list');}
-    catch(e2){log('ERROR: the song could not be saved because Fretline\'s storage on this phone is full ('+String(e2&&e2.name||e2)+'). Delete a few old songs in My songs (✕), then run it again.');
-      $('songMsg').textContent='Could not save "'+title+'": storage is full. Delete a few old songs in My songs, then run it again.';$('songOut').style.display='';throw new Error('storage is full');}}
+    try{delete def.recRaw;await SongDB.add(def);saved=true;log('storage: saved without the raw note list');}
+    catch(e2){log('ERROR: the song could not be saved to the phone\'s storage ('+String(e2&&e2.name||e2)+'). Free up some space on the phone, then run it again.');
+      $('songMsg').textContent='Could not save "'+title+'": the phone\'s storage is full or blocked. Free up some space, then run it again.';$('songOut').style.display='';throw new Error('storage is full');}}
   if(def.dir){try{await saveSources(def.dir);}catch(e){log('files: '+String(e&&e.message||e));}}
   const cnt=def.events?def.events.length:def.recNotes.length,last=def.events?Math.max(...def.events.map(e=>e.t)):Math.max(...def.recNotes.map(n=>n.beat));
   log('song: "'+title+'" saved to My songs ('+cnt+(def.events?' steps':' notes')+', '+Math.ceil(last/4)+' bars'+(def.capo?', capo '+def.capo:'')+')');
