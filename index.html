@@ -2318,7 +2318,11 @@ function comboPair(def){if(def.kind==='rec')return null; /* v1.93: a recording's
 function comboEvents(def,pair){const bpb=def.bpb||4;const L=def.parts[pair.lead].events,R=def.parts[pair.rhythm].events;
   const leadBars=new Set();for(const e of L){if(e.rest)continue;const a=Math.floor(e.t/bpb+1e-6),b=Math.floor((e.t+Math.max(e.d,0.01))/bpb-1e-6);for(let k=a;k<=b;k++)leadBars.add(k);}
   return [...L.filter(e=>leadBars.has(Math.floor(e.t/bpb+1e-6))).map(e=>({...e,ld:1})),...R.filter(e=>!leadBars.has(Math.floor(e.t/bpb+1e-6))).map(e=>({...e}))].sort((a,b)=>a.t-b.t);}
-function partChoices(def){const ch=(def.parts||[]).map((p,i)=>p.events.length?{v:String(i),label:p.label,sub:p.events.length+(partChordiness(p.events)>=0.5?' chords':' notes')}:null).filter(Boolean);
+/* v1.105: the versions of a song made from a tab + chord sheet are named for what a guitarist plays (older songs carry the first names) */
+const VER_NAMES={'Chords + lead':'Rhythm + lead','Chords only':'Rhythm only','Tab only':'Full tab'};
+const VER_INFO={'Rhythm + lead':'chords strummed, lead line where the tab plays one','Rhythm only':'just the strummed chords','Full tab':'every guitar part as the tab writes it, strums included','Lead only':'just the lead line'};
+function verName(l){return VER_NAMES[l]||l;}
+function partChoices(def){const ch=(def.parts||[]).map((p,i)=>p.events.length?{v:String(i),label:def.kind==='rec'?verName(p.label):p.label,sub:def.kind==='rec'&&VER_INFO[verName(p.label)]?p.events.length+' steps · '+VER_INFO[verName(p.label)]:p.events.length+(partChordiness(p.events)>=0.5?' chords':' notes')}:null).filter(Boolean);
   const pr=comboPair(def);if(pr)ch.unshift({v:'combo',label:'Lead + rhythm',sub:def.parts[pr.lead].label+' where it plays, '+def.parts[pr.rhythm].label+' in the other bars'});return ch;}
 function usePart(def,v){
   /* v1.93: a recording song made from a tab AND a chord sheet keeps its versions (chords + lead, chords only, tab only):
@@ -2333,7 +2337,7 @@ function usePart(def,v){
   def.events=tl.events;def.trim=tl.trim;def.capo=src.capo||0;def.strumAuto=src.strumAuto||null;def.partSel=v;delete def._built;
   const cs=store.get('capo',{});if(cs[def.id]!=null){delete cs[def.id];store.set('capo',cs);}
   if(def.cat==='mine')store.set('songs',mySongs);}
-function partLabel(def){const v=def.partSel||'0';if(def.kind==='rec'&&def.parts&&def.parts[+v])return def.parts[+v].label;if(v==='combo')return 'Lead + rhythm';const p=def.parts&&def.parts[+v];return p?p.label:'';}
+function partLabel(def){const v=def.partSel||'0';if(def.kind==='rec'&&def.parts&&def.parts[+v])return verName(def.parts[+v].label);if(v==='combo')return 'Lead + rhythm';const p=def.parts&&def.parts[+v];return p?p.label:'';}
 function pickPart(def,then){
   const ch=partChoices(def);if(ch.length<2){then();return;}
   showMsg(def.kind==='rec'?'Which version?':'Which part?','<p class="small" style="margin-top:0">'+esc(def.title)+(def.kind==='rec'?' has several versions: switch any time with the 🎸 button.':' has several parts.')+'</p>'+ch.map(c=>`<button class="partPick${c.v===(def.partSel||'0')?' primary':''}" data-v="${c.v}" style="display:block;width:100%;text-align:left;margin:6px 0;padding:10px 12px"><b>${esc(c.label)}</b><br><span class="small">${esc(c.sub)}</span></button>`).join(''));
@@ -4171,7 +4175,7 @@ function sfMidi(ev,bpm,bpb,title){
 function sfB64(u){let r='';for(let i=0;i<u.length;i+=0x8000)r+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(r);}
 function sfMidis(s){ /* [{name, b64}]: the song, and each of its versions when it has them */
   const out=[],bpm=s.bpm||90,bpb=s.bpb||4,base=sfSeg(s.title);
-  if(s.parts&&s.parts.length>1)s.parts.forEach(p=>{if(p.events&&p.events.length)out.push({name:base+' - '+sfSeg(p.label||'version')+'.mid',b64:sfB64(sfMidi(p.events,bpm,bpb,s.title+' - '+(p.label||'')))});});
+  if(s.parts&&s.parts.length>1)s.parts.forEach(p=>{if(p.events&&p.events.length)out.push({name:base+' - '+sfSeg(verName(p.label||'version'))+'.mid',b64:sfB64(sfMidi(p.events,bpm,bpb,s.title+' - '+verName(p.label||'')))});});
   else if(s.events&&s.events.length)out.push({name:base+'.mid',b64:sfB64(sfMidi(s.events,bpm,bpb,s.title))});
   return out;}
 let sfWhere='',sfTimer=0,sfBusy=false,sfAgain=false,sfLast='';
@@ -4217,7 +4221,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.104';
+const APP_VERSION='1.105';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
