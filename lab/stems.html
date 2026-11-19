@@ -709,7 +709,23 @@ async function labReceive(file){
   if(kind==='text'){const t=await file.text();const two=!free1&&free2;$(two?'sheet2':'sheet').value=t;$('mk').checked=true;status('Opened '+file.name+' as the '+(two?'second':'first')+' sheet.');return 'text';}
   status('Fretline Lab cannot use '+file.name+' (it needs a song, a MIDI / Guitar Pro / MusicXML file or a text sheet).');return '';}
 function labItemFile(it){const bin=atob(it.data||'');const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new File([u],it.name||'file');}
+/* v1.104: on the phone the Lab page can be reloaded while the file picker is open (Android frees memory), which empties the
+   chosen song and sheet files. Each pick is kept in the app's storage and put back when the page starts again. */
+const KEEP_SLOTS={song:'file',sheet1:'sheetFile',sheet2:'sheet2File'};
+async function keepFile(slot,file){try{const c=await caches.open('fretline-incoming'),k=location.origin+'/__fretline/labkeep/'+slot;
+  if(file)await c.put(k,new Response(file));else await c.delete(k);
+  const m=JSON.parse(localStorage.getItem('fretline:labKeep')||'{}'); /* read and write with no await in between, so two quick picks cannot overwrite each other */
+  if(file)m[slot]={name:file.name,type:file.type||''};else delete m[slot];
+  localStorage.setItem('fretline:labKeep',JSON.stringify(m));}catch(e){}}
+async function clearKept(){for(const k of Object.keys(KEEP_SLOTS))await keepFile(k,null);}
+async function restoreKept(){const back=[];try{const c=await caches.open('fretline-incoming'),m=JSON.parse(localStorage.getItem('fretline:labKeep')||'{}');
+  for(const slot of Object.keys(m)){const el=$(KEEP_SLOTS[slot]);if(!el||el.files.length)continue;const r=await c.match(location.origin+'/__fretline/labkeep/'+slot);if(!r)continue;
+    const f=new File([await r.arrayBuffer()],m[slot].name,{type:m[slot].type||''});await putFile(el,f);back.push(f.name);}}catch(e){}
+  if(back.length){status('The page had reloaded; your file'+(back.length>1?'s are':' is')+' back: '+back.join(', ')+'.');log('files: restored after a page reload: '+back.join(', '));}}
+Object.keys(KEEP_SLOTS).forEach(slot=>$(KEEP_SLOTS[slot]).addEventListener('change',()=>keepFile(slot,$(KEEP_SLOTS[slot]).files[0]||null)));
+$('sheetFileClear').addEventListener('click',()=>keepFile('sheet1',null));if($('sheet2FileClear'))$('sheet2FileClear').addEventListener('click',()=>keepFile('sheet2',null));
 (async function(){
+  await restoreKept();
   /* files the main screen set aside before opening the Lab */
   try{const list=JSON.parse(localStorage.getItem('fretline:labIncoming')||'[]');localStorage.removeItem('fretline:labIncoming');
     if(list.length){const c=await caches.open('fretline-incoming');for(const x of list){const r=await c.match(x.key);if(r){const f=new File([await r.arrayBuffer()],x.name);await c.delete(x.key);try{await labReceive(f);}catch(e){status('Could not open '+x.name+': '+(e.message||e));}}}}}catch(e){}
@@ -721,7 +737,7 @@ function labItemFile(it){const bin=atob(it.data||'');const u=new Uint8Array(bin.
 $('go').onclick=async()=>{
   window.__labDone=null;
   if(KA){try{await KA.start({text:'Starting…'});KA_ON=true;}catch(e){KA_ON=false;}}
-  try{await runLab();}finally{
+  try{await runLab();if(window.__labDone)clearKept();}finally{
     if(KA&&KA_ON){KA_ON=false;const ok=!!window.__labDone;try{await KA.done({title:ok?'Your song is ready':'Fretline Lab stopped',text:ok?'Open Fretline to play it from My songs.':'Open Fretline and tap the report to see what went wrong.'});}catch(e){}}}};
 </script>
 </body>
