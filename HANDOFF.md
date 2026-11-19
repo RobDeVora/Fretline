@@ -1,7 +1,8 @@
-# Fretline: session handoff (18 Nov 2026, web v1.87, Android app rebuilt for v1.80 (native separator + save to Downloads))
+# Fretline: session handoff (18 Nov 2026, evening · web v1.87 · Android APK last rebuilt at v1.80)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
-how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
+how detection works now, what's open, and a changelog (newest first from v1.87 down to v1.69, then the older
+v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conversation" below.**
 
 ## The project
 
@@ -40,32 +41,74 @@ how detection works now, what's open, and a changelog of everything built in the
 6. The owner updates with **Settings › App › Check for updates** (compares the live `APP_VERSION`). A new APK has
    to be installed by hand. Tell them clearly when a change needs the APK.
 
-## Where things stand (end of 18 Nov session)
+## Where things stand (18 Nov 2026, evening)
 
-**Confirmed working on the owner's phone:**
-- Native built-in mic via the app (fixed notes going silent with Bluetooth headphones): 32/32 on the A blues melody.
-- Full screen, per-output sound delay (report shows "output bluetooth (Robert's Buds4 Pro)"), 60 frames/s.
-- Landscape layout: the hand stands on the bottom edge, the highway fills the screen, lyrics fit.
-- **v1.68, two-note steps:** playing E0+A2 throughout "Boogie shuffle in E" scored 28/96. The pattern matches
-  exactly 28 steps; 27 of them counted (only #0, the first, missed), and just one wrong step counted (#6, E+C#).
-  All A and B steps (including B+G#) were correctly missed.
+**Versions:** web **v1.87** (sw cache `fretline-v75`). The APK was last rebuilt for v1.80 (Capacitor plugins:
+`IncomingPlugin`, `NativeMicPlugin`, `NativeSeparatorPlugin` = Demucs on all cores + save to Downloads; minSdk 24,
+onnxruntime-android 1.22.0, arm64-v8a + armeabi-v7a only). Everything after v1.80 is web-only. The owner has the
+v1.80 APK installed.
+
+**What this session built (details in the changelog sections below):**
+- v1.69–v1.76 detection work: highway speed in px/s, first chord after a switch, right-note playback in time,
+  arpeggios over ringing strings, strums must be the right chord, string colours, a research comparison with
+  Yousician / Gibson / Simply (`docs/RECOGNITION_RESEARCH.md`), tuning follower.
+- **Lab** (`lab/stems.html`, linked from Settings › App): split an MP3 with Demucs htdemucs_6s (guitar + band
+  without guitar), on device. In the APK it uses all cores natively (0.53–0.62× song length on the owner's phone;
+  web runtime on one thread is 2.4×). Then it makes a highway song:
+  - AI notes (Basic Pitch + cleanup, v1.81) **or** a tab / chord sheet / MIDI / MusicXML / Guitar Pro / PDF lined up
+    with the recording (v1.83–v1.86: order-only alignment for text; files use their own timing, best of both).
+  - Saved to My songs as `kind:'rec'`: backing = the band WAV, guide = the real guitar WAV (Listen plays the real
+    guitar; Play with headphones + "play the right note" fades it in while you hit).
+  - Tempo: auto, ½ / 2× buttons, type a BPM, tap tempo; ♩ button in My songs (v1.82). Notes keep their played
+    timing (1/48 beat, v1.85).
+- v1.86: MIDI tab exports with one channel per string are read as one part (also fixes the import screen).
+- v1.87: **guitar tunings** in the Tuner (11 presets, string-by-string "tighten / loosen N semitones / cents",
+  ✓ per string); the whole app, imports and the Lab follow the tuning; songs remember theirs and offer to switch.
+
+**Confirmed on the owner's phone this session:** native separator works (4.5× faster); real-guitar guide works
+("works as described"); the full "Thought You Should Know" song + MIDI run (before the v1.86 fixes) showed the
+problems fixed in v1.86. **Not yet confirmed on the phone:** v1.81 note cleanup, v1.83–v1.86 sheet alignment on a
+real run, v1.87 tunings/Tuner with a real guitar.
+
+**Owner's test song:** "Thought You Should Know" (Morgan Wallen). The owner sent the MP3 and a Songsterr-style MIDI
+(`…Thought_You_Should_Know_Tab-12-15-2025.mid`: Lead Guitar on 6 channels = 6 strings, E♭ tuning, 140 BPM, guitar
+from beat 47; plus vocals over 5 channels, bass over 3, drums). Not in the repo (commercial). Reproducing needs them
+re-sent; the model is mirrored in the `lab-model` release (run the manual "Mirror Lab model" workflow if missing).
+With them, the full song makes 773 steps, 140 BPM, E♭, median 3 ms from the MIDI's timing.
 
 **Open / to watch:**
-- **False hits on single notes (v1.65/1.66):** sim results are good, but sympathetic open strings can't be
-  simulated. The owner hasn't sent a single-note "play one wrong note throughout" report since v1.66. Next time,
-  ask for one (e.g. the A minor pentatonic lesson) to confirm.
-- **First note of a song** is often missed or judged without context (no history yet). Seen in the sims and in
-  the 1.68 report (#0).
-- The first E+C# false hit (#6 in the 1.68 report) suggests the "tracker heard it recently" rule can carry over
-  from a previous step. Fine for now; watch it.
-- Double stops in sim: E2+C#3 played over A2+E3 steps still pass 6 (E3 = E2's octave). See v1.67 notes.
-- **MP3 play-along idea:** discussed, not started (see the section below).
-- Not done: same-pitch-different-string detection; a "Jam" style; immersive mode is done but notch/cutout mode is
-  left at default.
+- Ask the owner to remake TYSK in the Lab (Whole song + the MIDI) on v1.87 and send the Lab report + a detection
+  report; check the song is saved as E♭ and the notes match what's heard.
+- Tunings with a real guitar: Tuner string detection when a string is far off (nearest target wins; tap to lock).
+- Transcription (no sheet) still has extra notes on fingerpicked parts and some bass bleed.
+- Lyrics from chord sheets are dropped in the Lab; chord shapes in open tunings are standard fingerings.
+- Older open items: false hits from sympathetic strings (no fresh single-note report since v1.66); first note of a
+  song often missed; see the v1.66–v1.68 notes.
 
 **Owner's preferences and style:** plain, practical explanations; they like seeing screenshots of layout changes;
 they want detection to be strict (wrong notes must not count) and report results honestly. They prefer
-one-tap/one-time settings and maximum screen space for the highway and hand.
+one-tap/one-time settings and maximum screen space for the highway and hand. Standing permission: "Take any
+necessary steps … to fix any of these issues in the way you think is best, so long as you're able to check that it
+doesn't cause interference with anything that does work correctly I don't need to approve it", and push straight
+to `main`. They test on the phone and send Lab reports and detection reports (often as .txt attachments).
+
+## Picking up the conversation
+
+The last exchange (18 Nov, ~20:00 Central):
+1. After v1.87 the owner asked whether the **"Lead + rhythm"** and **"chords only"** options were removed. Checked:
+   both still exist.
+   - **Lead + rhythm** is the part picker for songs imported from a file with several parts (MIDI / Guitar Pro /
+     MusicXML): "Which part?" on opening, or the 🎸 button in the player (`partChoices`, `comboPair`,
+     `comboEvents`, `usePart`; v1.57–v1.58). Offered only when one part is mostly chords and another mostly single
+     notes; lead where it plays, rhythm in the other bars.
+   - **Chords only** is the import screen's **Notes** option "Guitar chords (strummed, with capo suggestion)"
+     (`#impNotes` = all / top / chords; `partEvents` → `chordChart`).
+   - Told the owner: Lab recording songs have a single part, so neither option appears for them; and since v1.86,
+     per-string MIDI exports import as one part per instrument instead of six string "parts" (already-saved songs
+     keep their old parts until re-imported).
+2. The owner said they **have ideas related to Lead + rhythm / chords only**. I asked what the ideas are. **They
+   haven't answered yet: start the new chat by asking for those ideas** (likely: bringing parts / Lead + rhythm /
+   chords-only to Lab recording songs, e.g. using the MIDI's other tracks or a chord version of the guitar).
 
 ## How note detection works now
 
