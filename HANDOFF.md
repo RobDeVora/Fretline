@@ -455,6 +455,17 @@ recording and merged; saved as one `kind:'rec'` song (credit "a tab and a chord 
   window found 9.8–15.5 s (true solo 10.0–15.0), match 0.85; the 16 solo notes within 2–17 ms, no chord inside the
   solo, G/C/D/Em around it; both orders; `FROMTO='0:09.8,0:15.5'` for typed times, `STRUMS=1` for strum mode.
   The merged song opens in the main app: chord blocks / strum pattern, then single gems, then D, Em.
+- **Real-song check (18 Nov, 21:30; `tools/lab-tests/real_merge.py`, TYSK guitar stem + its MIDI):** the made-up
+  song works, the real one does NOT yet. Steps 300–347 of the MIDI pasted as a solo-only tab (true place 82.3–100.4 s),
+  chord sheet = the MIDI's own chord chart (102 chords, lined up in 2.7 s, but at +4 semitones: capo 4 vs the tab's 0,
+  "different keys" in the report). (1) Automatic window: picked 118.4–130.7 s (match 0.52, barely over the 0.45
+  limit): wrong; fingerpicked arpeggios in one key fit everywhere. (2) Typed window 81.9–101.0 s (exact): 35 of 48
+  steps placed, 33 of 35 within 50 ms of the true time; 13 steps dropped by the path. (3) Typed 81–102 s (±1 s slack):
+  41 of 48 placed, only 28 of 41 within 50 ms, the first notes crammed at the window start. So order-only alignment of
+  a text tab on a real fingerpicked recording is fragile (it was tuned on synthetic riffs and strums). Ideas: match the
+  tab's chord sequence to the chord sheet's names to pick the window (symbolic, robust), keep the chord-sheet window
+  edges instead of padding, put the pick-attack bonus / min-length K to work in short windows, use the chord
+  sheet's key shift for the tab, allow a MIDI / GP file as the second sheet (file timing is exact).
 - Not done: a file (MIDI / Guitar Pro) as the second sheet; the solo before the first chord / after the last is only
   tried as one window; real songs untested (the window search assumes the chord sheet lines up well — a solo with
   no chord change at its start gets a start pad of 0.5 s only).
