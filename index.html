@@ -2098,7 +2098,17 @@ function itemHTML(d,ic,extra){
    they are re-placed on the new beat grid (32nds under 90 BPM, 16ths above). Songs made from 1.82 keep the exact note
    times (recRaw); older ones are re-timed from their saved beats. Halving picks which old beat becomes the new beat
    by where the notes lean; any other change keeps bar 1 where it was. */
+/* v1.83: songs lined up from a tab / chord sheet keep each step's time in the recording (recEvT) */
+function recPlace(events,T,bpm,b0){const spb=60/bpm,G=bpm<90?8:4;const evs=[];let prev=-1;
+  events.forEach((e,i)=>{let q=Math.round((T[i]-b0)/spb*G)/G;if(q<0)return;if(q<=prev)q=prev+1/G;prev=q;evs.push({...e,t:q});});
+  for(let i=0;i<evs.length;i++){const ch=evs[i].chord||evs[i].strum;const gap=i+1<evs.length?evs[i+1].t-evs[i].t:(ch?4:1);evs[i].d=ch?Math.max(1/G,gap):Math.max(1/G,Math.min(gap,2));
+    if(evs[i].strum)evs[i].strum=Math.round(evs[i].t*2)%2?'U':'D';}
+  return evs;}
 function recRetime(def,bpm){const spbO=60/def.bpm,spb=60/bpm,G=bpm<90?8:4;
+  if(def.events&&def.recEvT){const T=def.recEvT;let b0=def.recOffset||0;
+    if(Math.abs(bpm*2-def.bpm)<0.02){let best=-1e9,pick=b0;for(const c of [b0,b0+spbO]){let sc=0;for(const t of T)sc+=Math.cos(2*Math.PI*(t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
+    while(b0+4*spb<=T[0]-0.05)b0+=4*spb;while(b0>T[0]+0.05)b0-=spb;
+    const out={...def,bpm,events:recPlace(def.events,T,bpm,b0),recOffset:b0};delete out._built;return out;}
   const raw=def.recRaw||def.recNotes.map(n=>({midi:n.midi,t:(def.recOffset||0)+n.beat*spbO,d:n.dur*spbO,a:n.v!=null?n.v:0.6}));
   let b0=def.recOffset||0;
   if(Math.abs(bpm*2-def.bpm)<0.02){let best=-1e9,pick=b0;for(const c of [b0,b0+spbO]){let sc=0;for(const n of raw)sc+=n.a*Math.cos(2*Math.PI*(n.t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
@@ -3998,7 +4008,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.82';
+const APP_VERSION='1.83';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

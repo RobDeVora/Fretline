@@ -13,3 +13,5 @@ section of HANDOFF.md) into `/tmp/ortpkg/package/dist/`; serve the repo on 8769;
 | `dropsrv.py` | a server that drops the model download at 10 MB; `getModel` must resume to an identical file |
 | `e2e.py` (v1.81: 64/64, 0 extras; real-guitar guide checks) | synthetic 100 BPM riff (`riff100.wav`, real guitar samples + clicks): split → Basic Pitch → tempo → song saved; main app builds it and plays the backing in sync. v1.78: 99.5 BPM, 64/64 riff notes on the right beat, 8 extras, sync error ≤ 6 ms |
 | `native.py <audio> [fail]` | fake APK NativeSeparator: default "all cores", exact blending, fallback to the web runtime |
+| `sheet_tab.py` (env `RIFF=`) | v1.83: tab with uneven spacing lined up with the riff: 64/64; half tempo moves nothing; app opens it, ♩ 2× |
+| `sheet_chords.py` (env `SHEET=`) | v1.83: chord sheet without lengths vs synthetic strums (`/tmp/chordtest`, generator in HANDOFF); changes within 72 ms; strum mode; transposed / capo sheets |

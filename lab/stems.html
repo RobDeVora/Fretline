@@ -39,6 +39,14 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
   <label style="display:flex;gap:8px;align-items:center;font-weight:600"><input type="checkbox" id="mk" checked style="width:auto"> Also make a highway song from the guitar</label>
   <input type="text" id="ttl" placeholder="Song title (from the file name if empty)" style="width:100%;font-size:15px;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text);margin-top:6px">
   <div class="small">The song is saved to Fretline's My songs with the band (without the guitar) as its backing track.</div>
+  <details id="sheetBox" style="margin-top:10px"><summary style="font-weight:600">Use a tab or chord sheet for the notes (optional)</summary>
+    <div class="small">Paste the song's tab or chord sheet (or load a text file). Its notes or chords are used as written, and lined up with the recording's guitar, instead of the AI writing the notes down.</div>
+    <textarea id="sheet" rows="6" placeholder="e|-----0---3---|&#10;B|---1-------1-|&#10;…  or  G  C  D  Em" style="width:100%;font:13px ui-monospace,monospace;padding:8px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text);margin-top:6px"></textarea>
+    <input type="file" id="sheetFile" accept=".txt,.text,.tab,.pro,.cho,.chopro,.chordpro,.crd,text/plain">
+    <div class="row"><div><label for="sheetType">It's a</label><select id="sheetType"><option value="auto">Detect</option><option value="tab">Tab</option><option value="chords">Chord sheet</option></select></div>
+      <div><label for="strumMode">Chords on the highway</label><select id="strumMode"><option value="changes">One strum per chord change</option><option value="strums">Follow the recording's strums</option></select></div></div>
+    <div class="small">The sheet should match this recording (same intro, verses and repeats). Parts the recording doesn't play are skipped; parts the sheet doesn't cover get no notes.</div>
+  </details>
   <button id="go" disabled>Split it</button>
   <div class="bar"><div id="prog"></div></div>
   <div id="status" class="small">Choose a file.</div>
@@ -90,6 +98,7 @@ async function nativeSave(a,name){const blob=await (await fetch(a.href)).blob();
   const r=await NS.saveFinish({name,mime:blob.type||'audio/wav'});status('Saved to '+r.path);log('saved: '+r.path);}
 ['dGtr','dRest'].forEach(id=>$(id).addEventListener('click',ev=>{if(!NS||!NS.saveChunk)return;ev.preventDefault();
   const base=($('ttl').value||'song').trim().replace(/[^A-Za-z0-9 ()-]+/g,'_');nativeSave($(id),base+(id==='dGtr'?' - guitar.wav':' - band.wav')).catch(e=>{status('Could not save: '+(e.message||e));log('save: '+(e.message||e));});}));
+$('sheetFile').onchange=async()=>{const f=$('sheetFile').files[0];if(!f)return;if(f.size>2e6){status('That file is too big for a tab or chord sheet.');return;}$('sheet').value=await f.text();$('mk').checked=true;status('Sheet loaded ('+f.name+').');};
 $('tHalf').onclick=()=>retime(0.5);$('tDouble').onclick=()=>retime(2);
 $('tSet').onclick=()=>{const v=+$('tBpm').value;if(!(v>=30&&v<=300)){status('Enter a tempo between 30 and 300 BPM.');return;}retime(1,v);};
 $('file').onchange=()=>{const f=$('file').files[0];if(f&&!$('ttl').value)$('ttl').value=f.name.replace(/\.[^.]+$/,'').replace(/[_]+/g,' ');$('go').disabled=!$('file').files.length;status($('file').files.length?'Ready.':'Choose a file.');};
@@ -196,15 +205,135 @@ function cleanNotes(notes,g22){const A=attackCurve(g22);
 // beats from times: bar 1 holds the first note (moved by whole beats), notes on a 16th grid
 function quantise(notes,bpm,b0){const spb=60/bpm,G=bpm<90?8:4; /* slow tempos: 32nd grid, so halving the tempo moves no note */const firstNote=Math.min(...notes.map(n=>n.t));while(b0+4*spb<=firstNote-0.05)b0+=4*spb;while(b0>firstNote+0.05)b0-=spb;
   return {b0,recNotes:notes.map(n=>({midi:n.midi,beat:Math.round((n.t-b0)/spb*G)/G,dur:Math.max(1/G,Math.round(n.d/spb*G)/G),v:Math.round(n.a*100)/100})).filter(n=>n.beat>=0)};}
-let LAST=null; /* the last song made here, for the tempo buttons */
+let LAST=null;
+function retimeEvents(f,target){const old=LAST.def,bpm=target||Math.round(old.bpm*f*1000)/1000,spbO=60/old.bpm;let b0=old.recOffset;const T=old.recEvT;
+  if(Math.abs(bpm*2-old.bpm)<0.02){const spb=60/bpm;let best=-1e9;let pick=b0;for(const c of [b0,b0+spbO]){let sc=0;for(const t of T)sc+=Math.cos(2*Math.PI*(t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
+  const spb=60/bpm;while(b0+4*spb<=T[0]-0.05)b0+=4*spb;while(b0>T[0]+0.05)b0-=spb;
+  const events=strumDirs(placeEvents(old.events.map((e,i)=>({e,t:T[i]})),bpm,b0));const def={...old,bpm,events,recOffset:b0};
+  const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');const i=songs.findIndex(x=>x.id===def.id);if(i>=0)songs[i]=def;localStorage.setItem('fretline:songs',JSON.stringify(songs));
+  LAST.def=def;window.__labSong=def;log('tempo: changed to '+Math.round(bpm*100)/100+' BPM, bar 1 at '+b0.toFixed(2)+' s');tempoButtons();status('Song updated: '+Math.round(bpm)+' BPM.');} /* the last song made here, for the tempo buttons */
 function tempoButtons(){const box=$('tempoBox');if(!LAST){box.style.display='none';return;}box.style.display='';const b=LAST.def.bpm;
   $('tempoNow').textContent='Tempo: '+Math.round(b)+' BPM. If the song feels like half or double that (count along), change it:';
   $('tHalf').textContent='Use '+Math.round(b/2)+' BPM';$('tDouble').textContent='Use '+Math.round(b*2)+' BPM';$('tBpm').value=Math.round(b*100)/100;$('tHalf').disabled=b/2<30;$('tDouble').disabled=b*2>300;}
-function retime(f,target){if(!LAST)return;const old=LAST.def,bpm=target||Math.round(old.bpm*f*1000)/1000,spbOld=60/old.bpm;let b0=old.recOffset;
+function retime(f,target){if(!LAST)return;if(LAST.def.events)return retimeEvents(f,target);const old=LAST.def,bpm=target||Math.round(old.bpm*f*1000)/1000,spbOld=60/old.bpm;let b0=old.recOffset;
   if(Math.abs(bpm*2-old.bpm)<0.02){/* the new beat is two old beats: put it on whichever old beat the notes lean on */const spb=60/bpm;let best=-1e9,pick=b0;for(const c of [b0,b0+spbOld]){let sc=0;for(const n of LAST.notes)sc+=n.a*Math.cos(2*Math.PI*(n.t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
   const q=quantise(LAST.notes,bpm,b0);const def={...old,bpm,recNotes:q.recNotes,recOffset:q.b0};
   const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');const i=songs.findIndex(x=>x.id===def.id);if(i>=0)songs[i]=def;else songs.unshift(def);localStorage.setItem('fretline:songs',JSON.stringify(songs));
   LAST.def=def;window.__labSong=def;log('tempo: changed to '+Math.round(bpm*100)/100+' BPM, bar 1 at '+q.b0.toFixed(2)+' s');tempoButtons();status('Song updated: '+Math.round(bpm)+' BPM.');}
+/* ---- v1.83: line a tab or chord sheet up with the recording ----
+   The sheet is read by Fretline's own tab / chord-sheet reader (the "core" script of index.html, run in its own
+   scope). The guitar stem becomes chroma (energy per note name, 4096-point FFT every 512 samples = 23 ms at 22.05 kHz).
+   Each sheet event gets a chroma template (its notes; for tabs plus the two notes before it, still ringing).
+   Alignment: a left-to-right path over [intro, event 1..m, outro]; per frame cost 1 − cosine(chroma, template);
+   moving to the next event costs a little, less on a real pick (attack curve), and skipping an event costs more.
+   Tried at the 3 transpositions whose overall note-name balance fits best (capo / sheet in another key); the
+   cheapest wins. Each event's start is then snapped to the nearest pick within ±0.12 s. */
+let CORE=null;
+async function loadCore(){if(CORE)return CORE;const t=await (await fetch('../index.html',{cache:'no-cache'})).text();const m=t.match(/<script id="core">([\s\S]*?)<\/script>/);if(!m)throw new Error("could not load Fretline's tab reader");
+  CORE=new Function(m[1]+';return {parseTab,parseChordSheet,chordEvent,strumEvent,transposeName,bestCapo};')();return CORE;}
+function capoFromText(t){const m=/\bcapo\b\s*(?:on|at)?\s*:?\s*(?:fret)?\s*(\d{1,2})/i.exec(t)||/(\d{1,2})(?:st|nd|rd|th)\s+fret\s+capo/i.exec(t);const n=m?parseInt(m[1],10):0;return n>0&&n<=12?n:0;}
+function readSheet(core,text,type){let kind=type,events=[];
+  if(type!=='chords'){const r=core.parseTab(text);if(r.events.length>=2||type==='tab'){kind='tab';events=r.events;}}
+  if(kind!=='tab'){kind='chords';events=core.parseChordSheet(text,4);}
+  events=[...events].filter(e=>e.pcs&&e.pcs.length).map(e=>{const o={...e};delete o.label;return o;});return {kind,events,capo:capoFromText(text)};}
+function chromaFrames(x){const W=4096,H=512,sr=22050,n=Math.max(0,Math.floor((x.length-W)/H)+1);const C=new Float32Array(n*12),E=new Float32Array(n);
+  const win=new Float32Array(W);for(let i=0;i<W;i++)win[i]=0.5-0.5*Math.cos(2*Math.PI*i/(W-1));
+  /* one value per semitone (its strongest bin), so high harmonics, which cover many bins, don't outweigh the
+     fundamental; notes above E4 / E5 count less (they're mostly overtones of lower notes) */
+  const miOf=new Int8Array(W/2).fill(-1);for(let k=1;k<W/2;k++){const f=k*sr/W;if(f>=70&&f<=2100)miOf[k]=Math.round(69+12*Math.log2(f/440))-36;}
+  const wMi=new Float32Array(64);for(let i=0;i<64;i++){const mi=i+36;wMi[i]=mi<64?1:mi<76?0.6:0.35;}
+  const re=new Float32Array(W),im=new Float32Array(W),P=new Float32Array(64);
+  for(let f=0;f<n;f++){for(let i=0;i<W;i++){re[i]=(x[f*H+i]||0)*win[i];im[i]=0;}fft(re,im);let e=0;const c=C.subarray(f*12,f*12+12);P.fill(0);
+    for(let k=1;k<W/2;k++){const i=miOf[k];if(i<0||i>=64)continue;const m2=re[k]*re[k]+im[k]*im[k];e+=m2;if(m2>P[i])P[i]=m2;}
+    let pm=0;for(let i=0;i<64;i++)pm=Math.max(pm,P[i]);if(pm>0)for(let i=0;i<64;i++)c[(i+36)%12]+=wMi[i]*Math.pow(P[i]/pm,0.25);
+    let q=0;for(let p=0;p<12;p++)q+=c[p]*c[p];q=Math.sqrt(q)||1;for(let p=0;p<12;p++)c[p]/=q;E[f]=e;}
+  return {C,E,n,t0:W/2/sr,dt:H/sr};}
+function templates(events,kind,shift){const m=events.length,T=new Float32Array(m*12);
+  /* a single note also sounds its overtones (octave = same name, then the 5th and major 3rd above, weaker) */
+  for(let i=0;i<m;i++){const t=T.subarray(i*12,i*12+12);const add=(e,w)=>{if(!e)return;const one=e.pcs.length===1;for(const p of e.pcs){t[(p+shift)%12]+=w;if(one){t[(p+shift+7)%12]+=0.35*w;t[(p+shift+4)%12]+=0.15*w;}}};add(events[i],1);if(kind==='tab'){add(events[i-1],0.3);add(events[i-2],0.12);}
+    let q=0;for(let p=0;p<12;p++)q+=t[p]*t[p];q=Math.sqrt(q)||1;for(let p=0;p<12;p++)t[p]/=q;}return T;}
+function alignPath(F,A,events,kind,shift){const m=events.length,n=F.n;const T=templates(events,kind,shift);
+  /* every event lasts at least K frames (K sub-states passed in order; the last one can repeat) */
+  const K=m*n*3<9e7?3:2,S=m*K+2,POST=S-1;
+  let emax=0;for(let f=0;f<n;f++)emax=Math.max(emax,F.E[f]);const quiet=emax*1e-3;
+  const tab=kind==='tab',cPre=0.55,pAdv=tab?0.6:0.3,pSkip=6,wA=tab?1:0.5,wS=tab?1.2:0;
+  /* each pick counts in exactly one frame: the strongest attack within ±90 ms, credited to the frame whose
+     reference time (centre − 20 ms; the chroma turns to a new note within ~0-35 ms of its pick) it falls in; 0..1 from 1.5× to 4× the local median */
+  const pk=new Float32Array(n),W9=Math.round(0.09/A.dt),rr=j=>A.fl[j]/(A.med[j]+1);
+  for(let j=1;j+1<A.fl.length;j++){const r=rr(j);if(r<1.5)continue;let top=true;for(let k=Math.max(0,j-W9);k<=Math.min(A.fl.length-1,j+W9);k++)if(k!==j&&(rr(k)>r||(rr(k)===r&&k<j))){top=false;break;}if(!top)continue;
+    const f=Math.ceil((A.t0+j*A.dt+0.02-F.t0)/F.dt);if(f>=0&&f<n)pk[f]=Math.max(pk[f],Math.min(1,(r-1.5)/2.5));}
+  const evCost=new Float32Array(m);
+  let D=new Float64Array(S).fill(Infinity),Dn=new Float64Array(S);const bp=new Uint8Array(n*S);
+  const fillCost=f=>{const q=F.E[f]<quiet;for(let i=0;i<m;i++){if(q){evCost[i]=cPre+0.15;continue;} /* silence belongs to the intro / outro */let d=0;const c=f*12,t=i*12;for(let p=0;p<12;p++)d+=F.C[c+p]*T[t+p];evCost[i]=1-d;}};
+  fillCost(0);D[0]=cPre;if(m)D[1]=evCost[0];
+  for(let f=1;f<n;f++){fillCost(f);const b=wA*pk[f],stayPen=wS*pk[f];
+    Dn[0]=D[0]+0.5*stayPen+cPre;bp[f*S]=0;
+    for(let i=0;i<m;i++){const base=1+i*K;
+      // entry sub-state: from the end of the previous event (or the intro), or skipping one event
+      {const from=base-1;let best=D[from]+pAdv-b,ch=1;const sk=base-1-K;if(sk>=0){const v=D[sk]+pAdv+pSkip-b;if(v<best){best=v;ch=2;}}
+        if(K===1){const v=D[base]+stayPen;if(v<best){best=v;ch=0;}}Dn[base]=best+evCost[i];bp[f*S+base]=ch;}
+      for(let j=1;j<K;j++){const st=base+j;let best=D[st-1],ch=1;if(j===K-1){const v=D[st]+stayPen;if(v<best){best=v;ch=0;}}Dn[st]=best+evCost[i];bp[f*S+st]=ch;}}
+    {let best=D[POST],ch=0;const v=D[POST-1];if(v<best){best=v;ch=1;}Dn[POST]=best+cPre;bp[f*S+POST]=ch;}
+    const tmp=D;D=Dn;Dn=tmp;}
+  // the recording may end anywhere in the sheet: end in the intro, the outro or after an event's minimum length
+  let end=0;for(let st=1;st<S;st++){const ok=st===POST||(st-1)%K===K-1;if(ok&&D[st]<D[end])end=st;}
+  const starts=new Int32Array(m).fill(-1),path=new Int32Array(n);let st=end;
+  for(let f=n-1;f>0;f--){path[f]=st===0?0:st===POST?m+1:1+Math.floor((st-1)/K);const ch=bp[f*S+st];
+    if(ch){const prev=ch===1?st-1:st-1-K;if(st!==POST&&(st-1)%K===0)starts[(st-1)/K]=f;st=prev;}}
+  path[0]=st===0?0:1+Math.floor((st-1)/K);if(st>=1&&st!==POST&&(st-1)%K===0&&starts[(st-1)/K]<0)starts[(st-1)/K]=0;
+  return {cost:D[end],starts,end,path,pk};}
+function alignSheet(sheet,g22){const F=chromaFrames(g22),A=attackCurve(g22);const ev=sheet.events;
+  // which transpositions fit the recording's overall note names best
+  const hs=new Float64Array(12),ha=new Float64Array(12);for(const e of ev)for(const p of e.pcs)hs[p]+=sheet.kind==='chords'?(e.d||1):1;
+  for(let f=0;f<F.n;f++)for(let p=0;p<12;p++)ha[p]+=F.C[f*12+p];
+  const cand=[];for(let sh=0;sh<12;sh++){let c=0;for(let p=0;p<12;p++)c+=hs[p]*ha[(p+sh)%12];cand.push([c,sh]);}cand.sort((a,b)=>b[0]-a[0]);
+  const tries=[...new Set([sheet.capo%12,...cand.slice(0,3).map(x=>x[1])])].slice(0,4);
+  let best=null;for(const sh of tries){const r=alignPath(F,A,ev,sheet.kind,sh);log('sheet: tried '+(sh?'+'+sh+' semitones':'as written')+' → fit '+(1-r.cost/F.n).toFixed(3));if(!best||r.cost<best.cost)best={...r,shift:sh};}
+  // event times, snapped to the nearest pick
+  const peakNear=(t,w,lo)=>{const i0=Math.max(0,Math.floor((Math.max(t-w,lo)-A.t0)/A.dt)),i1=Math.min(A.fl.length-1,Math.ceil((t+w-A.t0)/A.dt));let bi=-1,bv=0;
+    for(let i=i0;i<=i1;i++){const r=A.fl[i]/(A.med[i]+1);if(r<2)continue;const v=r*(1-0.5*Math.abs(A.t0+i*A.dt-t)/w);if(v>bv){bv=v;bi=i;}}return bi<0?t:A.t0+bi*A.dt;};
+  const out=[];let lastT=-1;for(let i=0;i<ev.length;i++){const f=best.starts[i];if(f<0)continue;let t=peakNear(F.t0+f*F.dt-0.02,0.12,lastT+0.06);if(t<=lastT+0.03)t=lastT+0.03;lastT=t;out.push({e:ev[i],t});}
+  const skipped=ev.length-out.length;
+  log('sheet: '+sheet.kind+', '+ev.length+' '+(sheet.kind==='tab'?'notes/chords':'chords')+'; '+out.length+' lined up'+(skipped?', '+skipped+' not in this part of the recording':'')+(best.shift?' · sounds '+best.shift+' semitones higher than written'+(sheet.capo===best.shift?' (capo '+sheet.capo+')':''):''));
+  return {placed:out,shift:best.shift,A};}
+// events at real times → events on the beat grid (32nds under 90 BPM, else 16ths); chords hold until the next change
+function placeEvents(placed,bpm,b0){const spb=60/bpm,G=bpm<90?8:4;const evs=[];let prev=-1;
+  for(const p of placed){let q=Math.round((p.t-b0)/spb*G)/G;if(q<0)continue;if(q<=prev)q=prev+1/G;prev=q;evs.push({...p.e,t:q});}
+  for(let i=0;i<evs.length;i++){const gap=i+1<evs.length?evs[i+1].t-evs[i].t:(evs[i].chord||evs[i].strum?4:1);evs[i].d=evs[i].chord||evs[i].strum?Math.max(1/G,gap):Math.max(1/G,Math.min(gap,2));}
+  return evs;}
+function strumsFromRecording(placed,A,core){const out=[];
+  for(let i=0;i<placed.length;i++){const a=placed[i],z=i+1<placed.length?placed[i+1].t:Infinity;const name=a.e.chord;if(!name){out.push(a);continue;}
+    let last=-1;out.push({e:core.strumEvent(name,0,1,'D'),t:a.t});last=a.t;
+    for(let j=0;j<A.fl.length;j++){const t=A.t0+j*A.dt;if(t<=a.t+0.09||t>=z-0.06)continue;const r=A.fl[j]/(A.med[j]+1);
+      if(r>=2.5&&A.fl[j]>=(A.fl[j-1]||0)&&A.fl[j]>=(A.fl[j+1]||0)&&t-last>=0.09){out.push({e:core.strumEvent(name,0,1,'D'),t});last=t;}}}
+  return out;}
+function strumDirs(evs){for(const e of evs)if(e.strum)e.strum=Math.round(e.t*2)%2?'U':'D';return evs;} /* down on the beat, up between (nearest 8th) */
+async function makeSheetSong(sheet,gL,gR,L,Rc,rL,rR,N){
+  status('Lining the sheet up with the recording…');const g22=await toRate([gL,gR],22050),m22=await toRate([L,Rc],22050);const core=await loadCore();
+  const t0=performance.now();const al=alignSheet(sheet,g22);log('sheet: lined up in '+((performance.now()-t0)/1000).toFixed(1)+' s');
+  let placed=al.placed;if(!placed.length)throw new Error('the sheet could not be lined up with this recording');
+  if(sheet.kind==='chords'&&$('strumMode').value==='strums'){placed=strumsFromRecording(placed,al.A,core);log('sheet: '+placed.length+' strums taken from the recording');}
+  const bt=findBeats(m22);let b0=bt.first;const spb=60/bt.bpm,first=placed[0].t;while(b0+4*spb<=first-0.05)b0+=4*spb;while(b0>first+0.05)b0-=spb;
+  log('tempo: '+bt.bpm+' BPM, bar 1 at '+b0.toFixed(2)+' s');
+  /* the recording sounds `shift` semitones above the sheet: up to 7 is read as a capo (shapes as written); more
+     than that, chord names are rewritten in the recording's key (with the capo that gives the easiest shapes) */
+  let capo=al.shift>=1&&al.shift<=7?al.shift:0;
+  if(al.shift&&!capo){if(sheet.kind==='chords'){const semi=al.shift-12;const names=[...new Set(placed.map(p=>p.e.chord||p.e.label).filter(Boolean))].map(n=>core.transposeName(n,semi));capo=core.bestCapo(names);
+      placed=placed.map(p=>{const nm=core.transposeName(p.e.chord||p.e.label,semi-capo);const e=p.e.strum?core.strumEvent(nm,0,1,'D'):core.chordEvent(nm,0,4);return {...p,e};});
+      log('sheet: the recording is '+(12-al.shift)+' semitones lower than the sheet; chords rewritten in the recording\'s key'+(capo?' (capo '+capo+')':''));}
+    else log('sheet: the recording is in a different key from the tab; notes are shown as written');}
+  const events=strumDirs(placeEvents(placed,bt.bpm,b0));
+  await saveRecSong({events,recEvT:placed.map(p=>Math.round(p.t*1000)/1000),bpm:bt.bpm,recOffset:b0,capo,credit:'Made from a recording and a '+(sheet.kind==='tab'?'tab':'chord sheet')+' in Fretline Lab'},gL,gR,rL,rR,null);}
+async function saveRecSong(extra,gL,gR,rL,rR,notes){
+  const id='m-rec-'+Date.now(),key=location.origin+'/__fretline/rec/'+id+'.wav';
+  status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
+  const gkey=location.origin+'/__fretline/rec/'+id+'-gtr.wav';await c.put(gkey,new Response(wav(gL,gR),{headers:{'content-type':'audio/wav'}}));
+  const title=($('ttl').value||'Recording').trim()+(+$('secs').value?' (first '+$('secs').value+' s)':'');
+  const def={id,cat:'mine',kind:'rec',title,bpb:4,recAudio:key,recGuitar:gkey,credit:'Made from a recording in Fretline Lab',...extra};
+  const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');songs.unshift(def);localStorage.setItem('fretline:songs',JSON.stringify(songs));
+  const cnt=def.events?def.events.length:def.recNotes.length,last=def.events?Math.max(...def.events.map(e=>e.t)):Math.max(...def.recNotes.map(n=>n.beat));
+  log('song: "'+title+'" saved to My songs ('+cnt+(def.events?' steps':' notes')+', '+Math.ceil(last/4)+' bars'+(def.capo?', capo '+def.capo:'')+')');
+  $('songMsg').textContent='"'+title+'" is in My songs.';$('songOut').style.display='';window.__labSong=def;LAST={def,notes};tempoButtons();}
 async function makeSong(gL,gR,L,Rc,rL,rR,N){
   status('Finding the notes…');const g22=await toRate([gL,gR],22050),m22=await toRate([L,Rc],22050);
   let notes=await transcribe(g22);if(!notes.length)throw new Error('no guitar notes were found');
@@ -215,14 +344,7 @@ async function makeSong(gL,gR,L,Rc,rL,rR,N){
   {let cx=0,sx=0;for(const n of notes){const ph=2*Math.PI*((n.t-b0)/bt.spb)*2;cx+=Math.cos(ph)*n.a;sx+=Math.sin(ph)*n.a;}
    const lag=Math.atan2(sx,cx)/(2*Math.PI)/2*bt.spb;if(Math.abs(lag)<0.2*bt.spb){b0+=lag;log('timing: notes shifted '+Math.round(-lag*1000)+' ms to the beat');}}
   const q=quantise(notes,bt.bpm,b0);const recNotes=q.recNotes;b0=q.b0;
-  const id='m-rec-'+Date.now(),key=location.origin+'/__fretline/rec/'+id+'.wav';
-  status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
-  const gkey=location.origin+'/__fretline/rec/'+id+'-gtr.wav';await c.put(gkey,new Response(wav(gL,gR),{headers:{'content-type':'audio/wav'}})); /* v1.80: the real guitar is the guide */
-  const title=($('ttl').value||'Recording').trim()+(+$('secs').value?' (first '+$('secs').value+' s)':'');
-  const def={id,cat:'mine',kind:'rec',title,bpm:bt.bpm,bpb:4,recNotes,recRaw:notes.map(n=>({midi:n.midi,t:Math.round(n.t*1000)/1000,d:Math.round(n.d*1000)/1000,a:Math.round(n.a*100)/100})),recAudio:key,recGuitar:gkey,recOffset:b0,credit:'Made from a recording in Fretline Lab'};
-  const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');songs.unshift(def);localStorage.setItem('fretline:songs',JSON.stringify(songs));
-  log('song: "'+title+'" saved to My songs ('+recNotes.length+' notes, '+Math.ceil((recNotes.length?Math.max(...recNotes.map(n=>n.beat)):0)/4)+' bars)');
-  $('songMsg').textContent='"'+title+'" is in My songs.';$('songOut').style.display='';window.__labSong=def;LAST={def,notes};tempoButtons();}
+  await saveRecSong({recNotes,recRaw:notes.map(n=>({midi:n.midi,t:Math.round(n.t*1000)/1000,d:Math.round(n.d*1000)/1000,a:Math.round(n.a*100)/100})),bpm:bt.bpm,recOffset:b0},gL,gR,rL,rR,notes);}
 $('go').onclick=async()=>{
   $('go').disabled=true;R.length=0;prog(0);$('out').style.display='none';
   const t0=performance.now();
@@ -231,6 +353,10 @@ $('go').onclick=async()=>{
     log('device: '+navigator.userAgent.replace(/\s+/g,' ').slice(0,160));
     log('cores '+(navigator.hardwareConcurrency||'?')+' · memory '+(navigator.deviceMemory?navigator.deviceMemory+' GB':'?')+' · WebGPU '+(('gpu' in navigator)?'present':'absent')+' · threads '+(self.crossOriginIsolated?'yes (cross-origin isolated)':'no (single thread)'));
     log('service worker: '+(navigator.serviceWorker&&navigator.serviceWorker.controller?'in charge':'not in charge')+' · reload done '+(sessionStorage.getItem('labReload')?'yes':'no'));
+    let sheet=null;const sheetText=$('sheet').value.trim();
+    if(sheetText&&$('mk').checked){status('Reading the sheet…');const core=await loadCore();sheet=readSheet(core,sheetText,$('sheetType').value);
+      if(!sheet.events.length)throw new Error(sheet.kind==='tab'?'no tab found in the sheet (tab lines look like e|--0--3--|, six lines per block)':'no chords found in the sheet');
+      log('sheet: '+(sheet.kind==='tab'?'tab':'chord sheet')+' with '+sheet.events.length+' steps'+(sheet.capo?' · capo '+sheet.capo:''));}
     let native=null;
     if($('be').value==='native'&&NS){try{
       const st=await NS.status({});log('native: '+st.cores+' cores · model on the phone '+(st.modelBytes/1e6).toFixed(0)+' MB');
@@ -301,7 +427,7 @@ $('go').onclick=async()=>{
     window.__labBufs={gL,gR,rL,rR,L,Rc};
     const bg=wav(gL,gR),br=wav(rL,rR);$('aGtr').src=URL.createObjectURL(bg);$('dGtr').href=$('aGtr').src;$('aRest').src=URL.createObjectURL(br);$('dRest').href=$('aRest').src;
     $('out').style.display='';
-    if($('mk').checked){try{await makeSong(gL,gR,L,Rc,rL,rR,N);}catch(e){log('song: could not make one ('+(e.message||e)+')');}}
+    if($('mk').checked){try{if(sheet)await makeSheetSong(sheet,gL,gR,L,Rc,rL,rR,N);else await makeSong(gL,gR,L,Rc,rL,rR,N);}catch(e){log('song: could not make one ('+(e.message||e)+')');}}
     prog(1);status('Done. Listen below, then tap the report to copy it.');window.__labDone={used,tot,N,parts:nCh};
   }catch(e){log('ERROR: '+(e&&e.message||e));if(CON.length)log('runtime messages:\n  '+CON.join('\n  '));if(/Could not find an implementation/.test(String(e&&e.message||e))&&$('mdl').value==='fp16')log('tip: the half-size model needs "Fully optimised" loading (which may run out of memory); use the Full model with Lean loading');log('(after an error like this, reload the page before trying another setting)');status('Something went wrong: '+(e&&e.message||e));window.__labDone={error:String(e&&e.message||e)};}
   $('go').disabled=false;};

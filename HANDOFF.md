@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.82, Android app rebuilt for v1.80 (native separator + save to Downloads))
+# Fretline: session handoff (18 Nov 2026, web v1.83, Android app rebuilt for v1.80 (native separator + save to Downloads))
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,36 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.83: Lab: line a tab or chord sheet up with the recording
+
+Owner: keep the Lab as it is, plus an option to attach a chord sheet or tab when splitting, aligned to the audio.
+- **UI**: "Use a tab or chord sheet for the notes (optional)" (`#sheetBox`): paste or load a text file, type
+  (detect/tab/chords), chords shown as "one strum per chord change" or "follow the recording's strums". With a sheet,
+  the song comes from the sheet (Basic Pitch is skipped); without one, nothing changed.
+- **Reading**: Fretline's own `parseTab` / `parseChordSheet` from `<script id="core">` of index.html, fetched and run
+  in its own scope (`loadCore`), so the Lab reads sheets exactly like the import screen. Capo from the text.
+- **Alignment** (`alignSheet` → `alignPath`): guitar-stem chroma (`chromaFrames`: 4096 FFT / 512 hop at 22.05 kHz;
+  one value per semitone = strongest bin, so high harmonics don't outweigh fundamentals — first version read low E as
+  B; notes ≥ E4 ×0.6, ≥ E5 ×0.35). Templates: the event's note names (single notes + 0.35 fifth + 0.15 third
+  overtones; tabs + 0.3/0.12 of the two notes before, still ringing). Left-to-right path over [intro, events, outro];
+  each event ≥ 3 frames (sub-states); cost 1 − cosine; silence costs events +0.15 (belongs to intro/outro).
+  Picks: attack curve peaks, strongest within ±90 ms, credited to the frame at pick + 20 ms (chroma turns within
+  0-35 ms). Tabs: moving on costs 0.6 − 1.0·pick, holding through a pick +1.2·pick (each tab step is a pick);
+  chords: 0.3 − 0.5·pick, no hold penalty; skipping an event +6. Tried at the sheet's capo and the 3 best
+  transpositions (overall note-name balance); cheapest wins. Starts snapped to the nearest pick (±0.12 s, never the
+  same pick twice). Shift 1-7 → capo; more → chord names rewritten in the recording's key with `bestCapo`; tabs as
+  written. Then `findBeats` tempo, bar 1 at the first step, steps on the grid (`placeEvents`, 32nds < 90 BPM),
+  chords held to the next change; strum mode adds a strum on every strong pick (≥ 2.5×) inside each chord, direction
+  by nearest 8th (down on the beat). Saved as `{kind:'rec', events, recEvT (s per step), …}`; `buildSong` uses
+  `def.events`. ♩ tempo (`recRetime` → `recPlace`) and the Lab buttons (`retimeEvents`) re-place from `recEvT`.
+- Tests (`tools/lab-tests/`): `sheet_tab.py` (riff with deliberately uneven tab spacing: 64/64 on the right beat
+  clean, 63/64 with the file's clicks; half tempo moves nothing; main app opens it, real guitar in Listen, ♩ 2×
+  moves nothing). `sheet_chords.py` (synthetic strummed G C D Em G C with uneven lengths after 2 s silence; sheet
+  without lengths: changes within 0-72 ms; strum mode 66 strums for 64, directions right; `SHEET=` env: a sheet 2
+  semitones high is rewritten to G C D Em; "Capo 2" F Bb C Dm keeps capo 2). e2e/native unchanged.
+- Limits: the sheet must follow the recording (repeats written out or "x2" on chord lines); whole sections the
+  recording skips cost 6 per skipped step, so long mismatches may misalign; lyrics from sheets are dropped.
 
 ## v1.82: set a recording song's tempo by hand
 
