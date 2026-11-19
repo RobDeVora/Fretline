@@ -4147,6 +4147,22 @@ const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capa
 function sfPlug(){try{const C=window.Capacitor;if(!IS_APP||!C||!C.Plugins||!C.Plugins.SongFiles)return null;if(C.isPluginAvailable&&!C.isPluginAvailable('SongFiles'))return null;return C.Plugins.SongFiles;}catch(e){return null;}}
 function sfSeg(t){let s=String(t||'').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').trim().replace(/^\.+/,'');if(s.length>80)s=s.slice(0,80).trim();return s||'Song';}
 function sfHash(str){let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return str.length+':'+(h>>>0);}
+/* a song's steps as a standard MIDI file (chords and notes play together; chord names are markers), so the folder has files any music app opens */
+function sfMidi(ev,bpm,bpb,title){
+  const PPQ=480,M=[],vlq=n=>{const b=[n&127];while(n>>=7)b.unshift((n&127)|128);return b;},txt=(t,s)=>{const u=new TextEncoder().encode(String(s).slice(0,100));return [0xFF,t,...vlq(u.length),...u];};
+  const us=Math.round(60e6/Math.max(20,Math.min(400,bpm||90)));
+  M.push({k:0,o:0,b:[0xFF,0x51,3,(us>>16)&255,(us>>8)&255,us&255]});M.push({k:0,o:0,b:[0xFF,0x58,4,bpb||4,2,24,8]});M.push({k:0,o:0,b:txt(3,title)});
+  for(const e of ev){const k=Math.max(0,Math.round(e.t*PPQ));if(typeof e.chord==='string')M.push({k,o:1,b:txt(6,e.chord)});
+    const dur=Math.max(1,Math.round(Math.min(e.d||0.5,16)*PPQ)-2);
+    for(const n of e.notes||[]){const m=Math.max(0,Math.min(127,Math.round(n.midi)));if(!(m>=0))continue;M.push({k,o:2,b:[0x90,m,e.strum?78:90]});M.push({k:k+dur,o:0,b:[0x80,m,0]});}}
+  M.sort((a,b)=>a.k-b.k||a.o-b.o);let last=0;const t=[];for(const m of M){t.push(...vlq(m.k-last),...m.b);last=m.k;}t.push(0,0xFF,0x2F,0);
+  const u=new Uint8Array(14+8+t.length);u.set([77,84,104,100,0,0,0,6,0,0,0,1,PPQ>>8,PPQ&255,77,84,114,107,(t.length>>>24)&255,(t.length>>16)&255,(t.length>>8)&255,t.length&255]);u.set(t,22);return u;}
+function sfB64(u){let r='';for(let i=0;i<u.length;i+=0x8000)r+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(r);}
+function sfMidis(s){ /* [{name, b64}]: the song, and each of its versions when it has them */
+  const out=[],bpm=s.bpm||90,bpb=s.bpb||4,base=sfSeg(s.title);
+  if(s.parts&&s.parts.length>1)s.parts.forEach(p=>{if(p.events&&p.events.length)out.push({name:base+' - '+sfSeg(p.label||'version')+'.mid',b64:sfB64(sfMidi(p.events,bpm,bpb,s.title+' - '+(p.label||'')))});});
+  else if(s.events&&s.events.length)out.push({name:base+'.mid',b64:sfB64(sfMidi(s.events,bpm,bpb,s.title))});
+  return out;}
 let sfWhere='',sfTimer=0,sfBusy=false,sfAgain=false,sfLast='';
 function sfSoon(ms){if(!sfPlug())return;clearTimeout(sfTimer);sfTimer=setTimeout(sfRun,ms==null?1500:ms);}
 async function sfRun(force){
@@ -4158,9 +4174,10 @@ async function sfRun(force){
       let rec=st[s.id];
       if(!rec||!rec.dir){let dir=s.dir?sfSeg(s.dir):sfSeg(s.title),n=2;const base=dir;while(taken.has(dir)){dir=base+' ('+n+')';n++;}taken.add(dir);rec=st[s.id]={dir,hash:''};}
       else if(s.dir&&sfSeg(s.dir)!==rec.dir&&!taken.has(sfSeg(s.dir))){taken.add(sfSeg(s.dir));rec.dir=sfSeg(s.dir);rec.hash='';}
-      const o={...s};delete o._built;const txt=JSON.stringify(o),h=sfHash(txt);
+      const o={...s};delete o._built;const txt=JSON.stringify(o),h=sfHash(txt)+'|m1';
       if(rec.hash===h&&!force)continue;
-      try{const w=await P.write({dir:rec.dir,name:sfSeg(s.title)+'.fretline.json',text:txt,mime:'application/json'});rec.hash=h;wrote++;if(w&&w.path)sfWhere=w.path;}catch(e){bad++;sfLast=String(e&&e.message||e);}
+      try{const w=await P.write({dir:rec.dir,name:sfSeg(s.title)+'.fretline.json',text:txt,mime:'application/json'});rec.hash=h;wrote++;if(w&&w.path)sfWhere=w.path;
+        try{for(const f of sfMidis(s)){try{await P.write({dir:rec.dir,name:f.name,data:f.b64,mime:'audio/midi'});}catch(e1){await P.write({dir:rec.dir,name:f.name,data:f.b64,mime:'application/octet-stream'});}}}catch(e2){sfLast='MIDI: '+String(e2&&e2.message||e2);}}catch(e){bad++;sfLast=String(e&&e.message||e);}
     }
     for(const id of Object.keys(st)){if(live.has(id))continue;
       try{await P.removeDir({dir:st[id].dir});delete st[id];gone++;}catch(e){bad++;sfLast=String(e&&e.message||e);}}
@@ -4186,7 +4203,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.96';
+const APP_VERSION='1.97';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
