@@ -13,7 +13,7 @@ for bar in range(2):
 tab='\n'.join(names[k]+'|'+''.join(rows[k]) for k in range(5,-1,-1))
 with sync_playwright() as p:
   b=p.chromium.launch(executable_path='/usr/bin/google-chrome');ctx=b.new_context(viewport={'width':412,'height':900},service_workers='block')
-  for first,win in ((('tab','tab'),) if os.environ.get('FROMTO') else (('tab','tab'),('chords','tab'),('tab','chords'))):
+  for first,win in ((('tab',os.environ.get('WIN','tab')),) if os.environ.get('FROMTO') else (('tab','auto'),('tab','tab'),('chords','tab'),('tab','chords'))):
     pg=ctx.new_page();errs=[];pg.on('pageerror',lambda e:errs.append(str(e)))
     pg.goto('http://localhost:8769/lab/stems.html?ortbase=http://localhost:8771/&modelurl=http://localhost:8771/dummy.onnx');pg.wait_for_timeout(800)
     pg.set_input_files('#file','/tmp/solotest/solo90.wav');pg.select_option('#secs','0');pg.select_option('#be','wasm');pg.fill('#ttl','Merge '+first+' '+win)

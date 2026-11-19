@@ -54,9 +54,14 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
     <div style="margin-top:12px;font-weight:600">And the other one, for a song with a solo (optional)</div>
     <div class="small">Put the tab (the solo) above and the chord sheet here, or the other way round. Both are lined up with the recording: you play the chords as strums and the tab's notes where it has them.</div>
     <textarea id="sheet2" rows="4" placeholder="G  C  D  Em  (or the tab)" style="width:100%;font:13px ui-monospace,monospace;padding:8px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text);margin-top:6px"></textarea>
+    <input type="file" id="sheet2File" accept=".txt,.text,.tab,.pro,.cho,.chopro,.chordpro,.crd,.mid,.midi,.kar,.xml,.musicxml,.mxl,.gp,.gp3,.gp4,.gp5,.gpx,.gp6,.gp7,.pdf,text/plain,audio/midi">
+    <div id="sheet2FileBox" style="display:none"><div class="small" id="sheet2FileName" style="margin-top:6px"></div>
+      <div><label for="sheet2Part">Track</label><select id="sheet2Part"></select></div>
+      <button type="button" id="sheet2FileClear" style="margin-top:8px;background:transparent;color:var(--muted);border:1px solid var(--line)">Remove the file</button></div>
+    <div class="small">A file here is used as whatever the first one isn't: chords if the first is a tab, notes if it's a chord sheet. Files (MIDI, Guitar Pro, MusicXML) line up by their own timing, which is the most exact.</div>
     <div class="small">Where is the tab in the song? Leave these empty to let the Lab find it, or type when it plays (like 1:05 and 1:30).</div>
     <div class="row"><div><label for="tabFrom">Tab starts</label><input type="text" id="tabFrom" placeholder="0:00" inputmode="decimal" style="width:100%;font-size:15px;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text)"></div><div><label for="tabTo">Tab ends</label><input type="text" id="tabTo" placeholder="0:00" inputmode="decimal" style="width:100%;font-size:15px;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text)"></div></div>
-    <div class="row"><div><label for="mergeWin">Where both play at once</label><select id="mergeWin"><option value="tab">The tab's notes win</option><option value="chords">The chords win (the tab only where there are no chords)</option></select></div></div>
+    <div class="row"><div><label for="mergeWin">Where both play at once</label><select id="mergeWin"><option value="auto">Auto: strum the chords, the tab where it plays a lead line</option><option value="tab">The tab's notes win</option><option value="chords">The chords win (the tab only where there are no chords)</option></select></div></div>
   </details>
   <button id="go" disabled>Split it</button>
   <div class="bar"><div id="prog"></div></div>
@@ -115,6 +120,26 @@ function setSheetFile(sf){SHEETFILE=sf;$('sheetFileBox').style.display=sf?'':'no
   $('sheetPart').innerHTML=parts.map((p,i)=>'<option value="'+i+'">'+p.label.replace(/[<&]/g,'')+' ('+p.count+' '+(p.chords?'chords':'notes')+')</option>').join('');$('sheetPart').value=pick;$('sheetPart').onchange();}
 $('sheetPart').onchange=()=>{const p=SHEETFILE&&SHEETFILE.info.parts[+$('sheetPart').value];$('sheetAsBox').style.display=p&&!p.chords?'':'none';};
 $('sheetFileClear').onclick=()=>{setSheetFile(null);status('File removed.');};
+let SHEETFILE2=null;
+async function readSheetFileInfo(f,core,toText){const buf=new Uint8Array(await f.arrayBuffer());let ext=/\.[a-z0-9]{1,8}$/i.test(f.name)?f.name.split('.').pop().toLowerCase():'';ext=core.sniffExt(buf,ext);
+  if(ext==='mid'||ext==='midi'||ext==='kar')return {info:core.parseMidi(buf),fmt:'MIDI'};
+  if(ext==='mxl')return {info:core.parseMusicXML(await core.readMxl(buf)),fmt:'MusicXML'};
+  if(ext==='musicxml'||ext==='xml')return {info:core.parseMusicXML(new TextDecoder().decode(buf)),fmt:'MusicXML'};
+  if(/^(gp|gp3|gp4|gp5|gpx|gp6|gp7)$/.test(ext)){status('Loading the Guitar Pro reader…');return {info:await core.readGuitarPro(buf),fmt:'Guitar Pro'};}
+  if(ext==='pdf'){status('Loading the PDF reader…');toText(await core.readPdfText(buf));return null;}
+  toText(new TextDecoder().decode(buf));return null;}
+function setSheetFile2(sf){SHEETFILE2=sf;$('sheet2FileBox').style.display=sf?'':'none';$('sheet2').style.display=sf?'none':'';if(!sf){$('sheet2File').value='';return;}
+  $('sheet2FileName').textContent=sf.name+' · '+sf.fmt+' · '+sf.info.bpm+' BPM in the file';const parts=sf.info.parts;
+  /* the track with the most notes struck together (the chords), else a guitar */
+  const poly=p=>{if(p.chords)return 1e9;const by={};for(const n of p.notes||[]){const k=Math.round(n.beat*8);by[k]=(by[k]||0)+1;}return Object.values(by).filter(v=>v>=3).length;};
+  let pick=0,bv=-1;parts.forEach((p,i)=>{const v=poly(p)+(p.isGuitar?0.5:0);if(v>bv){bv=v;pick=i;}});
+  $('sheet2Part').innerHTML=parts.map((p,i)=>'<option value="'+i+'">'+p.label.replace(/[<&]/g,'')+' ('+p.count+' '+(p.chords?'chords':'notes')+')</option>').join('');$('sheet2Part').value=pick;}
+$('sheet2FileClear').onclick=()=>{setSheetFile2(null);status('File removed.');};
+$('sheet2File').onchange=async()=>{const f=$('sheet2File').files[0];if(!f)return;if(f.size>20e6){status('That file is too big for a tab or chord sheet.');return;}
+  try{status('Reading '+f.name+'…');const core=await loadCore();const r=await readSheetFileInfo(f,core,t=>{setSheetFile2(null);$('sheet2').value=t;});
+    if(r){if(!r.info.parts||!r.info.parts.length)throw new Error('no playable tracks in this file');setSheetFile2({...r,name:f.name});}
+    $('mk').checked=true;status(r?'Loaded '+f.name+' as the second sheet.':'Second sheet loaded ('+f.name+').');
+  }catch(e){setSheetFile2(null);status('Could not read that file: '+(e.message||e));}};
 $('sheetFile').onchange=async()=>{const f=$('sheetFile').files[0];if(!f)return;if(f.size>20e6){status('That file is too big for a tab or chord sheet.');return;}
   try{status('Reading '+f.name+'…');const core=await loadCore();const buf=new Uint8Array(await f.arrayBuffer());let ext=/\.[a-z0-9]{1,8}$/i.test(f.name)?f.name.split('.').pop().toLowerCase():'';ext=core.sniffExt(buf,ext);
     let info=null,fmt='';
@@ -262,7 +287,7 @@ let CORE=null;
 async function loadCore(){if(CORE)return CORE;const t=await (await fetch('../index.html',{cache:'no-cache'})).text();const m=t.match(/<script id="core">([\s\S]*?)<\/script>/);if(!m)throw new Error("could not load Fretline's tab reader");
   const a=t.indexOf('function loadScript(srcs)'),z=t.indexOf('const TAB_SITES'),sn=t.indexOf('function sniffExt(buf,ext)'),snEnd=t.indexOf('\n}\n',sn);
   const readers=a>0&&z>a&&sn>0&&snEnd>sn?t.slice(a,z)+'\n'+t.slice(sn,snEnd+3):'';
-  CORE=new Function(m[1]+'\n'+readers+';return {parseTab,parseChordSheet,chordEvent,strumEvent,transposeName,bestCapo,parseMidi,parseMusicXML,eventsFromNotes,chordEventsFromSymbols,chordChart,chordProMeta,setTuning,tuningById,TUNINGS,'+
+  CORE=new Function(m[1]+'\n'+readers+';return {tuningShift,parseTab,parseChordSheet,chordEvent,strumEvent,transposeName,bestCapo,parseMidi,parseMusicXML,eventsFromNotes,chordEventsFromSymbols,chordChart,chordProMeta,setTuning,tuningById,TUNINGS,'+
     (readers?'readMxl,readGuitarPro,readPdfText,sniffExt':'readMxl:null,readGuitarPro:null,readPdfText:null,sniffExt:(b,e)=>e')+'};')();
   if(CORE.setTuning)CORE.setTuning(userTuning());return CORE;}
 /* v1.87: the guitar's tuning (Fretline › Tuner). A sheet in another tuning is read in its own tuning (MIDI per-string
@@ -277,17 +302,29 @@ function tuningFromText(t){const x=t.slice(0,3000).toLowerCase();const has=r=>r.
   if(has(/whole.?step\s*down|d\s*standard|tuning\s*:?\s*d\s*g\s*c\s*f/))return 'dstd';if(has(/c\s*standard/))return 'cstd';return null;}
 function capoFromText(t){const m=/\bcapo\b\s*(?:on|at)?\s*:?\s*(?:fret)?\s*(\d{1,2})/i.exec(t)||/(\d{1,2})(?:st|nd|rd|th)\s+fret\s+capo/i.exec(t);const n=m?parseInt(m[1],10):0;return n>0&&n<=12?n:0;}
 let SHEETFILE=null; /* {info:{bpm,bpb,parts},fmt,name} for MIDI / MusicXML / Guitar Pro */
-function fileSheet(core){const info=SHEETFILE.info,part=info.parts[+$('sheetPart').value]||info.parts[0],bpb=info.bpb||4;let kind='tab',events,capo=0;
-  const tun=part.tuning||userTuning();core.setTuning(tun);
+function fileSheet(core,sf,partIdx,asChords,tunIn){sf=sf||SHEETFILE;const info=sf.info,part=info.parts[partIdx!=null?partIdx:+$('sheetPart').value]||info.parts[0],bpb=info.bpb||4;let kind='tab',events,capo=0;
+  const tun=part.tuning||tunIn||userTuning();core.setTuning(tun);if(asChords==null)asChords=$('sheetAs').value==='chords';
   if(part.chords){kind='chords';events=core.chordEventsFromSymbols(part.chords,bpb,0);}
-  else if($('sheetAs').value==='chords'){const cc=core.chordChart(core.eventsFromNotes(part.notes,{bpb,shift:0}),bpb,info.bpm);kind='chords';events=cc.events;capo=cc.capo||0;}
+  else if(asChords){/* v1.91: in another tuning (E♭), name the chords by the shapes you play: the notes as heard, moved
+       by the tuning's difference (F# heard in E♭ tuning = a G shape) */const k=core.tuningShift&&core.tuningShift()||0;
+    const cc=core.chordChart(core.eventsFromNotes(part.notes.map(n=>({...n,midi:n.midi-k})),{bpb,shift:0}),bpb,info.bpm);kind='chords';events=cc.events;capo=cc.capo||0;}
   else events=core.eventsFromNotes(part.notes,{bpb,shift:0});
   events=[...events].filter(e=>e.pcs&&e.pcs.length).map(e=>{const o={...e};delete o.label;return o;});
   // a short clip only needs the start of the file (its own tempo says roughly how much)
   const secs=+$('secs').value;if(secs&&info.bpm){const lim=secs*info.bpm/60*1.6+4*bpb,t0=events.length?events[0].t:0;events=events.filter(e=>e.t-t0<=lim);}
   core.setTuning(userTuning());
-  return {kind,events,capo,bpm:info.bpm,bpb,fromFile:SHEETFILE.fmt+' · '+part.label,tuning:part.tuning||null,builtTuning:tun};}
-function readSheet(core,text,type){if(SHEETFILE)return fileSheet(core);let kind=type,events=[];const tt=tuningFromText(text),tun=tt||userTuning();core.setTuning(tun);
+  return {kind,events,capo,bpm:info.bpm,bpb,fromFile:sf.fmt+' · '+part.label,tuning:part.tuning||null,builtTuning:tun};}
+/* v1.90-91: the second box (the other kind of sheet). A file there is read as the other kind; chords are built for
+   the tab's tuning (and a chord sheet in the first box is read again for it: a chords file next to an E♭ tab) */
+function readSecond(core,sheet,sheetText){let s2=null;
+  if(SHEETFILE2){s2=fileSheet(core,SHEETFILE2,+$('sheet2Part').value,sheet.kind==='tab',sheet.kind==='tab'?sheet.builtTuning:null);core.setTuning(userTuning());}
+  else{const sf=SHEETFILE;SHEETFILE=null;try{s2=readSheet(core,$('sheet2').value.trim(),'auto');}finally{SHEETFILE=sf;}}
+  if(!s2.events.length){log('sheet 2: nothing found in the second box, ignored');return sheet;}
+  if(s2.kind===sheet.kind){log('sheet 2: it is a '+(s2.kind==='tab'?'tab':'chord sheet')+' like the first one; ignored (use one tab and one chord sheet)');return sheet;}
+  if(sheet.kind==='chords'&&s2.builtTuning&&s2.builtTuning!==sheet.builtTuning){const t=s2.builtTuning;
+    sheet=SHEETFILE?fileSheet(core,SHEETFILE,null,true,t):readSheet(core,sheetText,'chords',t);core.setTuning(userTuning());log('sheet: chords read again for the tab\'s tuning ('+core.tuningById(t).name.split(' (')[0]+')');}
+  sheet.also=s2;log('sheet 2: '+(s2.fromFile?s2.fromFile+' as ':'')+(s2.kind==='tab'?'tab':'chord sheet')+' with '+s2.events.length+' steps'+(s2.capo?' · capo '+s2.capo:'')+' · '+(sheet.kind==='tab'?'chords':'tab')+' above');return sheet;}
+function readSheet(core,text,type,tunIn){if(SHEETFILE)return fileSheet(core,null,null,null,tunIn);let kind=type,events=[];const tt=tuningFromText(text),tun=tt||tunIn||userTuning();core.setTuning(tun);
   if(type!=='chords'){const r=core.parseTab(text);if(r.events.length>=2||type==='tab'){kind='tab';events=r.events;}}
   if(kind!=='tab'){kind='chords';events=core.parseChordSheet(text,4);}
   events=[...events].filter(e=>e.pcs&&e.pcs.length).map(e=>{const o={...e};delete o.label;return o;});core.setTuning(userTuning());return {kind,events,capo:capoFromText(text),tuning:tt,builtTuning:tun};}
@@ -350,7 +387,11 @@ function fitFileTiming(sheet,F,A,shifts){const ev=sheet.events,m=ev.length;if(m<
       let q=0;for(let p=0;p<12;p++)q+=t[p]*t[p];q=Math.sqrt(q);for(let f=0;f<F.n;f++){let d=0;for(let p=0;p<12;p++)d+=F.C[f*12+p]*t[p];S[f*K+j]=d/q;}});
     let mean=0;for(let i=0;i<S.length;i++)mean+=S[i];mean/=S.length;
     const score=(off,spb)=>{let sc=0,inn=0;for(let i=0;i<m;i++){const f=Math.round((off+B[i]*spb+0.03-F.t0)/F.dt);if(f<0||f>=F.n)continue;sc+=S[f*K+kix[i]]-mean;inn++;}return {sc,inn};};
-    for(const mul of [1,0.5,2])for(let k=-4;k<=4;k++){const bpm=sheet.bpm*mul*(1+k*0.0025);if(bpm<40||bpm>260)continue;const spb=60/bpm;
+    /* v1.91: tempos to try: the file's own (±1%, also ½ and 2×), and, with a tab file already lined up, the tempo the
+       tab was found at (a chords file transcribed at 143 BPM for a 140 BPM song) */
+    const tempos=[];for(const mul of [1,0.5,2])for(let k=-4;k<=4;k++)tempos.push(sheet.bpm*mul*(1+k*0.0025));
+    if(sheet.bpmHint)for(const mul of [1,0.5,2])for(let k=-2;k<=2;k++)tempos.push(sheet.bpmHint*mul*(1+k*0.0025));
+    for(const bpm of tempos){if(bpm<40||bpm>260)continue;const spb=60/bpm;
       const lo=-B[m-1]*spb,hi=dur-B[0]*spb;for(let off=lo;off<=hi;off+=0.05){const r=score(off,spb);if(r.inn<Math.min(m,8))continue;all.push(r.sc);if(!best||r.sc>best.sc)best={sc:r.sc,inn:r.inn,off,bpm,sh,mean};}}
     if(best&&best.sh===sh){for(let it=0;it<2;it++){const b0=best;for(let db=-6;db<=6;db++){const bpm=b0.bpm*(1+db*0.0005),spb=60/bpm;for(let o=-0.06;o<=0.06;o+=0.005){const r=score(b0.off+o,spb);if(r.sc>best.sc)best={...best,sc:r.sc,inn:r.inn,off:b0.off+o,bpm};}}}}}
   if(!best)return null;
@@ -441,7 +482,27 @@ const mmss=v=>{v=(v||'').trim();if(!v)return null;const m=/^(\d+):(\d{1,2}(?:\.\
 /* v1.90 a tab and a chord sheet together: the tab's notes where the tab has them (runs of notes less than 1.5 s
    apart), the chords as strums everywhere else. "The chords win": the tab's notes only where the chord sheet has
    no chords (a chord sheet covers the song, so this is mostly the chords alone). */
-function mergeTabChords(tab,ch,win){const runs=(pl,gap,pad)=>{const t=pl.map(p=>p.t).sort((a,b)=>a-b),r=[];for(const x of t){const l=r[r.length-1];if(l&&x-l[1]<=gap)l[1]=x;else r.push([x,x]);}return r.map(q=>[q[0]-0.05,q[1]+pad]);};
+/* v1.91 Auto: a tab that covers the whole song (a full guitar part, fingerpicked) would win everywhere. Per chord
+   (consecutive steps of the same chord = one span): the tab is a lead line there if it's much busier than usual
+   (≥ 1.8× the song's median notes per second over spans) or mostly not the chord's notes (< 50% of ≥ 4 notes in
+   the chord); then the tab's notes, else the chord. Tab notes outside the chord sheet's spans are kept. */
+function mergeAuto(tab,ch){const C=ch.slice().sort((a,b)=>a.t-b.t),T=tab.slice().sort((a,b)=>a.t-b.t);if(!C.length)return T;
+  const spans=[];for(const p of C){const nm=p.e.chord||p.e.label||'';const l=spans[spans.length-1];if(l&&l.nm===nm&&p.t-l.last<4){l.last=p.t;l.steps.push(p);}else spans.push({nm,t0:p.t,last:p.t,steps:[p],pcs:new Set(p.e.pcs||[])});}
+  spans.forEach((s,k)=>{s.t1=k+1<spans.length?spans[k+1].t0:s.last+2;});
+  const endAll=spans[spans.length-1].t1;
+  for(const s of spans){let n=0,hit=0;for(const q of T){if(q.t<s.t0-0.05||q.t>=s.t1-0.05)continue;for(const c of q.e.pcs||[]){n++;if(s.pcs.has(c))hit++;}}s.n=n;s.agree=n?hit/n:1;s.dens=n/Math.max(0.3,s.t1-s.t0);}
+  const ds=spans.filter(s=>s.n>0).map(s=>s.dens).sort((a,b)=>a-b),md=ds.length?ds[ds.length>>1]:0;
+  /* a tab for only part of the song (a solo): it's played wherever it has notes */
+  const partial=spans.filter(s=>s.n>=4).length<0.5*spans.length;
+  for(const s of spans)s.lead=s.n>=4&&(partial||s.dens>=1.8*md||s.agree<0.5);
+  /* a lead line may start a little before its chord's first strum (a pickup): up to 0.4 s, not before the previous chord */
+  const out=[];let nl=0,keptT=0;spans.forEach((s,k)=>{if(s.lead){nl++;const lo=k&&!spans[k-1].lead?Math.max(s.t0-0.4,spans[k-1].last+0.05):s.t0-0.05;for(const q of T)if(q.t>=lo&&q.t<s.t1-0.05){out.push(q);keptT++;}}else out.push(...s.steps);});
+  for(const q of T)if(q.t<spans[0].t0-0.05||q.t>=endAll-0.05){out.push(q);keptT++;}
+  const runs=[];for(const s of spans)if(s.lead){const l=runs[runs.length-1];if(l&&Math.abs(l[1]-s.t0)<0.1)l[1]=s.t1;else runs.push([s.t0,s.t1]);}
+  const mm=x=>Math.floor(x/60)+':'+String(Math.floor(x%60)).padStart(2,'0');
+  log('merge (auto): '+nl+' of '+spans.length+' chords are '+(partial?'covered by the tab (it\'s only part of the song)':'lead lines in the tab')+' ('+keptT+' tab steps'+(runs.length?': '+runs.slice(0,8).map(r=>mm(r[0])+'–'+mm(r[1])).join(', ')+(runs.length>8?' …':''):'')+'); strummed chords elsewhere · busy = '+(1.8*md).toFixed(1)+'+ notes/s');
+  return out.sort((x,y)=>x.t-y.t||(x.e.strum||x.e.chord?1:-1));}
+function mergeTabChords(tab,ch,win){if(win==='auto')return mergeAuto(tab,ch);const runs=(pl,gap,pad)=>{const t=pl.map(p=>p.t).sort((a,b)=>a-b),r=[];for(const x of t){const l=r[r.length-1];if(l&&x-l[1]<=gap)l[1]=x;else r.push([x,x]);}return r.map(q=>[q[0]-0.05,q[1]+pad]);};
   const inRun=(r,t)=>r.some(q=>t>=q[0]&&t<=q[1]);let keepT=tab,keepC=ch;
   if(win==='chords'){const cr=runs(ch,6,1);keepT=tab.filter(p=>!inRun(cr,p.t));}else{const tr=runs(tab,1.5,0.25);keepC=ch.filter(p=>!inRun(tr,p.t));}
   log('merge: '+keepT.length+' of '+tab.length+' tab steps and '+keepC.length+' of '+ch.length+' chord steps kept ('+(win==='chords'?'the chords win':'the tab\'s notes win')+')');
@@ -454,14 +515,22 @@ async function makeSheetSong(sheet,gL,gR,L,Rc,rL,rR,N){
   if(!sec){const al=alignSheet(sheet,g22,null,cache);log('sheet: lined up in '+((performance.now()-t0)/1000).toFixed(1)+' s');
     if(!al.placed.length)throw new Error('the sheet could not be lined up with this recording');const P=prepPlaced(sheet,al,core);placed=P.placed;capo=P.capo;ftAl=al;}
   else{/* a tab and a chord sheet: the chords on the whole recording first, then the tab inside the right chords */
+    let alTf=null;if(sec.tab.fromFile&&!(mmss($('tabFrom').value)!=null&&mmss($('tabTo').value)!=null)){status('Lining the tab up…');alTf=alignSheet(sec.tab,g22,null,cache);
+      if(alTf.fileTempo&&sec.ch.fromFile){sec.ch.bpmHint=alTf.fileTempo.bpm;}}
     status('Lining the chords up…');const alC=alignSheet(sec.ch,g22,null,cache);if(!alC.placed.length)throw new Error('the chord sheet could not be lined up with this recording');
     const PC=prepPlaced(sec.ch,alC,core);log('sheet: chords lined up in '+((performance.now()-t0)/1000).toFixed(1)+' s');
     status('Finding where the tab goes…');const a=mmss($('tabFrom').value),b2=mmss($('tabTo').value);let alT=null;
-    if(a!=null&&b2!=null&&b2>a){QUIET=true;try{alT=alignSheet(sec.tab,g22,{t0:a,t1:b2},cache);}finally{QUIET=false;}log('merge: tab lined up inside '+a.toFixed(1)+'–'+b2.toFixed(1)+' s (as typed): '+alT.placed.length+' of '+sec.tab.events.length+' steps');}
+    if(alTf){/* a file has its own timing: lined up as a whole (exact) */alT=alTf;log('merge: the tab is a file, lined up by its own timing');}
+    else if(a!=null&&b2!=null&&b2>a){QUIET=true;try{alT=alignSheet(sec.tab,g22,{t0:a,t1:b2},cache);}finally{QUIET=false;}log('merge: tab lined up inside '+a.toFixed(1)+'–'+b2.toFixed(1)+' s (as typed): '+alT.placed.length+' of '+sec.tab.events.length+' steps');}
     else{const w=findTabWindow(sec.tab,alC.placed,g22,cache);if(w)alT=w.al;else{log('merge: could not tell where the tab goes; lined up on the whole recording instead. Type from / to times under "And the other one" to place it.');alT=alignSheet(sec.tab,g22,null,cache);}}
     if(!alT.placed.length)throw new Error('the tab could not be lined up with this recording');
-    const PT=prepPlaced(sec.tab,alT,core);if(alT.shift!==alC.shift)log('merge: the two sheets are in different keys ('+alT.shift+' / '+alC.shift+' semitones); each is shown in its own key');
-    placed=mergeTabChords(PT.placed,PC.placed,$('mergeWin').value);capo=PC.capo||PT.capo;tabSheet=sec.tab;ftAl=alT.fileTempo?alT:alC;}
+    const PT=prepPlaced(sec.tab,alT,core);
+    /* one song has one capo: the tab's notes are fixed, so the chords are renamed to the shapes that sound right with
+       the tab's capo (chord sheet heard 4 semitones up = capo 4; with the tab's capo 0 the names move up 4) */
+    if((PC.capo||0)!==(PT.capo||0)){const d=(PC.capo||0)-(PT.capo||0);core.setTuning(sec.tab.builtTuning||userTuning());
+      PC.placed=PC.placed.map(p=>{const nm=p.e.chord||p.e.label;if(!nm)return p;const n2=core.transposeName(nm,d);const e=p.e.strum?core.strumEvent(n2,0,1,p.e.strum):core.chordEvent(n2,0,4);return {...p,e};});core.setTuning(userTuning());
+      log('merge: chords renamed for capo '+(PT.capo||0)+' (they were for capo '+(PC.capo||0)+')');PC.capo=PT.capo||0;}
+    placed=mergeTabChords(PT.placed,PC.placed,$('mergeWin').value);capo=PT.capo||0;tabSheet=sec.tab;ftAl=alT.fileTempo?alT:alC;}
   if(!placed.length)throw new Error('nothing was lined up');
   let bt,b0;const ft=ftAl.fileTempo;
   if(ft){/* the file's own bars: bar 1 = the file's bar holding its first note */const bpb=sheet.bpb||4,spb=60/ft.bpm;bt={bpm:Math.round(ft.bpm*1000)/1000};b0=ft.beat0+Math.floor(ft.firstBeat/bpb+1e-6)*bpb*spb;while(b0>placed[0].t+0.05)b0-=bpb*spb;
@@ -504,10 +573,7 @@ $('go').onclick=async()=>{
     if((sheetText||SHEETFILE)&&$('mk').checked){status('Reading the sheet…');const core=await loadCore();sheet=readSheet(core,sheetText,$('sheetType').value);
       if(!sheet.events.length)throw new Error(sheet.kind==='tab'?'no tab found in the sheet (tab lines look like e|--0--3--|, six lines per block)':'no chords found in the sheet');
       log('sheet: '+(sheet.fromFile?sheet.fromFile+' as '+(sheet.kind==='tab'?'notes':'chords'):sheet.kind==='tab'?'tab':'chord sheet')+' with '+sheet.events.length+' steps'+(sheet.capo?' · capo '+sheet.capo:'')+(sheet.tuning?' · written for '+core.tuningById(sheet.tuning).name:'')+(sheet.builtTuning!=='std'?' · frets for '+core.tuningById(sheet.builtTuning).name.split(' (')[0]:''));}
-    if(sheet&&$('sheet2').value.trim()&&$('mk').checked){const core=await loadCore();const sf=SHEETFILE;SHEETFILE=null;let s2=null;try{s2=readSheet(core,$('sheet2').value.trim(),'auto');}finally{SHEETFILE=sf;}
-      if(!s2.events.length)log('sheet 2: nothing found in the second box, ignored');
-      else if(s2.kind===sheet.kind)log('sheet 2: it is a '+(s2.kind==='tab'?'tab':'chord sheet')+' like the first one; ignored (use one tab and one chord sheet)');
-      else{sheet.also=s2;log('sheet 2: '+(s2.kind==='tab'?'tab':'chord sheet')+' with '+s2.events.length+' steps'+(s2.capo?' · capo '+s2.capo:'')+' · '+(sheet.kind==='tab'?'chords':'tab')+' above');}}
+    if(sheet&&(SHEETFILE2||$('sheet2').value.trim())&&$('mk').checked)sheet=readSecond(await loadCore(),sheet,sheetText);
     let native=null;
     if($('be').value==='native'&&NS){try{
       const st=await NS.status({});log('native: '+st.cores+' cores · model on the phone '+(st.modelBytes/1e6).toFixed(0)+' MB');

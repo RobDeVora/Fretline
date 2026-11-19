@@ -18,6 +18,7 @@ section of HANDOFF.md) into `/tmp/ortpkg/package/dist/`; serve the repo on 8769;
 | — | `sheet_tab.py` default audio `/tmp/stemtest/riff100_clean.wav` = riff100.wav through `ffmpeg -af "lowpass=f=1800,lowpass=f=1800"` |
 
 | `make_solo90.py` + `sheet_merge.py` | v1.90 a tab (solo) + a chord sheet on one recording (`/tmp/solotest/solo90.wav`): solo window, note times, no chords inside the solo; env `FROMTO='0:09.8,0:15.5'`, `STRUMS=1` | `python3 make_solo90.py && python3 sheet_merge.py` |
+| `real_merge.py` / `real_files.py` | v1.90-91 real song (TYSK guitar stem + tab MIDI, and the owner's chords MIDI): a text tab cut from the MIDI (`real_merge.py A B [win] [from to]`) or both files (`real_files.py [auto|tab|chords] [swap]`). Files in /tmp, not in the repo | see the files |
 
 v1.84 MIDI sheets: `MIDI=/tmp/riff.mid python3 sheet_tab.py` and `MIDI=/tmp/chords.mid python3 sheet_chords.py`.
 Make the files with `pip install mido`, then: riff.mid = 120 BPM, tracks Bass (prog 33) / Drums (ch 10) / Guitar

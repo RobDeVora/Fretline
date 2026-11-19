@@ -1,7 +1,7 @@
-# Fretline: session handoff (18 Nov 2026, evening · web v1.90 · Android APK last rebuilt at v1.80)
+# Fretline: session handoff (18 Nov 2026, evening · web v1.91 · Android APK last rebuilt at v1.80)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
-how detection works now, what's open, and a changelog (newest first from v1.90 down to v1.69, then the older
+how detection works now, what's open, and a changelog (newest first from v1.91 down to v1.69, then the older
 v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conversation" below.**
 
 ## The project
@@ -43,7 +43,7 @@ v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conver
 
 ## Where things stand (18 Nov 2026, evening)
 
-**Versions:** web **v1.90** (sw cache `fretline-v78`). The APK was last rebuilt for v1.80 (Capacitor plugins:
+**Versions:** web **v1.91** (sw cache `fretline-v79`). The APK was last rebuilt for v1.80 (Capacitor plugins:
 `IncomingPlugin`, `NativeMicPlugin`, `NativeSeparatorPlugin` = Demucs on all cores + save to Downloads; minSdk 24,
 onnxruntime-android 1.22.0, arm64-v8a + armeabi-v7a only). Everything after v1.80 is web-only. The owner has the
 v1.80 APK installed.
@@ -62,6 +62,8 @@ v1.80 APK installed.
   - Tempo: auto, ½ / 2× buttons, type a BPM, tap tempo; ♩ button in My songs (v1.82). Notes keep their played
     timing (1/48 beat, v1.85).
 - v1.86: MIDI tab exports with one channel per string are read as one part (also fixes the import screen).
+- v1.91: **Lab: files in the second box, Auto merge** (chords strummed, the tab where it plays a lead line); real
+  song checked with the owner's TYSK tab MIDI + chords MIDI (see the v1.91 section).
 - v1.90: **Lab: a tab and a chord sheet together** (solo + strummed parts, see the v1.90 section).
 - v1.89: **Settings › Mic & timing › Chord matching** (Strict / Standard / Beginner) and a wrong-chord check in
   every mode (see the v1.89 section).
@@ -98,7 +100,12 @@ to `main`. They test on the phone and send Lab reports and detection reports (of
 
 ## Picking up the conversation
 
-**Latest (18 Nov, ~21:30 Central): the owner asked for a chord sheet AND a tab on one song (play the chords and the solo) — built in v1.90 (Lab).** Agreed rules: tab wins where both play (switch for chords), Lab first, My songs without a recording later. Waiting for the owner to try it on a real song.
+**Latest (18 Nov, ~21:45 Central): v1.91.** The owner sent a chords MIDI for TYSK (`…Thought_You_Should_Know_chords.mid`:
+Track 2 = chords, Track 3 = bass, 143 BPM in the file, unquantised, guitar from beat 47.57; not in the repo) and
+switched to Opus. Built: files in the second box, tempo hint, tuning / capo fixes, Auto merge. Waiting for the owner to
+make TYSK in the Lab with both files (Auto) and send the Lab report.
+
+Before that (~21:30): the owner asked for a chord sheet AND a tab on one song (play the chords and the solo) — built in v1.90 (Lab).** Agreed rules: tab wins where both play (switch for chords), Lab first, My songs without a recording later. Waiting for the owner to try it on a real song.
 
 Before that: **chords vs single notes — done in v1.88 + v1.89.** The owner asked for chords
 drawn as blocks (repeats as a strum pattern) and for partial strums / a brushed extra string to count, as a
@@ -433,6 +440,32 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.91: Lab — files in the second box; Auto merge; checked on the real song
+
+- Second box takes a file (`#sheet2File`, `#sheet2Part`, `SHEETFILE2`, `setSheetFile2`, `readSheetFileInfo`); read as
+  the other kind than the first sheet (`readSecond`). Track auto-pick: most 3+-note onsets (the chords track).
+  `fileSheet(core,sf,partIdx,asChords,tunIn)` / `readSheet(core,text,type,tunIn)` take the file / tuning.
+- **Tuning:** chords from notes are named by the shapes in the tab's tuning (notes moved by `tuningShift()` before
+  `chordChart`: F# heard in E♭ = a G shape); a chord sheet in box 1 is read again in the tab's tuning.
+- **Capo:** one song = one capo: the chord half is renamed for the tab's capo (`d = capoChords − capoTab`).
+- **Order:** a tab *file* is lined up first, whole, by its own timing (no window search); its tempo goes to the chords
+  file as `sheet.bpmHint` (extra tempos in `fitFileTiming`: hint ×1, ½, 2 ±0.5%). TYSK chords file: 143 BPM in the
+  file, real 140; ±1% couldn't reach it → fit 70.64 (match 0.143); with the hint 70 (= 140 halved by chordChart),
+  match 0.202. Checked against the tab's notes: chords agree 78% as placed; moved ½ cycle 42–44%, whole cycles ≤ 76%.
+- **Auto merge** (`mergeAuto`, default of "Where both play at once"): per chord span (same chord in a row), the tab
+  is a lead line if busy (≥ 1.8× median notes/s over spans with notes) or mostly not the chord's notes (< 50% of
+  ≥ 4); a tab with notes in < half the spans is a solo-only tab → used wherever it has notes; a lead line may start
+  0.4 s before its chord (pickup). TYSK (tab MIDI box 1 + chords MIDI box 2, or swapped): 9 of 90 chords become tab
+  (0:01–0:03, 1:25–1:27, 1:30–1:33, 1:37–1:38, 2:47–2:49, 2:54–2:57, 3:23–3:25), 81 strummed chords (G D Am7 C shapes,
+  E♭ tuning), 146 steps. Synthetic: solo 16/16 within 17 ms.
+- Tests: `tools/lab-tests/real_files.py [auto|tab|chords] [swap]` (needs /tmp/tysk_full_gtr.f32, /tmp/tysk.mid,
+  /tmp/tysk_chords.mid served on 8771 with the ORT files; prints chord-vs-tab agreement with `chords`; dumps the song
+  to /tmp/tysk_merge.json). `/tmp/tysk_full_song.json` (the old truth) is from before v1.86: ~37% of its steps differ
+  from today's file timing, so don't use it as truth for those parts.
+- Regressions: sheet_tab (MIDI) 64/64, sheet_chords unchanged, sheet_merge tab/chords/auto OK.
+- Note: `chordChart` rebases a file's chords to start at beat 0 (offset is free in the fit, harmless).
+- Open: a real song with a separate short solo tab (text) — the window search (v1.90) is still the weak part.
 
 ## v1.90: Lab — a tab and a chord sheet on one recording
 
