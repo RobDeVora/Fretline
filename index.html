@@ -133,6 +133,7 @@ header h1 span{color:var(--accent)}
     <h1>Fret<span>line</span></h1>
     <button id="btnInstall" class="primary" style="display:none">Install</button>
     <button id="btnTuner">Tuner</button>
+    <button id="btnFacts">📖 Facts</button>
     <button id="btnSettings">Settings</button>
   </header>
   <div class="banner" id="micBanner"><span class="dot"></span><span class="grow" id="micText">Microphone is off. It turns on when you start playing.</span><button id="btnMic">Enable mic</button></div>
@@ -304,6 +305,15 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
 </section>
 
 <!-- TUNER -->
+<!-- FACTS -->
+<section class="screen" id="facts">
+  <div class="top" style="display:flex;align-items:center;gap:12px;padding:8px 12px"><button id="factsBack" class="ghost">‹ Back</button><div class="title" style="font-weight:700;font-size:1.05em">Facts: what everything does</div></div>
+  <div class="factsBody" id="factsBody" style="padding:10px 14px;overflow:auto;flex:1;max-width:760px;margin:0 auto;width:100%;box-sizing:border-box">
+    <input type="search" id="factsFind" placeholder="Search: for example capo, timing, Lab, band" style="width:100%;box-sizing:border-box;margin-bottom:10px">
+    <div id="factsDoc"></div>
+  </div>
+</section>
+
 <section class="screen" id="tuner">
   <header><button class="ghost" id="tunBack">‹ Back</button><h1 style="font-size:18px">Tuner</h1></header>
   <div class="tuner">
@@ -3302,6 +3312,17 @@ $('#tuneSel').onchange=e=>{const id=e.target.value,d=G.def,c=G.clock;if(!d)retur
   if(G.playing){stopVoices();G.playing=false;G.listen=false;try{recStop();}catch(_){}keepAwake(false);}
   applyTuning(id);delete d._built;openSong(d);syncTuneSel();
   showHint('Tuning: '+tuningById(id).name.split(' (')[0]+'. The frets are for this tuning; retune in the Tuner.',4500);};
+/* ---- Facts: what everything does (content in facts.js; the disclaimer lives here and nowhere else) ---- */
+function factsLoad(){return window.FACTS?Promise.resolve():new Promise((res,rej)=>{const e=document.createElement('script');e.src='facts.js';e.onload=res;e.onerror=()=>rej(new Error('offline'));document.head.appendChild(e);});}
+function factsRender(q){const F=window.FACTS;if(!F)return;q=(q||'').trim().toLowerCase();let h='';
+  if(!q)h+='<div class="factsWarn" style="border:1px solid var(--accent2);border-radius:10px;padding:10px 12px;margin-bottom:12px"><b>Please read</b>'+F.disclaimer.map(x=>'<p class="small" style="margin:6px 0">'+esc(x)+'</p>').join('')+'</div>';
+  let n=0;for(const sec of F.sections){const it=sec.items.filter(i=>!q||(sec.title+' '+i.n+' '+i.t).toLowerCase().includes(q));if(!it.length)continue;n+=it.length;
+    h+='<h3 style="margin:16px 0 6px">'+esc(sec.title)+'</h3>'+it.map(i=>'<div style="margin:0 0 10px"><b>'+esc(i.n)+'</b><div class="small" style="margin-top:2px">'+esc(i.t)+'</div></div>').join('');}
+  if(!n)h+='<p class="small">Nothing matches that. Try a shorter word.</p>';
+  $('#factsDoc').innerHTML=h;}
+$('#btnFacts').onclick=async()=>{show('facts');$('#factsFind').value='';$('#factsDoc').innerHTML='<p class="small">Loading…</p>';try{await factsLoad();factsRender('');}catch(e){$('#factsDoc').innerHTML='<p class="small">The Facts page needs to be downloaded once. Connect to the internet and try again.</p>';}};
+$('#factsFind').oninput=e=>factsRender(e.target.value);
+$('#factsBack').onclick=()=>show('home');
 $('#btnTuner').onclick=async()=>{$('#tTuning').value=TUNING_ID;tunerStrings();show('tuner');await enableMic();};
 $('#tunBack').onclick=()=>show('home');
 function tunerUpdate(){
@@ -4221,7 +4242,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.105';
+const APP_VERSION='1.106';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

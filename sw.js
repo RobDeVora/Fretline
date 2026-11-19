@@ -1,8 +1,8 @@
 // Fretline service worker: always tries the network first so updates you
 // upload to GitHub show up on the next launch; falls back to the saved copy offline.
-const CACHE = 'fretline-v93';
+const CACHE = 'fretline-v94';
 const SHARE = 'fretline-share'; // holds a song shared from another app until the page picks it up
-const CORE = ['./', './index.html', './songdb.js', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
+const CORE = ['./', './index.html', './songdb.js', './facts.js', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', e => {
   // cache each file separately so one missing file can't block installation
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(CORE.map(u => c.add(u).catch(() => {})))).then(() => self.skipWaiting()));
