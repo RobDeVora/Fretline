@@ -2483,6 +2483,22 @@ document.querySelectorAll('#seLen button').forEach(b=>b.onclick=()=>{const n=+b.
 $('#seCancel').onclick=()=>$('#strumEd').classList.remove('show');
 $('#seSave').onclick=()=>{let p=sePat.join('');if(!/[DUx]/.test(p))p='D'+p.slice(1);$('#strumEd').classList.remove('show');if(G.seSave){G.seSave(p);G.seSave=null;}else saveStrumChoice(p);};
 function isChordEv(e){return !!e.chord||e.notes.length>=3;}
+/* v1.88: how the highway draws chords found in a song's notes (imported files, recordings, AI transcriptions).
+   Display only: playing and scoring still use the original events. Three or more notes struck together are one
+   chord: drawn as a block across the strings it uses. A chord repeated three or more times in a row (close
+   together) is a strumming pattern: the first shows the fingering, the repeats become strokes with D/U arrows. */
+function chordView(ev){if(ev._cv)return ev._cv;const out=new Array(ev.length).fill(null);
+  const key=e=>e.notes.map(n=>n.s+':'+n.f).sort().join(',');
+  const cand=i=>{const e=ev[i];return !!e&&!e.strum&&!e.chord&&!e.rest&&e.notes&&e.notes.length>=3&&new Set(e.notes.map(n=>n.s)).size===e.notes.length;};
+  const mk=(e,dir)=>{const shape=[-1,-1,-1,-1,-1,-1],fgs=[0,0,0,0,0,0];for(const n of e.notes){shape[n.s]=n.f;fgs[n.s]=n.fg||0;}
+    return Object.assign({},e,{shape,fgs,snotes:e.notes,label:e.label||('~'+key(e)),_cvLabel:e.label||'',_cvDir:dir});};
+  for(let i=0;i<ev.length;i++){if(!cand(i)||out[i])continue;let j=i;const k=key(ev[i]);
+    while(j+1<ev.length&&cand(j+1)&&key(ev[j+1])===k&&ev[j+1].t-ev[j].t<=2.01)j++;
+    if(j-i+1>=3){for(let q=i;q<=j;q++){const d=Math.round(ev[q].t*2)%2?'U':'D';const v=mk(ev[q],d);v.strum=d;v.label=ev[i].label||('~'+k);out[q]=v;}}
+    else for(let q=i;q<=j;q++)out[q]=Object.assign(mk(ev[q],null),{_blk:true});
+    i=j;}
+  ev._cv=out;return out;}
+
 // timing window in beats, measured against the latency-adjusted clock. Playing as a note's edge reaches its target
 // ring always counts (G.ringBeats is set by the drawing code), and the Timing setting widens everything.
 function hitWindow(e,b,gap,pgap){
@@ -3043,15 +3059,15 @@ function draw(now){
       cx.lineWidth=on?2+2*a:2;cx.strokeStyle=on?STRC[s]:hexA(zc,0.55);cx.stroke();}
   }
   cx.textAlign='center';cx.textBaseline='middle';
-  let lastLabel=null;
+  let lastLabel=null;const CV=chordView(ev);
   for(let i=0;i<ev.length;i++){
-    const e=ev[i];const x=hitX+(e.t-G.clock)*ppb;if(x>W+80)break;const w=e.d*ppb;if(x+w<-80)continue;const st=G.state[i];
+    const e=CV[i]||ev[i];const x=hitX+(e.t-G.clock)*ppb;if(x>W+80)break;const w=e.d*ppb;if(x+w<-80)continue;const st=G.state[i];
     if(e.strum&&settings.strumView!=='arrows'&&e.strum!=='x'&&e.shape){
       // strum as fingering: the chord's notes roll through the hit zone like single notes, joined by a stroke
       // line with direction arrows at the top and bottom. The first strum of a chord shows the full fingering;
       // repeats of the same chord shrink to coloured dots so you can see at a glance it's the same shape.
       const dcol=st===1?'#5ce1a6':st===2?'#4a4f5a':e.strum==='U'?'#ffa94d':'#4dabf7';
-      const pv=ev[i-1],nx=ev[i+1];const first=!(pv&&pv.strum&&pv.label===e.label&&e.t-pv.t<2.01);
+      const pv=CV[i-1]||ev[i-1],nx=ev[i+1];const first=!(pv&&pv.strum&&pv.label===e.label&&e.t-pv.t<2.01);
       const gap=nx?nx.t-e.t:1;const rf=Math.max(6,Math.min(r,gap*ppb*0.47));const rs=first?rf:Math.max(4,rf*0.5);
       const strs=[];e.shape.forEach((f,s)=>{if(f>=0)strs.push(s);});
       if(strs.length){const yTop=Y(Math.max(...strs)),yBot=Y(Math.min(...strs));
@@ -3079,6 +3095,15 @@ function draw(now){
         cx.beginPath();cx.arc(x,(top+bot)/2,Math.min(15*k,laneH*0.6),0,7);cx.fillStyle=st===2?'#2a2e37':COL.bg;cx.fill();cx.lineWidth=2;cx.stroke();
         cx.fillStyle=col;cx.font='bold '+F(14)+' -apple-system,sans-serif';cx.fillText(down?'D':'U',x,(top+bot)/2+1);}
       cx.lineCap='butt';
+      continue;
+    }
+    if(e._blk){
+      const ss=e.notes.map(n=>n.s),yT=Y(Math.max(...ss))-laneH/2+2,yB2=Y(Math.min(...ss))+laneH/2-2;const x0=x-r*0.6,ww=Math.max(r*1.6,w-6);
+      rr(x0,yT,ww,yB2-yT,10);
+      cx.fillStyle=st===1?'rgba(92,225,166,.28)':st===2?'rgba(120,120,130,.18)':'rgba(179,136,255,.18)';cx.fill();
+      cx.lineWidth=2;cx.strokeStyle=st===1?'#5ce1a6':st===2?'#666':'#b388ff';cx.stroke();
+      cx.font='bold '+F(12)+' -apple-system,sans-serif';
+      for(const n of e.notes){cx.fillStyle=noteCol(n.s,n.fg);cx.fillText(String(settings.names?pcName(n.midi):n.f),x0+12*k,Y(n.s));}
       continue;
     }
     if(e.chord){
@@ -4085,7 +4110,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.87';
+const APP_VERSION='1.88';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

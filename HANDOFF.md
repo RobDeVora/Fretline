@@ -1,7 +1,7 @@
-# Fretline: session handoff (18 Nov 2026, evening · web v1.87 · Android APK last rebuilt at v1.80)
+# Fretline: session handoff (18 Nov 2026, evening · web v1.88 · Android APK last rebuilt at v1.80)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
-how detection works now, what's open, and a changelog (newest first from v1.87 down to v1.69, then the older
+how detection works now, what's open, and a changelog (newest first from v1.88 down to v1.69, then the older
 v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conversation" below.**
 
 ## The project
@@ -43,7 +43,7 @@ v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conver
 
 ## Where things stand (18 Nov 2026, evening)
 
-**Versions:** web **v1.87** (sw cache `fretline-v75`). The APK was last rebuilt for v1.80 (Capacitor plugins:
+**Versions:** web **v1.88** (sw cache `fretline-v76`). The APK was last rebuilt for v1.80 (Capacitor plugins:
 `IncomingPlugin`, `NativeMicPlugin`, `NativeSeparatorPlugin` = Demucs on all cores + save to Downloads; minSdk 24,
 onnxruntime-android 1.22.0, arm64-v8a + armeabi-v7a only). Everything after v1.80 is web-only. The owner has the
 v1.80 APK installed.
@@ -62,6 +62,7 @@ v1.80 APK installed.
   - Tempo: auto, ½ / 2× buttons, type a BPM, tap tempo; ♩ button in My songs (v1.82). Notes keep their played
     timing (1/48 beat, v1.85).
 - v1.86: MIDI tab exports with one channel per string are read as one part (also fixes the import screen).
+- v1.88: **chord blocks on the highway** for chords found in a song's notes (see the v1.88 section).
 - v1.87: **guitar tunings** in the Tuner (11 presets, string-by-string "tighten / loosen N semitones / cents",
   ✓ per string); the whole app, imports and the Lab follow the tuning; songs remember theirs and offer to switch.
 
@@ -93,6 +94,20 @@ doesn't cause interference with anything that does work correctly I don't need t
 to `main`. They test on the phone and send Lab reports and detection reports (often as .txt attachments).
 
 ## Picking up the conversation
+
+**Latest (18 Nov, ~20:40 Central): the owner's first idea, chords vs single notes.** They asked for the AI to tell
+chords from single notes and show chords on the highway as the block shape used in generated songs / courses, with
+repeats turning into the strumming pattern. They also want **partial strums to count and an extra brushed string
+not to void a chord, as a setting like Forgiving/Strict** (there is no setting by that name: the nearest is
+Settings › Mic & timing › Timing window Normal / Relaxed / Very relaxed). Agreed split: the drawing was built in
+v1.88 (Sonnet); **still to do: the "Chord matching" setting (Beginner / Standard / Strict) and the scoring change**
+(suggested for Opus, with the strict regression checks). Beginner = most strings heard, extra strings ignored;
+Standard = most strings, clearly wrong extras count against; Strict = today's behaviour (default stays Strict so
+nothing that works changes). Scoring lives in `matchEvent` (strum path: `chordFit` ≥0.5 and best among the song's
+chords, 2 frames; chord path: `chordScore` >0.42 for 3 frames). Ask the owner which model they have, and whether
+to name chords only when a sheet gives them.
+
+Earlier, the same evening:
 
 The last exchange (18 Nov, ~20:00 Central):
 1. After v1.87 the owner asked whether the **"Lead + rhythm"** and **"chords only"** options were removed. Checked:
@@ -418,6 +433,18 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.88: chords found in a song's notes draw as blocks (display only)
+
+`chordView(ev)` (next to `isChordEv`) builds a cached per-song drawing view; the draw loop uses `CV[i]||ev[i]`.
+Playing, scoring and saving still use the original events. A step with 3+ notes on different strings that is not
+already a `strum` / `chord` event is a chord: drawn as a block across the strings it uses, with each string's
+fret (or note name). The same chord (same strings and frets) repeated 3+ times in a row, each within 2 beats of
+the last, becomes a strum pattern: first one with the full fingering, repeats as strokes with ▼ / ▲ (direction
+guessed from the beat: off-beat = up). 2-note steps stay single gems. The chord name above comes from the existing
+label. Checked: screenshots of a test song (singles, Am, C, G x6), strum regression test 95/96 unchanged.
+Test script: not kept in the repo (rebuild: open a `kind:'file'` def with events via `openSong`, set `G.clock`,
+call `draw`).
 
 ## v1.87: guitar tunings (Tuner) — app, imports and the Lab follow them
 
