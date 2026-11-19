@@ -273,10 +273,10 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
   <div class="form">
     <div class="field"><input id="libSearch" type="search" placeholder="Search title or composer"></div>
     <div class="seg" id="libLvl" style="display:flex;margin-bottom:8px"><button data-v="0" class="on" style="flex:1">All</button><button data-v="1" style="flex:1">Beginner</button><button data-v="2" style="flex:1">Intermediate</button><button data-v="3" style="flex:1">Advanced</button></div>
-    <div class="field"><select id="libStyle"><option value="">All styles</option><option>Folk &amp; traditional</option><option>Practice progressions</option><option>Classical guitar</option></select></div>
+    <div class="field"><select id="libStyle"><option value="">All styles</option><option>Folk &amp; traditional</option><option>Practice progressions</option><option>Classical guitar</option><option>Blues</option><option>Country &amp; bluegrass</option><option>Gospel &amp; spirituals</option><option>Jazz &amp; ragtime</option><option>Celtic &amp; sea shanties</option><option>Latin &amp; flamenco</option><option>Rock &amp; metal (original riffs)</option></select></div>
     <div class="small" id="libCount" style="margin:2px 0 8px"></div>
     <div id="libList"></div>
-    <p class="small" style="margin-top:14px">Classical pieces come from the <a href="https://www.mutopiaproject.org/" target="_blank" rel="noopener" style="color:var(--accent2)">Mutopia Project</a>, typeset by its volunteers and shared as public domain or under Creative Commons licences; each song shows its credit. Chord charts are written for Fretline. Downloaded songs go to My Songs and work offline.</p>
+    <p class="small" style="margin-top:14px">Classical pieces come from the <a href="https://www.mutopiaproject.org/" target="_blank" rel="noopener" style="color:var(--accent2)">Mutopia Project</a>, typeset by its volunteers and shared as public domain or under Creative Commons licences; each song shows its credit. Chord charts, and the tabs marked original, are written for Fretline. Downloaded songs go to My Songs and work offline.</p>
   </div>
 </section>
 
@@ -2296,7 +2296,7 @@ function renderLibrary(){
   $('#libCount').textContent=m.length+' song'+(m.length===1?'':'s');
   const fmt=sec=>sec?(sec>=60?Math.floor(sec/60)+' min ':'')+(sec%60?sec%60+' s':''):'';
   let h='';for(const x of m.slice(0,libShown)){const got=have.has(x.id);
-    h+=`<div class="item" data-libid="${esc(x.id)}"><div class="ic" style="background:${x.kind==='chords'?'#ffa94d':'#4dabf7'};color:#0b0d12">${x.kind==='chords'?'♪':'𝄞'}</div><div class="tx"><div class="t">${esc(x.title)}</div><div class="s" style="white-space:normal">${esc(x.by)} · ${['','Beginner','Intermediate','Advanced'][x.lvl]||''} · ${x.kind==='chords'?'Chords':'Notes'}${x.sec?' · '+fmt(x.sec):''}</div><div class="s" style="white-space:normal;font-size:11px">${esc(x.credit)} · ${esc(x.license)}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener" style="color:var(--accent2)">source</a>`:''}</div></div><div class="best">${got?'✓ Play':'Get ›'}</div></div>`;}
+    h+=`<div class="item" data-libid="${esc(x.id)}"><div class="ic" style="background:${x.kind==='chords'?'#ffa94d':x.kind==='tab'?'#69db7c':'#4dabf7'};color:#0b0d12">${x.kind==='chords'?'♪':x.kind==='tab'?'T':'𝄞'}</div><div class="tx"><div class="t">${esc(x.title)}</div><div class="s" style="white-space:normal">${esc(x.by)} · ${['','Beginner','Intermediate','Advanced'][x.lvl]||''} · ${x.kind==='chords'?'Chords':'Notes'}${x.sec?' · '+fmt(x.sec):''}</div><div class="s" style="white-space:normal;font-size:11px">${esc(x.credit)} · ${esc(x.license)}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener" style="color:var(--accent2)">source</a>`:''}</div></div><div class="best">${got?'✓ Play':'Get ›'}</div></div>`;}
   if(m.length>libShown)h+=`<button id="libMore" style="width:100%;margin-top:4px">Show more (${m.length-libShown} left)</button>`;
   if(!m.length)h='<div class="note-txt">No songs match. Try another search or level.</div>';
   $('#libList').innerHTML=h;
@@ -2310,6 +2310,7 @@ async function getLibSong(x){
   if(!d){
     const base={id:'m-'+x.id,cat:'mine',lib:x.id,title:x.title,bpm:x.bpm,capo:0,credit:x.credit+' · '+x.license};
     if(x.kind==='chords')d={...base,kind:'chords',bpb:x.bpb,cb:x.cb,src:x.src,strum:'auto',tune:x.tune||null};
+    else if(x.kind==='tab')d={...base,kind:'tab',bpb:x.bpb||4,src:x.src};
     else{d={...base,kind:'file',fmt:'Library',bpb:4,libFile:x.file,strum:''};
       try{await loadLibEvents(d);}catch(e){showMsg('Download failed','<p>Check your internet connection and try again.</p>');return;}}
     mySongs.unshift(d);store.set('songs',mySongs);
@@ -4264,7 +4265,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.109';
+const APP_VERSION='1.110';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
