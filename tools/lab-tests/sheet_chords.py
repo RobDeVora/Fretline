@@ -10,7 +10,10 @@ with sync_playwright() as p:
     pg=ctx.new_page();errs=[];pg.on('pageerror',lambda e:errs.append(str(e)))
     pg.goto('http://localhost:8769/lab/stems.html?ortbase=http://localhost:8771/&modelurl=http://localhost:8771/dummy.onnx');pg.wait_for_timeout(800)
     pg.set_input_files('#file','/tmp/chordtest/chords90.wav');pg.select_option('#secs','0');pg.select_option('#be','wasm');pg.fill('#ttl','Chords '+mode)
-    pg.click('#sheetBox summary');pg.fill('#sheet',__import__('os').environ.get('SHEET','Intro\nG  C  D  Em\nG  C'));pg.select_option('#strumMode',mode);pg.click('#go');pg.wait_for_function('window.__labDone',timeout=900000)
+    pg.click('#sheetBox summary')
+    if __import__('os').environ.get('MIDI'):pg.set_input_files('#sheetFile',__import__('os').environ['MIDI']);pg.wait_for_timeout(1500);pg.select_option('#sheetAs','chords')
+    else:pg.fill('#sheet',__import__('os').environ.get('SHEET','Intro\nG  C  D  Em\nG  C'))
+    pg.select_option('#strumMode',mode);pg.click('#go');pg.wait_for_function('window.__labDone',timeout=900000)
     print('\n'.join(l for l in pg.text_content('#log').split('\n') if l.startswith(('sheet','tempo','song','ERROR'))))
     d=pg.evaluate('window.__labSong');ev=d['events'];spb=60/d['bpm']
     names=[(e.get('chord') or e.get('label'),round(d['recOffset']+e['t']*spb,3)) for e in ev]

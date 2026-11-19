@@ -42,7 +42,12 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
   <details id="sheetBox" style="margin-top:10px"><summary style="font-weight:600">Use a tab or chord sheet for the notes (optional)</summary>
     <div class="small">Paste the song's tab or chord sheet (or load a text file). Its notes or chords are used as written, and lined up with the recording's guitar, instead of the AI writing the notes down.</div>
     <textarea id="sheet" rows="6" placeholder="e|-----0---3---|&#10;B|---1-------1-|&#10;…  or  G  C  D  Em" style="width:100%;font:13px ui-monospace,monospace;padding:8px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text);margin-top:6px"></textarea>
-    <input type="file" id="sheetFile" accept=".txt,.text,.tab,.pro,.cho,.chopro,.chordpro,.crd,text/plain">
+    <input type="file" id="sheetFile" accept=".txt,.text,.tab,.pro,.cho,.chopro,.chordpro,.crd,.mid,.midi,.kar,.xml,.musicxml,.mxl,.gp,.gp3,.gp4,.gp5,.gpx,.gp6,.gp7,.pdf,text/plain,audio/midi">
+    <div class="small">Text, ChordPro, PDF, MIDI, MusicXML or Guitar Pro.</div>
+    <div id="sheetFileBox" style="display:none"><div class="small" id="sheetFileName" style="margin-top:6px"></div>
+      <div class="row"><div><label for="sheetPart">Track</label><select id="sheetPart"></select></div>
+        <div id="sheetAsBox"><label for="sheetAs">Use it as</label><select id="sheetAs"><option value="notes">Notes, as written</option><option value="chords">Chords</option></select></div></div>
+      <button type="button" id="sheetFileClear" style="margin-top:8px;background:transparent;color:var(--muted);border:1px solid var(--line)">Remove the file</button></div>
     <div class="row"><div><label for="sheetType">It's a</label><select id="sheetType"><option value="auto">Detect</option><option value="tab">Tab</option><option value="chords">Chord sheet</option></select></div>
       <div><label for="strumMode">Chords on the highway</label><select id="strumMode"><option value="changes">One strum per chord change</option><option value="strums">Follow the recording's strums</option></select></div></div>
     <div class="small">The sheet should match this recording (same intro, verses and repeats). Parts the recording doesn't play are skipped; parts the sheet doesn't cover get no notes.</div>
@@ -98,7 +103,24 @@ async function nativeSave(a,name){const blob=await (await fetch(a.href)).blob();
   const r=await NS.saveFinish({name,mime:blob.type||'audio/wav'});status('Saved to '+r.path);log('saved: '+r.path);}
 ['dGtr','dRest'].forEach(id=>$(id).addEventListener('click',ev=>{if(!NS||!NS.saveChunk)return;ev.preventDefault();
   const base=($('ttl').value||'song').trim().replace(/[^A-Za-z0-9 ()-]+/g,'_');nativeSave($(id),base+(id==='dGtr'?' - guitar.wav':' - band.wav')).catch(e=>{status('Could not save: '+(e.message||e));log('save: '+(e.message||e));});}));
-$('sheetFile').onchange=async()=>{const f=$('sheetFile').files[0];if(!f)return;if(f.size>2e6){status('That file is too big for a tab or chord sheet.');return;}$('sheet').value=await f.text();$('mk').checked=true;status('Sheet loaded ('+f.name+').');};
+function setSheetFile(sf){SHEETFILE=sf;$('sheetFileBox').style.display=sf?'':'none';$('sheet').style.display=sf?'none':'';$('sheetType').disabled=!!sf;if(!sf){$('sheetFile').value='';return;}
+  $('sheetFileName').textContent=sf.name+' · '+sf.fmt+' · '+sf.info.bpm+' BPM in the file';
+  const parts=sf.info.parts;let pick=parts.findIndex(p=>p.isGuitar&&p.hasTab);if(pick<0)pick=parts.findIndex(p=>p.isGuitar);if(pick<0)pick=0;
+  $('sheetPart').innerHTML=parts.map((p,i)=>'<option value="'+i+'">'+p.label.replace(/[<&]/g,'')+' ('+p.count+' '+(p.chords?'chords':'notes')+')</option>').join('');$('sheetPart').value=pick;$('sheetPart').onchange();}
+$('sheetPart').onchange=()=>{const p=SHEETFILE&&SHEETFILE.info.parts[+$('sheetPart').value];$('sheetAsBox').style.display=p&&!p.chords?'':'none';};
+$('sheetFileClear').onclick=()=>{setSheetFile(null);status('File removed.');};
+$('sheetFile').onchange=async()=>{const f=$('sheetFile').files[0];if(!f)return;if(f.size>20e6){status('That file is too big for a tab or chord sheet.');return;}
+  try{status('Reading '+f.name+'…');const core=await loadCore();const buf=new Uint8Array(await f.arrayBuffer());let ext=/\.[a-z0-9]{1,8}$/i.test(f.name)?f.name.split('.').pop().toLowerCase():'';ext=core.sniffExt(buf,ext);
+    let info=null,fmt='';
+    if(ext==='mid'||ext==='midi'||ext==='kar'){info=core.parseMidi(buf);fmt='MIDI';}
+    else if(ext==='mxl'){info=core.parseMusicXML(await core.readMxl(buf));fmt='MusicXML';}
+    else if(ext==='musicxml'||ext==='xml'){info=core.parseMusicXML(new TextDecoder().decode(buf));fmt='MusicXML';}
+    else if(/^(gp|gp3|gp4|gp5|gpx|gp6|gp7)$/.test(ext)){status('Loading the Guitar Pro reader…');info=await core.readGuitarPro(buf);fmt='Guitar Pro';}
+    else if(ext==='pdf'){status('Loading the PDF reader…');setSheetFile(null);$('sheet').value=await core.readPdfText(buf);}
+    else{setSheetFile(null);$('sheet').value=new TextDecoder().decode(buf);}
+    if(info){if(!info.parts||!info.parts.length)throw new Error('no playable tracks in this file');setSheetFile({info,fmt,name:f.name});if(!$('ttl').value&&info.title)$('ttl').value=info.title;}
+    $('mk').checked=true;status(info?'Loaded '+f.name+': pick the track to use.':'Sheet loaded ('+f.name+')'+(ext==='pdf'?': check the text pulled from the PDF.':'.'));
+  }catch(e){setSheetFile(null);status('Could not read that file: '+(e.message||e));}};
 $('tHalf').onclick=()=>retime(0.5);$('tDouble').onclick=()=>retime(2);
 $('tSet').onclick=()=>{const v=+$('tBpm').value;if(!(v>=30&&v<=300)){status('Enter a tempo between 30 and 300 BPM.');return;}retime(1,v);};
 $('file').onchange=()=>{const f=$('file').files[0];if(f&&!$('ttl').value)$('ttl').value=f.name.replace(/\.[^.]+$/,'').replace(/[_]+/g,' ');$('go').disabled=!$('file').files.length;status($('file').files.length?'Ready.':'Choose a file.');};
@@ -229,10 +251,24 @@ function retime(f,target){if(!LAST)return;if(LAST.def.events)return retimeEvents
    Tried at the 3 transpositions whose overall note-name balance fits best (capo / sheet in another key); the
    cheapest wins. Each event's start is then snapped to the nearest pick within ±0.12 s. */
 let CORE=null;
+/* plus the app's file readers (MIDI, MusicXML, Guitar Pro, PDF text): the block from loadScript() to TAB_SITES and
+   sniffExt() of index.html's main script, run in the same private scope */
 async function loadCore(){if(CORE)return CORE;const t=await (await fetch('../index.html',{cache:'no-cache'})).text();const m=t.match(/<script id="core">([\s\S]*?)<\/script>/);if(!m)throw new Error("could not load Fretline's tab reader");
-  CORE=new Function(m[1]+';return {parseTab,parseChordSheet,chordEvent,strumEvent,transposeName,bestCapo};')();return CORE;}
+  const a=t.indexOf('function loadScript(srcs)'),z=t.indexOf('const TAB_SITES'),sn=t.indexOf('function sniffExt(buf,ext)'),snEnd=t.indexOf('\n}\n',sn);
+  const readers=a>0&&z>a&&sn>0&&snEnd>sn?t.slice(a,z)+'\n'+t.slice(sn,snEnd+3):'';
+  CORE=new Function(m[1]+'\n'+readers+';return {parseTab,parseChordSheet,chordEvent,strumEvent,transposeName,bestCapo,parseMidi,parseMusicXML,eventsFromNotes,chordEventsFromSymbols,chordChart,chordProMeta,'+
+    (readers?'readMxl,readGuitarPro,readPdfText,sniffExt':'readMxl:null,readGuitarPro:null,readPdfText:null,sniffExt:(b,e)=>e')+'};')();return CORE;}
 function capoFromText(t){const m=/\bcapo\b\s*(?:on|at)?\s*:?\s*(?:fret)?\s*(\d{1,2})/i.exec(t)||/(\d{1,2})(?:st|nd|rd|th)\s+fret\s+capo/i.exec(t);const n=m?parseInt(m[1],10):0;return n>0&&n<=12?n:0;}
-function readSheet(core,text,type){let kind=type,events=[];
+let SHEETFILE=null; /* {info:{bpm,bpb,parts},fmt,name} for MIDI / MusicXML / Guitar Pro */
+function fileSheet(core){const info=SHEETFILE.info,part=info.parts[+$('sheetPart').value]||info.parts[0],bpb=info.bpb||4;let kind='tab',events,capo=0;
+  if(part.chords){kind='chords';events=core.chordEventsFromSymbols(part.chords,bpb,0);}
+  else if($('sheetAs').value==='chords'){const cc=core.chordChart(core.eventsFromNotes(part.notes,{bpb,shift:0}),bpb,info.bpm);kind='chords';events=cc.events;capo=cc.capo||0;}
+  else events=core.eventsFromNotes(part.notes,{bpb,shift:0});
+  events=[...events].filter(e=>e.pcs&&e.pcs.length).map(e=>{const o={...e};delete o.label;return o;});
+  // a short clip only needs the start of the file (its own tempo says roughly how much)
+  const secs=+$('secs').value;if(secs&&info.bpm){const lim=secs*info.bpm/60*1.6+4*bpb,t0=events.length?events[0].t:0;events=events.filter(e=>e.t-t0<=lim);}
+  return {kind,events,capo,fromFile:SHEETFILE.fmt+' · '+part.label};}
+function readSheet(core,text,type){if(SHEETFILE)return fileSheet(core);let kind=type,events=[];
   if(type!=='chords'){const r=core.parseTab(text);if(r.events.length>=2||type==='tab'){kind='tab';events=r.events;}}
   if(kind!=='tab'){kind='chords';events=core.parseChordSheet(text,4);}
   events=[...events].filter(e=>e.pcs&&e.pcs.length).map(e=>{const o={...e};delete o.label;return o;});return {kind,events,capo:capoFromText(text)};}
@@ -354,9 +390,9 @@ $('go').onclick=async()=>{
     log('cores '+(navigator.hardwareConcurrency||'?')+' · memory '+(navigator.deviceMemory?navigator.deviceMemory+' GB':'?')+' · WebGPU '+(('gpu' in navigator)?'present':'absent')+' · threads '+(self.crossOriginIsolated?'yes (cross-origin isolated)':'no (single thread)'));
     log('service worker: '+(navigator.serviceWorker&&navigator.serviceWorker.controller?'in charge':'not in charge')+' · reload done '+(sessionStorage.getItem('labReload')?'yes':'no'));
     let sheet=null;const sheetText=$('sheet').value.trim();
-    if(sheetText&&$('mk').checked){status('Reading the sheet…');const core=await loadCore();sheet=readSheet(core,sheetText,$('sheetType').value);
+    if((sheetText||SHEETFILE)&&$('mk').checked){status('Reading the sheet…');const core=await loadCore();sheet=readSheet(core,sheetText,$('sheetType').value);
       if(!sheet.events.length)throw new Error(sheet.kind==='tab'?'no tab found in the sheet (tab lines look like e|--0--3--|, six lines per block)':'no chords found in the sheet');
-      log('sheet: '+(sheet.kind==='tab'?'tab':'chord sheet')+' with '+sheet.events.length+' steps'+(sheet.capo?' · capo '+sheet.capo:''));}
+      log('sheet: '+(sheet.fromFile?sheet.fromFile+' as '+(sheet.kind==='tab'?'notes':'chords'):sheet.kind==='tab'?'tab':'chord sheet')+' with '+sheet.events.length+' steps'+(sheet.capo?' · capo '+sheet.capo:''));}
     let native=null;
     if($('be').value==='native'&&NS){try{
       const st=await NS.status({});log('native: '+st.cores+' cores · model on the phone '+(st.modelBytes/1e6).toFixed(0)+' MB');

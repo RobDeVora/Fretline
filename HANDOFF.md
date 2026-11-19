@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.83, Android app rebuilt for v1.80 (native separator + save to Downloads))
+# Fretline: session handoff (18 Nov 2026, web v1.84, Android app rebuilt for v1.80 (native separator + save to Downloads))
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,24 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.84: Lab sheets from MIDI, MusicXML, Guitar Pro and PDF files
+
+Owner: "Why can't we use the midi file for the tabs or chords?" (v1.83 only took text.) Now the Lab's sheet file
+button takes text/ChordPro, PDF (text pulled out into the box), MIDI, MusicXML (.xml/.musicxml/.mxl) and Guitar Pro.
+- `loadCore` also lifts the app's file readers out of index.html's main script: the block from
+  `function loadScript(srcs)` up to `const TAB_SITES` (loadScript, unzip, readMxl, readGuitarPro, readPdfText) plus
+  `sniffExt`, run in the same private scope as the core. **Keep those functions contiguous there** (or update the
+  markers in `loadCore`).
+- File → `SHEETFILE {info,fmt,name}`; Track picker (default: a guitar track with tab, else any guitar, else first);
+  "Use it as" Notes (`eventsFromNotes`, string/fret from the file when it has tab) or Chords (`chordChart`, its capo
+  passed to the alignment); chord-symbol tracks use `chordEventsFromSymbols`. With a short clip ("first 30 s") only the
+  start of the file is used (file tempo × 1.6 + a bar). The file's own timing/tempo is otherwise ignored: the
+  alignment places every step from the recording.
+- Tests: `MIDI=/tmp/riff.mid sheet_tab.py` (120 BPM file with bass + drums + 2 empty bars vs the 99.5 BPM riff:
+  guitar track picked, 64/64); `MIDI=/tmp/chords.mid sheet_chords.py` (as chords: changes 0-72 ms; strums 66/64).
+  MIDI test files are written with `mido` (snippet in tools/lab-tests/README.md). MusicXML / Guitar Pro use the same
+  readers as the import screen (not separately tested in the Lab).
 
 ## v1.83: Lab: line a tab or chord sheet up with the recording
 

@@ -15,7 +15,10 @@ truth={(m,b*4+i*0.5) for b in range(8) for i,m in enumerate([40,40,52,40,45,45,4
 with sync_playwright() as p:
   b=p.chromium.launch(executable_path='/usr/bin/google-chrome');ctx=b.new_context(viewport={'width':412,'height':900},service_workers='block');pg=ctx.new_page();errs=[];pg.on('pageerror',lambda e:errs.append(str(e)))
   pg.goto('http://localhost:8769/lab/stems.html?ortbase=http://localhost:8771/&modelurl=http://localhost:8771/dummy.onnx');pg.wait_for_timeout(1000)
-  pg.set_input_files('#file',__import__('os').environ.get('RIFF','/tmp/stemtest/riff100_clean.wav'));pg.select_option('#secs','0');pg.select_option('#be','wasm');pg.fill('#ttl','Riff tab');pg.click('#sheetBox summary');pg.fill('#sheet',tab);pg.click('#go');pg.wait_for_function('window.__labDone',timeout=900000)
+  pg.set_input_files('#file',__import__('os').environ.get('RIFF','/tmp/stemtest/riff100_clean.wav'));pg.select_option('#secs','0');pg.select_option('#be','wasm');pg.fill('#ttl','Riff tab');pg.click('#sheetBox summary')
+  if __import__('os').environ.get('MIDI'):pg.set_input_files('#sheetFile',__import__('os').environ['MIDI']);pg.wait_for_timeout(1500);print('file:',pg.text_content('#sheetFileName'),'· track',pg.eval_on_selector('#sheetPart','e=>e.options[e.selectedIndex].text'))
+  else:pg.fill('#sheet',tab)
+  pg.click('#go');pg.wait_for_function('window.__labDone',timeout=900000)
   print('\n'.join(l for l in pg.text_content('#log').split('\n') if l.startswith(('sheet','tempo','song','ERROR'))))
   d=pg.evaluate('window.__labSong');got={(n['midi'],e['t']) for e in d['events'] for n in e['notes']}
   print('bpm',d['bpm'],'steps',len(d['events']),'· riff notes on the right beat:',len(truth&got),'/',len(truth),'· wrong:',sorted(got-truth)[:8])

@@ -16,3 +16,8 @@ section of HANDOFF.md) into `/tmp/ortpkg/package/dist/`; serve the repo on 8769;
 | `sheet_tab.py` (env `RIFF=`) | v1.83: tab with uneven spacing lined up with the riff: 64/64; half tempo moves nothing; app opens it, ♩ 2× |
 | `sheet_chords.py` (env `SHEET=`) | v1.83: chord sheet without lengths vs synthetic strums (`make_chords90.py` builds `/tmp/chordtest`); changes within 72 ms; strum mode; transposed / capo sheets |
 | — | `sheet_tab.py` default audio `/tmp/stemtest/riff100_clean.wav` = riff100.wav through `ffmpeg -af "lowpass=f=1800,lowpass=f=1800"` |
+
+v1.84 MIDI sheets: `MIDI=/tmp/riff.mid python3 sheet_tab.py` and `MIDI=/tmp/chords.mid python3 sheet_chords.py`.
+Make the files with `pip install mido`, then: riff.mid = 120 BPM, tracks Bass (prog 33) / Drums (ch 10) / Guitar
+(prog 25) with the riff [40,40,52,40,45,45,47,50] as 8ths from beat 8 for 8 bars; chords.mid = 100 BPM, one track,
+G C D Em G C one bar each (G=[43,47,50,55,59,67], C=[48,52,55,60,64], D=[50,57,62,66], Em=[40,47,52,55,59,64]).
