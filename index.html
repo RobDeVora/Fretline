@@ -973,10 +973,13 @@ function parseMidi(bytes){
   // that short first bar is a pickup: move everything later so the real bars start on the bar lines
   let pad=0;if(tsList.length>1&&tsList[0].tick===0){const p=tsList[0].n*4/tsList[0].d;if(p<bpb&&Math.abs(tsList[1].tick-p*div)<1)pad=bpb-p;}
   const groups=new Map();
-  for(const n of raw){if(n.ch===9)continue;const key=n.track+':'+n.ch;if(!groups.has(key))groups.set(key,[]);groups.get(key).push({beat:n.tick/div+pad,dur:n.dur/div,midi:n.midi});}
+  /* v1.86: channels of one track that share an instrument are one part. Tab programs (Guitar Pro, Songsterr) export
+     each string on its own channel: a guitar came in as six "parts", one per string (the Lab took the thumb line only). */
+  const chProg=(tr,ch)=>progs[tr+':'+ch];
+  for(const n of raw){if(n.ch===9)continue;const pr=chProg(n.track,n.ch);const key=n.track+':'+(pr!=null?'p'+pr:'c'+n.ch);if(!groups.has(key))groups.set(key,{ch:n.ch,notes:[]});groups.get(key).notes.push({beat:n.tick/div+pad,dur:n.dur/div,midi:n.midi});}
   const parts=[];
-  for(const [key,notes] of groups){
-    const [tr,ch]=key.split(':').map(Number);const pr=progs[key]!=null?progs[key]:(progs[tr+':'+ch]);
+  for(const [key,g] of groups){const notes=g.notes.sort((a,b)=>a.beat-b.beat||a.midi-b.midi);
+    const tr=+key.split(':')[0],ch=g.ch;const pr=progs[key]!=null?progs[key]:(progs[tr+':'+ch]);
     const isGuitar=pr!=null&&pr>=24&&pr<=31;
     const inst=pr==null?'':isGuitar?GM_GTR[pr-24]:GM_FAM[Math.floor(pr/8)];
     let label=tnames[tr]||inst||('Track '+(tr+1));
@@ -4009,7 +4012,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.85';
+const APP_VERSION='1.86';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

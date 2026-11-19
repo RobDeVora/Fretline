@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.85, Android app rebuilt for v1.80 (native separator + save to Downloads))
+# Fretline: session handoff (18 Nov 2026, web v1.86, Android app rebuilt for v1.80 (native separator + save to Downloads))
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,31 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.86: MIDI tab exports read whole; files lined up by their own timing
+
+Owner sent the full TYSK MP3, the Songsterr-style MIDI (Morgan_Wallen-Thought_You_Should_Know_Tab-12-15-2025.mid) and a
+1.85 report (real guitar loaded, from a sheet; notes didn't match what was heard). Reproduced here end to end
+(full song through the real model in headless Chrome, single thread: 703 s).
+- **MIDI reader split one guitar into six parts**: tab programs export each string on its own channel (ch 0 = high e
+  … ch 5 = low E; this file also splits vocals over 5 and bass over 3). `parseMidi` grouped by track:channel → the
+  Lab took "part 1" = the D-string thumb notes only (252 of 773). Now channels of one track with the same program are
+  one part (key track:p<program>, else track:c<channel>). Affects the app's import too (twinkle/riff/chords files
+  unchanged). This file is in E♭ tuning (each string's lowest note a semitone under standard): Fretline has no
+  alternate tunings, so notes show at the same pitch in standard tuning.
+- **File timing**: the order-only path forced the MIDI onto the recording from 0 s, but the file's guitar starts at
+  beat 47 (20 s) while the recording's starts at 0.3 s → notes seconds off. `fitFileTiming`: one offset + tempo for
+  the whole file (file tempo, ½, 2× each ±1% in 0.25% steps, offsets every 50 ms, then ±0.3% / ±60 ms fine; scored
+  by note-name match vs the average, per candidate transposition; precomputed per distinct note set). TYSK: 140 BPM,
+  beat 0 at −19.84 s, 0.139 above average vs top-1% 0.051. Then the whole file is moved by the median gap to the
+  nearest pick (chroma peaks ~0.1 s after a pick: −86 ms) and each note snapped to its pick if within 35 ms (TYSK: 422
+  of 773; median 3 ms from the file's timing). Tempo/bars come from the file (bar 1 = the file's bar of its first
+  note). Both ways are tried for files: the order-only result only wins if it also follows the file's rhythm
+  (Theil-Sen line vs file beats, ≥80% within 0.1 s) and matches the chroma better (a file at another tempo than the
+  recording: synthetic 120-BPM MIDI vs 100-BPM riff → order-only, 100% linear, 64/64). TYSK: order-only only 14%
+  linear → file timing.
+- Tests: /tmp/fitt.py-style check (guitar stem from the full run + the MIDI; not in the repo since the MP3/MIDI are
+  the owner's); `RIFF=riff_even MIDI=riff.mid sheet_tab.py` 64/64; chords MIDI unchanged.
 
 ## v1.85: recording songs keep the played timing; report shows the recording's state
 

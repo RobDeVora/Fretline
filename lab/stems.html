@@ -267,7 +267,7 @@ function fileSheet(core){const info=SHEETFILE.info,part=info.parts[+$('sheetPart
   events=[...events].filter(e=>e.pcs&&e.pcs.length).map(e=>{const o={...e};delete o.label;return o;});
   // a short clip only needs the start of the file (its own tempo says roughly how much)
   const secs=+$('secs').value;if(secs&&info.bpm){const lim=secs*info.bpm/60*1.6+4*bpb,t0=events.length?events[0].t:0;events=events.filter(e=>e.t-t0<=lim);}
-  return {kind,events,capo,fromFile:SHEETFILE.fmt+' · '+part.label};}
+  return {kind,events,capo,bpm:info.bpm,bpb,fromFile:SHEETFILE.fmt+' · '+part.label};}
 function readSheet(core,text,type){if(SHEETFILE)return fileSheet(core);let kind=type,events=[];
   if(type!=='chords'){const r=core.parseTab(text);if(r.events.length>=2||type==='tab'){kind='tab';events=r.events;}}
   if(kind!=='tab'){kind='chords';events=core.parseChordSheet(text,4);}
@@ -318,17 +318,62 @@ function alignPath(F,A,events,kind,shift){const m=events.length,n=F.n;const T=te
     if(ch){const prev=ch===1?st-1:st-1-K;if(st!==POST&&(st-1)%K===0)starts[(st-1)/K]=f;st=prev;}}
   path[0]=st===0?0:1+Math.floor((st-1)/K);if(st>=1&&st!==POST&&(st-1)%K===0&&starts[(st-1)/K]<0)starts[(st-1)/K]=0;
   return {cost:D[end],starts,end,path,pk};}
+/* v1.86: a MIDI / MusicXML / Guitar Pro file has real timing. Find the one offset + tempo where the whole file fits
+   the guitar stem best (mean chroma match of each note at its predicted time), searching the file's tempo (also ½, 2×)
+   ±1% and the likely transpositions; then move each note to the strongest pick within ±70 ms. A file with a long
+   empty lead-in (TYSK's guitar starts at beat 47 = 20 s, the recording at 0.3 s) or sections the order-only path
+   can't skip is handled exactly. Returns null when no fit clearly stands out (then the order-only path is used). */
+function fitFileTiming(sheet,F,A,shifts){const ev=sheet.events,m=ev.length;if(m<8)return null;
+  const dur=F.t0+F.n*F.dt,B=ev.map(e=>e.t);const keyOf=(e,sh)=>e.pcs.map(p=>(p+sh)%12).sort((a,b)=>a-b).join(',');
+  let best=null;const all=[];
+  for(const sh of shifts){const keys=[...new Set(ev.map(e=>keyOf(e,sh)))],kix=ev.map(e=>keys.indexOf(keyOf(e,sh)));const K=keys.length;
+    const S=new Float32Array(F.n*K);keys.forEach((k,j)=>{const pcs=k.split(',').map(Number);const t=new Float32Array(12);for(const p of pcs){t[p]+=1;if(pcs.length===1){t[(p+7)%12]+=0.35;t[(p+4)%12]+=0.15;}}
+      let q=0;for(let p=0;p<12;p++)q+=t[p]*t[p];q=Math.sqrt(q);for(let f=0;f<F.n;f++){let d=0;for(let p=0;p<12;p++)d+=F.C[f*12+p]*t[p];S[f*K+j]=d/q;}});
+    let mean=0;for(let i=0;i<S.length;i++)mean+=S[i];mean/=S.length;
+    const score=(off,spb)=>{let sc=0,inn=0;for(let i=0;i<m;i++){const f=Math.round((off+B[i]*spb+0.03-F.t0)/F.dt);if(f<0||f>=F.n)continue;sc+=S[f*K+kix[i]]-mean;inn++;}return {sc,inn};};
+    for(const mul of [1,0.5,2])for(let k=-4;k<=4;k++){const bpm=sheet.bpm*mul*(1+k*0.0025);if(bpm<40||bpm>260)continue;const spb=60/bpm;
+      const lo=-B[m-1]*spb,hi=dur-B[0]*spb;for(let off=lo;off<=hi;off+=0.05){const r=score(off,spb);if(r.inn<Math.min(m,8))continue;all.push(r.sc);if(!best||r.sc>best.sc)best={sc:r.sc,inn:r.inn,off,bpm,sh,mean};}}
+    if(best&&best.sh===sh){for(let it=0;it<2;it++){const b0=best;for(let db=-6;db<=6;db++){const bpm=b0.bpm*(1+db*0.0005),spb=60/bpm;for(let o=-0.06;o<=0.06;o+=0.005){const r=score(b0.off+o,spb);if(r.sc>best.sc)best={...best,sc:r.sc,inn:r.inn,off:b0.off+o,bpm};}}}}}
+  if(!best)return null;
+  // does it stand out? the best fit per in-range note vs the spread of all tried fits
+  all.sort((a,b)=>a-b);const med=all[all.length>>1],p99=all[Math.floor(all.length*0.99)];const per=best.sc/best.inn;
+  log('sheet: file timing fits best at '+(Math.round(best.bpm*100)/100)+' BPM, its beat 0 at '+best.off.toFixed(2)+' s'+(best.sh?', +'+best.sh+' semitones':'')+' (match '+per.toFixed(3)+' above average per note; typical fit '+(med/best.inn).toFixed(3)+', top 1% '+(p99/best.inn).toFixed(3)+')');
+  if(per<0.04||best.sc<p99*1.04){log('sheet: the file\'s timing doesn\'t clearly fit this recording; lining it up note by note instead');return null;}
+  const spb=60/best.bpm;const peakAt=(t,w)=>{const i0=Math.max(0,Math.floor((t-w-A.t0)/A.dt)),i1=Math.min(A.fl.length-1,Math.ceil((t+w-A.t0)/A.dt));let bi=-1,bv=0;
+    for(let i=i0;i<=i1;i++){const r=A.fl[i]/(A.med[i]+1);if(r<2)continue;const v=r*(1-0.6*Math.abs(A.t0+i*A.dt-t)/w);if(v>bv){bv=v;bi=i;}}return bi<0?t:A.t0+bi*A.dt;};
+  /* the chroma peaks ~0.1 s after a pick, so the fitted offset runs late: measure the usual gap to the nearest pick
+     (median within ±0.15 s; TYSK: −90 ms → 68% of notes within 20 ms of a pick) and shift the whole file by it */
+  const pkT=[];for(let i=1;i+1<A.fl.length;i++){const r=A.fl[i]/(A.med[i]+1);if(r>=2&&A.fl[i]>=A.fl[i-1]&&A.fl[i]>=A.fl[i+1])pkT.push(A.t0+i*A.dt);}
+  const nearest=t=>{let lo=0,hi=pkT.length-1;while(lo<hi){const mid=(lo+hi)>>1;if(pkT[mid]<t)lo=mid+1;else hi=mid;}let b=null;for(const j of [lo-1,lo])if(j>=0&&j<pkT.length&&(b==null||Math.abs(pkT[j]-t)<Math.abs(b-t)))b=pkT[j];return b;};
+  const gaps=[];for(let i=0;i<m;i++){const tp=best.off+B[i]*spb;const q=nearest(tp);if(q!=null&&Math.abs(q-tp)<=0.15)gaps.push(q-tp);}gaps.sort((a,b)=>a-b);
+  const lag=gaps.length>=8?gaps[gaps.length>>1]:0;best.off+=lag;
+  const placed=[];let lastT=-1,moved=0;
+  for(let i=0;i<m;i++){const tp=best.off+B[i]*spb;if(tp<0||tp>dur-0.05)continue;const q=nearest(tp);let t=q!=null&&Math.abs(q-tp)<=0.035?q:tp;if(t<=lastT+0.02)t=tp>lastT+0.02?tp:lastT+0.02;if(Math.abs(t-tp)>0.003)moved++;lastT=t;placed.push({e:ev[i],t});}
+  log('sheet: whole file moved '+Math.round(lag*1000)+' ms onto the picks; '+placed.length+' of '+m+' steps fall inside the recording, '+moved+' nudged ≤35 ms onto their pick');
+  return {placed,shift:best.sh,bpm:best.bpm,beat0:best.off,firstBeat:B[0]};}
 function alignSheet(sheet,g22){const F=chromaFrames(g22),A=attackCurve(g22);const ev=sheet.events;
   // which transpositions fit the recording's overall note names best
   const hs=new Float64Array(12),ha=new Float64Array(12);for(const e of ev)for(const p of e.pcs)hs[p]+=sheet.kind==='chords'?(e.d||1):1;
   for(let f=0;f<F.n;f++)for(let p=0;p<12;p++)ha[p]+=F.C[f*12+p];
   const cand=[];for(let sh=0;sh<12;sh++){let c=0;for(let p=0;p<12;p++)c+=hs[p]*ha[(p+sh)%12];cand.push([c,sh]);}cand.sort((a,b)=>b[0]-a[0]);
   const tries=[...new Set([sheet.capo%12,...cand.slice(0,3).map(x=>x[1])])].slice(0,4);
+  const fit=sheet.fromFile&&sheet.bpm?fitFileTiming(sheet,F,A,tries):null;
   let best=null;for(const sh of tries){const r=alignPath(F,A,ev,sheet.kind,sh);log('sheet: tried '+(sh?'+'+sh+' semitones':'as written')+' → fit '+(1-r.cost/F.n).toFixed(3));if(!best||r.cost<best.cost)best={...r,shift:sh};}
   // event times, snapped to the nearest pick
   const peakNear=(t,w,lo)=>{const i0=Math.max(0,Math.floor((Math.max(t-w,lo)-A.t0)/A.dt)),i1=Math.min(A.fl.length-1,Math.ceil((t+w-A.t0)/A.dt));let bi=-1,bv=0;
     for(let i=i0;i<=i1;i++){const r=A.fl[i]/(A.med[i]+1);if(r<2)continue;const v=r*(1-0.5*Math.abs(A.t0+i*A.dt-t)/w);if(v>bv){bv=v;bi=i;}}return bi<0?t:A.t0+bi*A.dt;};
   const out=[];let lastT=-1;for(let i=0;i<ev.length;i++){const f=best.starts[i];if(f<0)continue;let t=peakNear(F.t0+f*F.dt-0.02,0.12,lastT+0.06);if(t<=lastT+0.03)t=lastT+0.03;lastT=t;out.push({e:ev[i],t});}
+  /* with a file, both ways were tried: keep the one whose notes match the guitar better (each note's names in the
+     chroma ~0.1 s after it, minus the average match); a file at another tempo than the recording loses here */
+  if(fit){const q=(pl,sh)=>{let sc=0;for(const p of pl){const f=Math.round((p.t+0.1-F.t0)/F.dt);if(f<0||f>=F.n)continue;const t=new Float32Array(12);const one=p.e.pcs.length===1;
+        for(const c of p.e.pcs){t[(c+sh)%12]+=1;if(one){t[(c+sh+7)%12]+=0.35;t[(c+sh+4)%12]+=0.15;}}let d=0,qq=0;for(let k=0;k<12;k++){d+=F.C[f*12+k]*t[k];qq+=t[k]*t[k];}sc+=d/Math.sqrt(qq);}return sc/Math.max(1,ev.length);};
+    /* …but the note-by-note path maximises exactly that match, so it only wins if its times also follow the file's
+       rhythm (a straight line against the file's beats, Theil-Sen, ≥ 80% of notes within 0.1 s): that is the case
+       of a file at a different tempo from the recording, not of a path that went astray */
+    const lin=pl=>{const n=pl.length;if(n<8)return 0;const k=Math.max(1,n>>1),sl=[];for(let i=0;i+k<n;i++){const db=pl[i+k].e.t-pl[i].e.t;if(db>0)sl.push((pl[i+k].t-pl[i].t)/db);}if(!sl.length)return 0;sl.sort((a,b)=>a-b);const sp=sl[sl.length>>1];
+      const ic=pl.map(p=>p.t-sp*p.e.t).sort((a,b)=>a-b)[n>>1];let inl=0;for(const p of pl)if(Math.abs(p.t-sp*p.e.t-ic)<0.1)inl++;return inl/n;};
+    const qf=q(fit.placed,fit.shift),qd=q(out,best.shift),ld=lin(out);log('sheet: match using the file\'s timing '+qf.toFixed(3)+' · note by note '+qd.toFixed(3)+' (follows the file\'s rhythm for '+Math.round(ld*100)+'% of notes)');
+    if(!(ld>=0.8&&qd>qf))return {placed:fit.placed,shift:fit.shift,A,fileTempo:fit};}
   const skipped=ev.length-out.length;
   log('sheet: '+sheet.kind+', '+ev.length+' '+(sheet.kind==='tab'?'notes/chords':'chords')+'; '+out.length+' lined up'+(skipped?', '+skipped+' not in this part of the recording':'')+(best.shift?' · sounds '+best.shift+' semitones higher than written'+(sheet.capo===best.shift?' (capo '+sheet.capo+')':''):''));
   return {placed:out,shift:best.shift,A};}
@@ -349,8 +394,11 @@ async function makeSheetSong(sheet,gL,gR,L,Rc,rL,rR,N){
   const t0=performance.now();const al=alignSheet(sheet,g22);log('sheet: lined up in '+((performance.now()-t0)/1000).toFixed(1)+' s');
   let placed=al.placed;if(!placed.length)throw new Error('the sheet could not be lined up with this recording');
   if(sheet.kind==='chords'&&$('strumMode').value==='strums'){placed=strumsFromRecording(placed,al.A,core);log('sheet: '+placed.length+' strums taken from the recording');}
-  const bt=findBeats(m22);let b0=bt.first;const spb=60/bt.bpm,first=placed[0].t;while(b0+4*spb<=first-0.05)b0+=4*spb;while(b0>first+0.05)b0-=spb;
-  log('tempo: '+bt.bpm+' BPM, bar 1 at '+b0.toFixed(2)+' s');
+  let bt,b0;const ft=al.fileTempo;
+  if(ft){/* the file's own bars: bar 1 = the file's bar holding its first note */const bpb=sheet.bpb||4,spb=60/ft.bpm;bt={bpm:Math.round(ft.bpm*1000)/1000};b0=ft.beat0+Math.floor(ft.firstBeat/bpb+1e-6)*bpb*spb;while(b0>placed[0].t+0.05)b0-=bpb*spb;
+    log('tempo: '+Math.round(bt.bpm*100)/100+' BPM from the file, bar 1 at '+b0.toFixed(2)+' s');}
+  else{bt=findBeats(m22);b0=bt.first;const spb=60/bt.bpm,first=placed[0].t;while(b0+4*spb<=first-0.05)b0+=4*spb;while(b0>first+0.05)b0-=spb;
+    log('tempo: '+bt.bpm+' BPM, bar 1 at '+b0.toFixed(2)+' s');}
   /* the recording sounds `shift` semitones above the sheet: up to 7 is read as a capo (shapes as written); more
      than that, chord names are rewritten in the recording's key (with the capo that gives the easiest shapes) */
   let capo=al.shift>=1&&al.shift<=7?al.shift:0;
