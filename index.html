@@ -331,6 +331,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
       <span class="small" id="sMicNow" style="color:var(--accent2)"></span></div>
     <div class="field"><label>Latency compensation: <span id="sLatV"></span> ms</label><input type="range" id="sLat" min="0" max="600" step="10"><span class="small">Raise this if you play on time but notes count as late.</span></div>
     <div class="field"><label>Timing window</label><select id="sTiming"><option value="1">Normal</option><option value="1.5">Relaxed</option><option value="2">Very relaxed</option></select><span class="small">How early or late a note can be and still count.</span></div>
+    <div class="field"><label>Chord matching</label><select id="sChordM"><option value="strict">Strict</option><option value="standard">Standard</option><option value="beginner">Beginner</option></select><span class="small">How complete a strummed chord must sound to count. Strict: every string. Standard: most strings, but a wrong extra note counts against you. Beginner: most strings, and a brushed extra string is fine. A different chord never counts, and single notes aren't affected.</span></div>
     <div class="field inline"><label>Show the timing window as a shaded band</label><input type="checkbox" id="sBand"></div>
     <div class="small" style="margin-top:-6px">Off: just aim for the rings on the hit line. The window still works the same.</div>
     <div class="field"><label>Sound delay: <span id="sDelV"></span></label><input type="range" id="sDel" min="-10" max="400" step="10"><span class="small">How long the app's sound takes to reach your ears. Bluetooth headphones add 150–300 ms; slide left to the end for Auto. The band, Listen and the count-in play this much early so you hear them right on the line.</span>
@@ -1428,7 +1429,7 @@ function buildSong(def){
 
 /* ================= Storage & settings ================= */
 const store={get(k,d){try{const v=localStorage.getItem('fretline:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fretline:'+k,JSON.stringify(v));}catch(e){}}};
-const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:false,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,band:false,micId:'',backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1,sing:true,fingerGuide:true,noteBy:'finger',vocalGuide:true,vocalVol:0.7,vocalLibrary:true,vocalFiles:true,vocalMadeUp:true},store.get('settings',{}));
+const settings=Object.assign({fx:'miss',sound:'basic',sens:5,latency:90,anyOctave:false,names:false,metronome:false,zoom:1,big:1.3,fretboard:true,strumView:'fingers',timing:1,chordMatch:'strict',band:false,micId:'',backing:true,bandVol:0.6,headphones:false,deadStrings:true,soundDelay:-1,sing:true,fingerGuide:true,noteBy:'finger',vocalGuide:true,vocalVol:0.7,vocalLibrary:true,vocalFiles:true,vocalMadeUp:true},store.get('settings',{}));
 // with the Android app, the sound delay and "I'm using headphones" are kept separately for each output
 // (phone speaker, Bluetooth, wired, USB) and swapped in when the sound moves (see outRoute below)
 let outRoute=null,outName='';
@@ -2565,6 +2566,19 @@ function strumPcs(e){const cp=G.capo||0;if(e._pcsFor!==cp){let p=null;const ns=e
 function songChords(){const ev=G.song.events,cp=G.capo||0;if(G._scFor===ev&&G._scCp===cp)return G._sc;const m=new Map();
   for(const e of ev){const p=e.strum?(e.strum==='x'?null:strumPcs(e)):isChordEv(e)?(e.pcs||[]).map(x=>(x+cp)%12):null;if(p&&p.length>=2){const k=p.slice().sort().join(',');if(!m.has(k))m.set(k,{k,p});}}
   G._sc=[...m.values()];G._scFor=ev;G._scCp=cp;return G._sc;}
+/* v1.89 Settings › Chord matching. Strict is the behaviour before v1.89 (unchanged). fit / tol: strums (chord
+   template fit, and how close a rival chord in the song may come); part / inS: chord steps (share of the chord's
+   notes heard, share of the sound inside the chord). Every mode keeps "no other chord in the song fits better". */
+/* rivals for Standard / Beginner: the song's chords plus every major and minor triad, so a chord that isn't in the
+   song (Am strummed for C) can't pass for one that is just because they share notes */
+function cmRivals(){if(G._cmrFor===G.song.events&&G._cmrCp===(G.capo||0))return G._cmr;const m=new Map();for(const q of songChords())m.set(q.k,q);
+  for(let r=0;r<12;r++)for(const iv of [[0,4,7],[0,3,7]]){const p=iv.map(x=>(r+x)%12);const k=p.slice().sort().join(',');if(!m.has(k))m.set(k,{k,p});}
+  G._cmr=[...m.values()];G._cmrFor=G.song.events;G._cmrCp=G.capo||0;return G._cmr;}
+/* a rival chord only counts if a note it has and the expected chord doesn't is really heard: a partial G (just
+   its G and B strings) is also part of Em, but without an E it isn't Em */
+function cmBest(P,k){const c=strumChroma();let mx=0;for(let j=0;j<12;j++)mx=Math.max(mx,c[j]);let best=0;
+  for(const q of cmRivals()){if(q.k===k)continue;if(!q.p.some(pc=>!P.includes(pc)&&c[pc]>=0.25*mx))continue;best=Math.max(best,chordFit(q.p,c));}return best;}
+const CMODE={strict:{fit:0.5,tol:0.015},standard:{fit:0.44,tol:0.02,part:0.6,inS:0.5},beginner:{fit:0.38,tol:0.03,part:0.6,inS:0.33}};
 function matchEvent(e,i,now){
   /* v1.74: a strum counts only if (1) it was strummed inside this step's window (before, a strum could take the
      previous step's strum and the whole song slid one strum early, "okay -380 ms"), and (2) it sounds like this
@@ -2574,15 +2588,21 @@ function matchEvent(e,i,now){
     const P=e.strum==='x'||!analyser?null:strumPcs(e);if(!P){G.usedOnset=det.onsetAt;return true;}
     if(G.stOn!==det.onsetAt||G.stIdx!==i){G.stOn=det.onsetAt;G.stIdx=i;G.stOk=0;}
     const sc=chordFit(P),k=P.slice().sort().join(',');let best=0;for(const q of songChords())if(q.k!==k)best=Math.max(best,chordFit(q.p));
-    if(window.__stLog)window.__stLog.push([i,+sc.toFixed(3),+best.toFixed(3)]);
-    if(sc>=0.5&&sc>=best-(window.__stTol!=null?window.__stTol:0.015))G.stOk++;if(G.stOk>=2){G.usedOnset=det.onsetAt;return true;}return false;}
+    const CM=CMODE[settings.chordMatch]||CMODE.strict;best=CM.part?cmBest(P,k):Math.max(best,cmBest(P,k));
+    if(window.__stLog){const c=strumChroma();window.__stLog.push([i,+sc.toFixed(3),+best.toFixed(3),Array.from(c).map(x=>+x.toFixed(2))]);}if(sc>=CM.fit&&sc>=best-(window.__stTol!=null?window.__stTol:CM.tol))G.stOk++;if(G.stOk>=2){G.usedOnset=det.onsetAt;return true;}return false;}
   const key=evKey(e);
   if(key===G.lastHitKey&&!(det.onsetAt>G.lastHitAt))return false;
   if(G.cfIdx!==i){G.cfIdx=i;G.cf=0;}
   if(isChordEv(e)){
     if(!analyser||det.rms<gate()){G.cf=Math.max(0,G.cf-1);return false;}
-    const sc=chordScore(G.capo?e.pcs.map(pc=>(pc+G.capo)%12):e.pcs);
-    if(sc>0.42)G.cf++;else G.cf=Math.max(0,G.cf-1);
+    const P=G.capo?e.pcs.map(pc=>(pc+G.capo)%12):e.pcs;const CM=CMODE[settings.chordMatch]||CMODE.strict;
+    let ok;if(!CM.part)ok=chordScore(P)>0.42;
+    else{chordScore(P);const c=chromaC,tot=chromaTot;let inS=0,present=0;for(const pc of P){inS+=c[pc];if(tot>0&&c[pc]/tot>0.04)present++;}
+      /* v1.89 Standard / Beginner: most of the chord's notes heard (not all), a smaller share of the sound in the
+         chord (an extra brushed string is fine in Beginner), and no other chord in the song fits better */
+      ok=tot>0&&present>=Math.ceil(P.length*CM.part)&&inS/tot>=CM.inS;
+      if(ok){const k=P.slice().sort().join(','),sc=chordFit(P);ok=sc>=cmBest(P,k)-CM.tol;}}
+    if(ok)G.cf++;else G.cf=Math.max(0,G.cf-1);
     return G.cf>=3;
   }
   const m=det.stableMidi,cp=(G.capo||0);G._mNow=now;
@@ -2698,7 +2718,7 @@ function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]
 function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.notes.push(txt);}
 function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);}}
 function diagReport(){
-  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+(TUNING_ID!=='std'?' · tuning '+TUNING_ID:'')+(G.def&&G.def.recAudio?' · recording: backing '+(RECB.buf?(RECB.buf.duration).toFixed(0)+' s':'not loaded')+', real guitar '+(RECB.gbuf?'yes':G.def.recGuitar?'FAILED '+(RECB.gErr||''):'none (older song)')+', '+(G.def.recEvT?'from a sheet':'AI notes')+', offset '+(G.def.recOffset||0).toFixed(3)+' s':'')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+')'+(tuneOff?' · tuning '+(tuneOff>0?'+':'')+tuneOff+' cents':'')+' · '+G.hits+'/'+S.events.length];
+  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+(TUNING_ID!=='std'?' · tuning '+TUNING_ID:'')+(settings.chordMatch&&settings.chordMatch!=='strict'?' · chords '+settings.chordMatch:'')+(G.def&&G.def.recAudio?' · recording: backing '+(RECB.buf?(RECB.buf.duration).toFixed(0)+' s':'not loaded')+', real guitar '+(RECB.gbuf?'yes':G.def.recGuitar?'FAILED '+(RECB.gErr||''):'none (older song)')+', '+(G.def.recEvT?'from a sheet':'AI notes')+', offset '+(G.def.recOffset||0).toFixed(3)+' s':'')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+')'+(tuneOff?' · tuning '+(tuneOff>0?'+':'')+tuneOff+' cents':'')+' · '+G.hits+'/'+S.events.length];
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
     L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.notes.length?' · '+d.notes.join(','):''));});
@@ -3277,7 +3297,7 @@ function tunerUpdate(){
 let settingsOpen=false;
 function syncSettingsUI(){{const P=IS_APP&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;
   $('#appBuild').innerHTML=!IS_APP?'':P&&P.outputRoute?'Android app: latest build (full screen, sound delay per output'+(outRoute?' · sound now on '+ROUTE_NAMES[outRoute]:'')+')':'Android app: an older build. <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">Install the latest Fretline.apk</a> for full screen and a sound delay for each output.';}$('#sFingerGuide').checked=settings.fingerGuide!==false;$('#cNoteBy').value=settings.noteBy==='string'?'string':'finger';$('#sVoxOn').checked=settings.vocalGuide!==false;$('#sVoxLib').checked=settings.vocalLibrary!==false;$('#sVoxFile').checked=settings.vocalFiles!==false;$('#sVoxMade').checked=settings.vocalMadeUp!==false;
-  $('#sVoxVol').value=settings.vocalVol==null?0.7:settings.vocalVol;$('#sVoxV').textContent=Math.round((settings.vocalVol==null?0.7:settings.vocalVol)*100)+'%';$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+  $('#sVoxVol').value=settings.vocalVol==null?0.7:settings.vocalVol;$('#sVoxV').textContent=Math.round((settings.vocalVol==null?0.7:settings.vocalVol)*100)+'%';$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sChordM').value=settings.chordMatch||'strict';$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();fillMicList();};
@@ -3310,6 +3330,7 @@ $('#sFingerGuide').onchange=e=>{settings.fingerGuide=e.target.checked;saveSettin
 $('#cNoteBy').onchange=e=>{settings.noteBy=e.target.value;saveSettings();};
 $('#sStrumView').onchange=e=>{settings.strumView=e.target.value;saveSettings();};
 $('#sTiming').onchange=e=>{settings.timing=+e.target.value;saveSettings();};
+$('#sChordM').onchange=e=>{settings.chordMatch=e.target.value;saveSettings();};
 $('#sBand').onchange=e=>{settings.band=e.target.checked;saveSettings();};
 $('#sPhones').onchange=e=>{settings.headphones=e.target.checked;saveSettings();};
 $('#sDel').oninput=e=>{const v=+e.target.value;settings.soundDelay=v<0?-1:v;saveSettings();syncSettingsUI();};
@@ -4110,7 +4131,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.88';
+const APP_VERSION='1.89';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

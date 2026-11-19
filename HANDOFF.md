@@ -1,7 +1,7 @@
-# Fretline: session handoff (18 Nov 2026, evening · web v1.88 · Android APK last rebuilt at v1.80)
+# Fretline: session handoff (18 Nov 2026, evening · web v1.89 · Android APK last rebuilt at v1.80)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
-how detection works now, what's open, and a changelog (newest first from v1.88 down to v1.69, then the older
+how detection works now, what's open, and a changelog (newest first from v1.89 down to v1.69, then the older
 v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conversation" below.**
 
 ## The project
@@ -43,7 +43,7 @@ v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conver
 
 ## Where things stand (18 Nov 2026, evening)
 
-**Versions:** web **v1.88** (sw cache `fretline-v76`). The APK was last rebuilt for v1.80 (Capacitor plugins:
+**Versions:** web **v1.89** (sw cache `fretline-v77`). The APK was last rebuilt for v1.80 (Capacitor plugins:
 `IncomingPlugin`, `NativeMicPlugin`, `NativeSeparatorPlugin` = Demucs on all cores + save to Downloads; minSdk 24,
 onnxruntime-android 1.22.0, arm64-v8a + armeabi-v7a only). Everything after v1.80 is web-only. The owner has the
 v1.80 APK installed.
@@ -62,6 +62,8 @@ v1.80 APK installed.
   - Tempo: auto, ½ / 2× buttons, type a BPM, tap tempo; ♩ button in My songs (v1.82). Notes keep their played
     timing (1/48 beat, v1.85).
 - v1.86: MIDI tab exports with one channel per string are read as one part (also fixes the import screen).
+- v1.89: **Settings › Mic & timing › Chord matching** (Strict / Standard / Beginner) and a wrong-chord check in
+  every mode (see the v1.89 section).
 - v1.88: **chord blocks on the highway** for chords found in a song's notes (see the v1.88 section).
 - v1.87: **guitar tunings** in the Tuner (11 presets, string-by-string "tighten / loosen N semitones / cents",
   ✓ per string); the whole app, imports and the Lab follow the tuning; songs remember theirs and offer to switch.
@@ -95,17 +97,12 @@ to `main`. They test on the phone and send Lab reports and detection reports (of
 
 ## Picking up the conversation
 
-**Latest (18 Nov, ~20:40 Central): the owner's first idea, chords vs single notes.** They asked for the AI to tell
-chords from single notes and show chords on the highway as the block shape used in generated songs / courses, with
-repeats turning into the strumming pattern. They also want **partial strums to count and an extra brushed string
-not to void a chord, as a setting like Forgiving/Strict** (there is no setting by that name: the nearest is
-Settings › Mic & timing › Timing window Normal / Relaxed / Very relaxed). Agreed split: the drawing was built in
-v1.88 (Sonnet); **still to do: the "Chord matching" setting (Beginner / Standard / Strict) and the scoring change**
-(suggested for Opus, with the strict regression checks). Beginner = most strings heard, extra strings ignored;
-Standard = most strings, clearly wrong extras count against; Strict = today's behaviour (default stays Strict so
-nothing that works changes). Scoring lives in `matchEvent` (strum path: `chordFit` ≥0.5 and best among the song's
-chords, 2 frames; chord path: `chordScore` >0.42 for 3 frames). Ask the owner which model they have, and whether
-to name chords only when a sheet gives them.
+**Latest (18 Nov, ~20:45 Central): chords vs single notes — done in v1.88 + v1.89.** The owner asked for chords
+drawn as blocks (repeats as a strum pattern) and for partial strums / a brushed extra string to count, as a
+setting. v1.88 = the drawing, v1.89 = the Chord matching setting + scoring. Waiting for the owner to try it on the
+phone (a song with chords, each mode) and send detection reports; the report line shows "chords beginner/standard"
+when not Strict. Still open from this idea: whether to name chords only when a sheet gives them (today: the
+existing label, or none).
 
 Earlier, the same evening:
 
@@ -433,6 +430,28 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.89: Chord matching setting; wrong strummed chords no longer count
+
+Settings › Mic & timing › **Chord matching**: Strict (default) / Standard / Beginner (`settings.chordMatch`,
+`#sChordM`, `CMODE` next to `matchEvent`).
+- Strums (`e.strum`): template fit (`chordFit`) ≥ 0.5 / 0.44 / 0.38, and no rival chord fitting better than the
+  expected one minus 0.015 / 0.02 / 0.03, two frames.
+- Chord steps (`isChordEv`): Strict unchanged (`chordScore` > 0.42, 3 frames). Standard / Beginner: at least 60%
+  of the chord's notes heard, share of the sound inside the chord ≥ 0.5 / 0.33, and the rival check.
+- **Rival check (`cmRivals`, `cmBest`)**: the song's chords plus all 24 major / minor triads, but a rival only
+  counts if a note it has and the expected chord lacks is heard (≥ 25% of the loudest note in `strumChroma`): a
+  partial G (G and B strings) isn't rejected as Em without an E. Applied in all three modes for strums (Strict keeps
+  its old song-chord rivals too); for chord steps in Standard / Beginner.
+- Why Strict changed too: the new test showed Strict accepted Am strummed for C or D (4/8) and Em for G (3/8).
+  Now 0/8 and 1/8. Full strums and 3-string partials still 8/8.
+- Test: `tools/detection-tests/test_chord_matching.py` (= test_strums.py plus env `MODE`, `PLAYV` per-step voicings,
+  `ASNOTES=1` for chord steps instead of strums, `STDBG=1` to print fit numbers). Matrix over G C D Em ×2:
+  FULL 8/8 in every mode; 3-string partial 8/8; 2-string partial Strict 2, Standard 3, Beginner 4 of 8; full +
+  wrong open string: strums 8/8, chord steps Standard 6/8 (by design), Beginner 8/8; Am strummed throughout 0/8
+  everywhere; Em/G/C swapped ≤1/8. Regressions: test_strums 95/96, test_window_steal 95/96 (unchanged);
+  chords_dead_strings same hits, but C with a dead B and Am with a dead D now grade "Okay · late" (the rival check
+  holds them a frame or two).
 
 ## v1.88: chords found in a song's notes draw as blocks (display only)
 
