@@ -389,6 +389,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="stab" data-t="app">
     <div class="small" id="appBuild" style="margin-bottom:8px"></div>
     <div class="field"><a href="lab/stems.html" style="color:var(--accent2);font-weight:600">🧪 Lab: split a song into guitar + band</a><div class="small">Test of on-device AI (Demucs) that pulls the guitar out of a recording. Downloads a large model once; use Wi-Fi.</div></div>
+    <div class="field" id="sFilesBox" style="display:none"><label><input type="checkbox" id="sSaveFiles"> Keep each song in its own folder on the phone</label><div class="small" id="sFilesInfo">Saves every song, and the tab and chord files it was made from, to <b>Downloads › Fretline › Songs › (song name)</b>. Deleting a song here deletes its folder too, so nothing is left taking up space.</div><div class="row" style="margin:6px 0 0"><button id="sFilesNow">Save all songs now</button></div><span class="small" id="sFilesMsg"></span></div>
     <div class="field" id="sAndroid" style="display:none"><a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2);font-weight:600">📱 Get the Android app</a><div class="small">Adds “Open with Fretline” for song files and downloads from links. Your saved songs stay in this browser; the app starts fresh.</div></div>
     <div class="field"><div class="row" style="margin:0;align-items:center;gap:8px"><span class="small" id="appVer" style="flex:1"></span><button id="sUpd">Check for updates</button></div>
       <span class="small" id="sUpdMsg"></span></div>
@@ -4139,6 +4140,41 @@ window.fretlineBack=handleBack; // the Android app calls this when the back butt
 })();
 /* ---- installable app ---- */
 const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
+/* ---- one folder per song on the phone (Android app only) ----
+   Downloads/Fretline/Songs/<song name>/ gets the song file; the Lab adds the tab / chord files it was made from.
+   Every change to My songs goes through store.set('songs'), so one reconcile pass keeps the folders in step:
+   new or changed songs are written, songs that are gone have their folder removed. */
+function sfPlug(){try{const C=window.Capacitor;if(!IS_APP||!C||!C.Plugins||!C.Plugins.SongFiles)return null;if(C.isPluginAvailable&&!C.isPluginAvailable('SongFiles'))return null;return C.Plugins.SongFiles;}catch(e){return null;}}
+function sfSeg(t){let s=String(t||'').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').trim().replace(/^\.+/,'');if(s.length>80)s=s.slice(0,80).trim();return s||'Song';}
+function sfHash(str){let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return str.length+':'+(h>>>0);}
+let sfTimer=0,sfBusy=false,sfAgain=false,sfLast='';
+function sfSoon(ms){if(!sfPlug())return;clearTimeout(sfTimer);sfTimer=setTimeout(sfRun,ms==null?1500:ms);}
+async function sfRun(force){
+  const P=sfPlug();if(!P||settings.saveFiles===false)return;
+  if(sfBusy){sfAgain=true;return;}sfBusy=true;let wrote=0,gone=0,bad=0;
+  try{
+    const st=store.get('songFiles',{}),live=new Set(),taken=new Set(Object.values(st).map(r=>r.dir));
+    for(const s of mySongs){if(s.cat!=='mine')continue;live.add(s.id);
+      let rec=st[s.id];
+      if(!rec||!rec.dir){let dir=s.dir?sfSeg(s.dir):sfSeg(s.title),n=2;const base=dir;while(taken.has(dir)){dir=base+' ('+n+')';n++;}taken.add(dir);rec=st[s.id]={dir,hash:''};}
+      else if(s.dir&&sfSeg(s.dir)!==rec.dir&&!taken.has(sfSeg(s.dir))){taken.add(sfSeg(s.dir));rec.dir=sfSeg(s.dir);rec.hash='';}
+      const o={...s};delete o._built;const txt=JSON.stringify(o),h=sfHash(txt);
+      if(rec.hash===h&&!force)continue;
+      try{await P.write({dir:rec.dir,name:sfSeg(s.title)+'.fretline.json',text:txt,mime:'application/json'});rec.hash=h;wrote++;}catch(e){bad++;sfLast=String(e&&e.message||e);}
+    }
+    for(const id of Object.keys(st)){if(live.has(id))continue;
+      try{await P.removeDir({dir:st[id].dir});delete st[id];gone++;}catch(e){bad++;sfLast=String(e&&e.message||e);}}
+    store.set('songFiles',st);
+  }finally{sfBusy=false;}
+  if(bad)sfLast=sfLast||'some files could not be saved';else sfLast='';
+  sfStatus(wrote,gone,bad);
+  if(sfAgain){sfAgain=false;sfSoon(300);}
+}
+function sfStatus(w,g,b){const el=$('#sFilesMsg');if(!el)return;el.textContent=b?'Could not save everything: '+sfLast:(w||g)?('Saved '+w+' song'+(w===1?'':'s')+(g?', removed '+g+' folder'+(g===1?'':'s'):'')+'.'):'Everything is up to date.';}
+(function(){const set=store.set;store.set=function(k,v){set.call(store,k,v);if(k==='songs')sfSoon();};})();
+$('#sSaveFiles').onchange=e=>{settings.saveFiles=e.target.checked;saveSettings();if(e.target.checked)sfSoon(100);};
+$('#sFilesNow').onclick=()=>{$('#sFilesMsg').textContent='Saving…';sfRun(true);};
+if(sfPlug()){$('#sFilesBox').style.display='';$('#sSaveFiles').checked=settings.saveFiles!==false;sfSoon(4000);}
 const ROUTE_NAMES={speaker:'the phone speaker',bluetooth:'Bluetooth',wired:'wired headphones',usb:'USB audio'};
 function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.route!==outRoute;outRoute=r.route;outName=r.name||'';
   const D=settings.soundDelays||{},P=settings.phonesBy||{};
@@ -4148,7 +4184,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.93';
+const APP_VERSION='1.94';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

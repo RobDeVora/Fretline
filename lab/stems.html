@@ -547,13 +547,31 @@ async function makeSheetSong(sheet,gL,gR,L,Rc,rL,rR,N){
   if(parts)log('versions: '+parts.map(q=>q.label+' ('+q.events.length+' steps)').join(', ')+' (switch with the 🎸 button in the song)');
   const what=sec?'a tab and a chord sheet':(sheet.kind==='tab'?'a tab':'a chord sheet');
   await saveRecSong({events,recEvT:placed.map(p=>Math.round(p.t*1000)/1000),bpm:bt.bpm,recOffset:b0,capo,...(parts?{parts,partSel:'0'}:{}),builtTuning:tabSheet.builtTuning||'std',...(tabSheet.tuning?{tuning:tabSheet.tuning}:{}),credit:'Made from a recording and '+what+' in Fretline Lab'},gL,gR,rL,rR,null);}
+/* the tab / chord files this song was made from go into its own folder on the phone (Android app) */
+const SFP=(()=>{try{const C=window.Capacitor;if(!C||!C.Plugins||!C.Plugins.SongFiles)return null;if(C.isPluginAvailable&&!C.isPluginAvailable('SongFiles'))return null;return C.Plugins.SongFiles;}catch(e){return null;}})();
+let SRCFILES=[]; /* [{kind:'tab'|'chords', name, bytes | text}] for the run in progress */
+function sfSeg(t){let s=String(t||'').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').trim().replace(/^\.+/,'');if(s.length>80)s=s.slice(0,80).trim();return s||'Song';}
+function b64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s);}
+async function grabSource(fileEl,sf,text,kind){ /* keep what the person gave: the file as it is, or the pasted text */
+  try{const f=sf&&fileEl.files&&fileEl.files[0];
+    if(f)return {kind,name:f.name,bytes:new Uint8Array(await f.arrayBuffer())};
+    if(text&&text.trim())return {kind,name:(kind==='tab'?'Tab':'Chords')+'.txt',text};}catch(e){}return null;}
+function pickSongDir(title){const st=JSON.parse(localStorage.getItem('fretline:songFiles')||'{}'),songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');
+  const taken=new Set([...Object.values(st).map(r=>r.dir),...songs.map(x=>x.dir).filter(Boolean)]);let dir=sfSeg(title),n=2;const base=dir;while(taken.has(dir)){dir=base+' ('+n+')';n++;}return dir;}
+async function saveSources(dir){
+  if(!SFP||!SRCFILES.length)return;let on=true;try{on=(JSON.parse(localStorage.getItem('fretline:settings')||'{}')).saveFiles!==false;}catch(e){}if(!on)return;
+  let ok=0;for(const f of SRCFILES){try{const nm=(f.kind==='tab'?'Tab - ':'Chords - ')+f.name.replace(/^(tab|chords)( - )?/i,'')||f.name;
+    await SFP.write(f.text!=null?{dir,name:f.name,text:f.text,mime:'text/plain'}:{dir,name:nm,data:b64(f.bytes),mime:'application/octet-stream'});ok++;}catch(e){log('files: could not save '+f.name+' ('+String(e&&e.message||e).slice(0,100)+')');}}
+  if(ok)log('files: '+ok+' sheet file'+(ok>1?'s':'')+' saved in Downloads/Fretline/Songs/'+dir);}
 async function saveRecSong(extra,gL,gR,rL,rR,notes){
   const id='m-rec-'+Date.now(),key=location.origin+'/__fretline/rec/'+id+'.wav';
   status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
   const gkey=location.origin+'/__fretline/rec/'+id+'-gtr.wav';await c.put(gkey,new Response(wav(gL,gR),{headers:{'content-type':'audio/wav'}}));
   const title=($('ttl').value||'Recording').trim()+(+$('secs').value?' (first '+$('secs').value+' s)':'');
   const def={id,cat:'mine',kind:'rec',title,bpb:4,recAudio:key,recGuitar:gkey,credit:'Made from a recording in Fretline Lab',...extra};
+  if(SFP){def.dir=pickSongDir(title);}
   const songs=JSON.parse(localStorage.getItem('fretline:songs')||'[]');songs.unshift(def);localStorage.setItem('fretline:songs',JSON.stringify(songs));
+  if(def.dir)await saveSources(def.dir);
   const cnt=def.events?def.events.length:def.recNotes.length,last=def.events?Math.max(...def.events.map(e=>e.t)):Math.max(...def.recNotes.map(n=>n.beat));
   log('song: "'+title+'" saved to My songs ('+cnt+(def.events?' steps':' notes')+', '+Math.ceil(last/4)+' bars'+(def.capo?', capo '+def.capo:'')+')');
   $('songMsg').textContent='"'+title+'" is in My songs.';$('songOut').style.display='';window.__labSong=def;LAST={def,notes};tempoButtons();}
@@ -578,9 +596,10 @@ $('go').onclick=async()=>{
     log('service worker: '+(navigator.serviceWorker&&navigator.serviceWorker.controller?'in charge':'not in charge')+' · reload done '+(sessionStorage.getItem('labReload')?'yes':'no'));
     let sheet=null;const sheetText=$('sheet').value.trim();
     if((sheetText||SHEETFILE)&&$('mk').checked){status('Reading the sheet…');const core=await loadCore();sheet=readSheet(core,sheetText,$('sheetType').value);
+      SRCFILES=[];{const g=await grabSource($('sheetFile'),SHEETFILE,sheetText,sheet.kind);if(g)SRCFILES.push(g);}
       if(!sheet.events.length)throw new Error(sheet.kind==='tab'?'no tab found in the sheet (tab lines look like e|--0--3--|, six lines per block)':'no chords found in the sheet');
       log('sheet: '+(sheet.fromFile?sheet.fromFile+' as '+(sheet.kind==='tab'?'notes':'chords'):sheet.kind==='tab'?'tab':'chord sheet')+' with '+sheet.events.length+' steps'+(sheet.capo?' · capo '+sheet.capo:'')+(sheet.tuning?' · written for '+core.tuningById(sheet.tuning).name:'')+(sheet.builtTuning!=='std'?' · frets for '+core.tuningById(sheet.builtTuning).name.split(' (')[0]:''));}
-    if(sheet&&(SHEETFILE2||$('sheet2').value.trim())&&$('mk').checked)sheet=readSecond(await loadCore(),sheet,sheetText);
+    if(sheet&&(SHEETFILE2||$('sheet2').value.trim())&&$('mk').checked){{const g=await grabSource($('sheet2File'),SHEETFILE2,$('sheet2').value,SRCFILES.length&&SRCFILES[0].kind==='tab'?'chords':'tab');if(g)SRCFILES.push(g);}sheet=readSecond(await loadCore(),sheet,sheetText);}
     let native=null;
     if($('be').value==='native'&&NS){try{
       const st=await NS.status({});log('native: '+st.cores+' cores · model on the phone '+(st.modelBytes/1e6).toFixed(0)+' MB');
