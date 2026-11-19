@@ -38,6 +38,8 @@
                 <data android:mimeType="application/vnd.recordare.musicxml+xml" />
                 <data android:mimeType="application/x-chordpro" />
                 <data android:mimeType="application/octet-stream" />
+                <!-- songs to split in the Lab -->
+                <data android:mimeType="audio/*" />
             </intent-filter>
             <!-- "Share → Fretline" -->
             <intent-filter>

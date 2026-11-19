@@ -20,7 +20,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 
 public class MainActivity extends BridgeActivity {
-    private static final int MAX_BYTES = 20 * 1024 * 1024;
+    private static final int MAX_BYTES = 40 * 1024 * 1024;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {

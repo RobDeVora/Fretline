@@ -4203,7 +4203,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.97';
+const APP_VERSION='1.98';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
@@ -4250,6 +4250,12 @@ $('#impUrlGo').onclick=async()=>{
   const handle=async it=>{if(!it)return;try{
     if(it.error){showMsg('Could not open the file','<p>'+esc(it.error)+'</p>');return;}
     let file=null;if(it.data){const bin=atob(it.data);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);file=new File([u],it.name||'song');}
+    /* song files, MIDI, Guitar Pro and MusicXML go straight to the Lab, in the spot they belong */
+    if(file&&/\.(mp3|m4a|wav|flac|ogg|oga|aac|opus|wma|mp4|3gp|mid|midi|kar|mxl|musicxml|xml|gp|gp3|gp4|gp5|gpx|gp6|gp7)$/i.test(file.name)){
+      const key=location.origin+'/__fretline/incoming/'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+      const c=await caches.open('fretline-incoming');await c.put(key,new Response(file));
+      const list=JSON.parse(localStorage.getItem('fretline:labIncoming')||'[]');list.push({key,name:file.name});localStorage.setItem('fretline:labIncoming',JSON.stringify(list));
+      location.href='lab/stems.html';return;}
     await applyShared({title:it.title||'',text:it.text||'',url:''},file);}catch(e){}};
   P.getPending().then(r=>handle(r&&r.item)).catch(()=>{});P.addListener('incoming',handle);
 })();

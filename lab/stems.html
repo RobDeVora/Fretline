@@ -677,6 +677,28 @@ async function runLab(){
     prog(1);status('Done. Listen below, then tap the report to copy it.');window.__labDone={used,tot,N,parts:nCh};
   }catch(e){log('ERROR: '+(e&&e.message||e));if(CON.length)log('runtime messages:\n  '+CON.join('\n  '));if(/Could not find an implementation/.test(String(e&&e.message||e))&&$('mdl').value==='fp16')log('tip: the half-size model needs "Fully optimised" loading (which may run out of memory); use the Full model with Lean loading');log('(after an error like this, reload the page before trying another setting)');status('Something went wrong: '+(e&&e.message||e));window.__labDone={error:String(e&&e.message||e)};}
   $('go').disabled=false;}
+/* "Open with Fretline" (Android app): a song file lands in the song box, a midi / Guitar Pro / MusicXML file in the first free tab / chord box */
+const LAB_AUDIO=/\.(mp3|m4a|wav|flac|ogg|oga|aac|opus|wma|mp4|3gp)$/i,LAB_SHEET=/\.(mid|midi|kar|mxl|musicxml|xml|gp|gp3|gp4|gp5|gpx|gp6|gp7)$/i,LAB_TEXT=/\.(txt|text|tab|pro|cho|chopro|chordpro|crd)$/i;
+function labKind(name,mime){if(LAB_SHEET.test(name))return 'sheet';if(LAB_AUDIO.test(name)||(/^audio\//.test(mime||'')&&!/midi|mid$/.test(mime||'')))return 'audio';if(LAB_TEXT.test(name))return 'text';return '';}
+async function putFile(el,file){const dt=new DataTransfer();dt.items.add(file);el.files=dt.files;if(el.onchange)await el.onchange();}
+async function labReceive(file){
+  const kind=labKind(file.name,file.type);
+  if(kind==='audio'){await putFile($('file'),file);status('Opened '+file.name+' as the song. Add a tab or chord sheet below if you have one, then tap Split it.');return 'song';}
+  const free1=!SHEETFILE&&!$('sheet').value.trim(),free2=!SHEETFILE2&&!$('sheet2').value.trim();
+  if(kind==='sheet'){const two=!free1&&free2;await putFile($(two?'sheet2File':'sheetFile'),file);
+    if($('mk')&&!$('mk').checked)$('mk').checked=true;status('Opened '+file.name+' as the '+(two?'second':'first')+' tab / chord sheet.');return two?'sheet 2':'sheet 1';}
+  if(kind==='text'){const t=await file.text();const two=!free1&&free2;$(two?'sheet2':'sheet').value=t;$('mk').checked=true;status('Opened '+file.name+' as the '+(two?'second':'first')+' sheet.');return 'text';}
+  status('Fretline Lab cannot use '+file.name+' (it needs a song, a MIDI / Guitar Pro / MusicXML file or a text sheet).');return '';}
+function labItemFile(it){const bin=atob(it.data||'');const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new File([u],it.name||'file');}
+(async function(){
+  /* files the main screen set aside before opening the Lab */
+  try{const list=JSON.parse(localStorage.getItem('fretline:labIncoming')||'[]');localStorage.removeItem('fretline:labIncoming');
+    if(list.length){const c=await caches.open('fretline-incoming');for(const x of list){const r=await c.match(x.key);if(r){const f=new File([await r.arrayBuffer()],x.name);await c.delete(x.key);try{await labReceive(f);}catch(e){status('Could not open '+x.name+': '+(e.message||e));}}}}}catch(e){}
+  /* files opened while the Lab is already showing */
+  try{const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.Incoming;if(!P)return;
+    const h=async it=>{if(!it)return;if(it.error){status('Could not open the file: '+it.error);return;}if(!it.data)return;try{await labReceive(labItemFile(it));}catch(e){status('Could not open '+it.name+': '+(e.message||e));}};
+    const r=await P.getPending();await h(r&&r.item);P.addListener('incoming',h);}catch(e){}
+})();
 $('go').onclick=async()=>{
   window.__labDone=null;
   if(KA){try{await KA.start({text:'Starting…'});KA_ON=true;}catch(e){KA_ON=false;}}

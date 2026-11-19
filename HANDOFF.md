@@ -1,7 +1,7 @@
-# Fretline: session handoff (18 Nov 2026, evening · web v1.97 · Android APK last rebuilt at v1.80)
+# Fretline: session handoff (18 Nov 2026, evening · web v1.98 · Android APK last rebuilt at v1.80)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
-how detection works now, what's open, and a changelog (newest first from v1.97 down to v1.69, then the older
+how detection works now, what's open, and a changelog (newest first from v1.98 down to v1.69, then the older
 v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conversation" below.**
 
 ## The project
@@ -43,7 +43,7 @@ v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conver
 
 ## Where things stand (18 Nov 2026, evening)
 
-**Versions:** web **v1.97** (sw cache `fretline-v85`). The APK was last rebuilt for v1.80, **v1.94 adds `SongFilesPlugin` and v1.95 `KeepAlivePlugin` + `KeepAliveService`, so it needs the NEW APK** (Capacitor plugins:
+**Versions:** web **v1.98** (sw cache `fretline-v86`). The APK was last rebuilt for v1.80, **v1.94 adds `SongFilesPlugin` and v1.95 `KeepAlivePlugin` + `KeepAliveService`, so it needs the NEW APK** (Capacitor plugins:
 `IncomingPlugin`, `NativeMicPlugin`, `NativeSeparatorPlugin`, `SongFilesPlugin` = Demucs on all cores + save to Downloads; minSdk 24,
 onnxruntime-android 1.22.0, arm64-v8a + armeabi-v7a only). Everything after v1.80 is web-only. The owner has the
 v1.80 APK installed.
@@ -62,6 +62,7 @@ v1.80 APK installed.
   - Tempo: auto, ½ / 2× buttons, type a BPM, tap tempo; ♩ button in My songs (v1.82). Notes keep their played
     timing (1/48 beat, v1.85).
 - v1.86: MIDI tab exports with one channel per string are read as one part (also fixes the import screen).
+- v1.98: **"Open with Fretline" goes to the Lab (audio part needs the new APK).** Manifest VIEW filter gained `audio/*` (mp3 etc.); `MainActivity.MAX_BYTES` 20→40 MB. index.html `Incoming` handler: audio / MIDI / Guitar Pro / MusicXML files are put in Cache `fretline-incoming` (list in localStorage `fretline:labIncoming`) and the app goes to `lab/stems.html`; other shared things (text, chordpro, pdf, links) still go to the import screen as before, and MIDI no longer goes to the import screen from outside the app (the import button still takes MIDI). lab/stems.html: `labReceive(file)` puts audio in `#file` (title filled, Split enabled), MIDI/GP/XML in the first free sheet box (then the second; if both are full the first), text sheets in the textarea; it also reads the stash on load and listens to `Incoming` while the Lab is open. Test: `tools/lab-tests/test_openwith.py` (fake Incoming plugin; needs /tmp/tysk.mid, /tmp/tysk_chords.mid). Untested on a phone.
 - v1.97: the owner confirmed song folders work but each had only one .json and asked for the original files. Web-only (no new APK). `sfMidi`/`sfMidis` write a standard .mid per song, and one per version (Chords + lead / Chords only / Tab only) for songs with `parts`, into the song folder next to the .json (chord names as MIDI markers; bpm and time signature included; hash suffix `|m1` forces one rewrite of every existing song). Songs made in the Lab since v1.94 also hold the exact tab / chord files that were uploaded (those can't be recovered for older songs, hence the generated MIDI). Test: `tools/lab-tests/test_songmidi.py` (notes read back with `parseMidi` = 471/453/773 as in the song).
 - v1.96: the owner said they found no Fretline folder after v1.95. Most likely their phone still has an older APK (no `SongFiles` plugin), so Settings › App now always shows a "Song folders on the phone" box in the app: with the plugin it shows the checkbox, the last saved path and any error; without it, it says the app is older and links the APK. Waiting for their report on which they see.
 - v1.95: **the Lab keeps working when you leave the app (needs the new APK).** `KeepAliveService` is a foreground service (type dataSync, notification "Fretline is working on your song" showing the status line, partial wake lock capped at 3 h) and `KeepAlivePlugin` (`start/update/stop/done`; asks for the notification permission on Android 13+, the service runs even if refused). lab/stems.html: the Run handler is now `runLab()` wrapped by `$('go').onclick`, which calls `KA.start`, forwards `status()` (every 2.5 s) with `KA.update`, and in `finally` calls `KA.done` ("Your song is ready" / "Fretline Lab stopped"; ready = `window.__labDone` set). Hint text under the button appears only in the app. Manifest: FOREGROUND_SERVICE, FOREGROUND_SERVICE_DATA_SYNC, WAKE_LOCK, POST_NOTIFICATIONS + `<service>`. Limits: the owner must not swipe the app away; in a normal browser tab nothing changes (browsers pause hidden tabs); a hidden WebView throttles timers (the Lab only has two rare ones, the heavy work is native / compute loops). Untested on a phone (the Java builds in CI). Test: `tools/lab-tests/test_keepalive.py` (fake plugin).
