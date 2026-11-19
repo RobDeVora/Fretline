@@ -21,3 +21,8 @@ v1.84 MIDI sheets: `MIDI=/tmp/riff.mid python3 sheet_tab.py` and `MIDI=/tmp/chor
 Make the files with `pip install mido`, then: riff.mid = 120 BPM, tracks Bass (prog 33) / Drums (ch 10) / Guitar
 (prog 25) with the riff [40,40,52,40,45,45,47,50] as 8ths from beat 8 for 8 bars; chords.mid = 100 BPM, one track,
 G C D Em G C one bar each (G=[43,47,50,55,59,67], C=[48,52,55,60,64], D=[50,57,62,66], Em=[40,47,52,55,59,64]).
+
+v1.85 timing check: `RIFF=/tmp/stemtest/riff_even.wav MIDI=/tmp/riff.mid python3 sheet_tab.py` prints "timing vs the
+evenly played riff" (median 3 ms, max 10 ms as placed). riff_even.wav: 44.1 kHz stereo, plucks at 1.0 s + k·0.3 s
+(100 BPM 8ths, the riff ×8 bars), each pluck = harmonics 1-8 with amplitude h^-1.2, decay e^(-(3+0.9h)t), 2 ms
+attack, 1.2 s long. (riff100.wav has a pre-attack 55 ms before on-beat picks: ±27 ms residuals there.)

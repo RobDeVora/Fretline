@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.84, Android app rebuilt for v1.80 (native separator + save to Downloads))
+# Fretline: session handoff (18 Nov 2026, web v1.85, Android app rebuilt for v1.80 (native separator + save to Downloads))
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,24 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.85: recording songs keep the played timing; report shows the recording's state
+
+Owner: a full song made with a MIDI file sounds like "the timing of the notes is off" in Listen with the band.
+(The song is on the phone; not seen here.) Two causes found in the code:
+- **Grid snapping**: steps were snapped to 16ths (32nds < 90 BPM) of the detected tempo, up to ±half a slot
+  (~50 ms at 140 BPM), worse when the detected tempo is slightly off (99.5 vs 100 on the test riff). Now
+  `placeEvents`, `quantise` (Lab) and `recPlace`/`recRetime` (app) use 1/48 beat, like `eventsFromNotes` does anyway:
+  steps stay where they were played; bar lines still follow the detected / chosen tempo. Clean synthetic riff
+  (`riff_even.wav`: additive plucks, exactly 100 BPM, generator below): aligned median 2 ms / max 6 ms, as placed
+  median 3 / max 10 ms. Existing songs: ♩ → Save (same tempo) re-places them (sheet songs and AI songs from 1.82 keep
+  exact times; older AI songs only have beats).
+- **Real guitar not loading** (a 4-min song is two ~42 MB WAVs, ~90 MB each decoded): a failure used to fall back
+  silently to synthesized notes (played at the snapped times against the real band). Now a hint says so, and the
+  detection report has "recording: backing N s, real guitar yes / FAILED <why> / none (older song), from a sheet /
+  AI notes, offset".
+- Test note: riff100.wav has a pre-attack ~55 ms before each on-beat pick (from how it was made), so its timing
+  residuals are ±27 ms; use `RIFF=/tmp/stemtest/riff_even.wav` for timing checks (generator in the lab-tests README).
 
 ## v1.84: Lab sheets from MIDI, MusicXML, Guitar Pro and PDF files
 

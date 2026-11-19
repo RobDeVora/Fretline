@@ -21,7 +21,15 @@ with sync_playwright() as p:
   pg.click('#go');pg.wait_for_function('window.__labDone',timeout=900000)
   print('\n'.join(l for l in pg.text_content('#log').split('\n') if l.startswith(('sheet','tempo','song','ERROR'))))
   d=pg.evaluate('window.__labSong');got={(n['midi'],e['t']) for e in d['events'] for n in e['notes']}
-  print('bpm',d['bpm'],'steps',len(d['events']),'· riff notes on the right beat:',len(truth&got),'/',len(truth),'· wrong:',sorted(got-truth)[:8])
+  # v1.85: steps keep their played time (1/48 beat), so match within 0.15 beat and report how far from the beat
+  spb=60/d['bpm'];hit=0;dev=[]
+  for (m,bt) in truth:
+    c=[gb for (gm,gb) in got if gm==m and abs(gb-bt)<=0.15]
+    if c:hit+=1;dev.append(min(abs(x-bt) for x in c)*spb*1000)
+  print('bpm',d['bpm'],'steps',len(d['events']),'· riff notes on the right beat (±0.15):',hit,'/',len(truth),'· distance from the exact beat: median',int(sorted(dev)[len(dev)//2]) if dev else '-','ms, max',int(max(dev)) if dev else '-','ms')
+  import numpy as np;T=np.array(d['recEvT']);i=np.arange(len(T));A=np.polyfit(i,T,1);res=(T-np.polyval(A,i))*1000
+  P=np.array([d['recOffset']+e['t']*spb for e in d['events']]);res2=(P-np.polyval(A,i))*1000
+  print('timing vs the evenly played riff: aligned median',int(np.median(abs(res))),'ms max',int(abs(res).max()),'ms · as placed on the highway: median',int(np.median(abs(res2))),'ms max',int(abs(res2).max()),'ms')
   pg.click('#tHalf');d2=pg.evaluate('window.__labSong')
   sec=lambda d:sorted(round(d['recOffset']+e['t']*60/d['bpm'],3) for e in d['events']);a,b2=sec(d),sec(d2);mx=max(abs(x-y) for x,y in zip(a,b2))
   print('half tempo',d2['bpm'],'· steps',len(d2['events']),'· largest move in the recording',int(mx*1000),'ms (grid',int(60/d2['bpm']/8*1000),'ms)')

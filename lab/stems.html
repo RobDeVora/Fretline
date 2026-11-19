@@ -225,7 +225,7 @@ function cleanNotes(notes,g22){const A=attackCurve(g22);
   const out=[];for(const g of groups){g.sort((a,b)=>b.a-a.a);const sel=[g[0]];for(const n of g.slice(1))if(sel.length<2&&n.a>=0.8*g[0].a&&n.midi%12!==g[0].midi%12)sel.push(n);out.push(...sel);}
   log('notes: '+out.length+' kept on '+groups.length+' picks (of '+notes.length+': no real attack, too short, or extra notes in the same pick dropped)');return out;}
 // beats from times: bar 1 holds the first note (moved by whole beats), notes on a 16th grid
-function quantise(notes,bpm,b0){const spb=60/bpm,G=bpm<90?8:4; /* slow tempos: 32nd grid, so halving the tempo moves no note */const firstNote=Math.min(...notes.map(n=>n.t));while(b0+4*spb<=firstNote-0.05)b0+=4*spb;while(b0>firstNote+0.05)b0-=spb;
+function quantise(notes,bpm,b0){const spb=60/bpm,G=48; /* v1.85: 1/48 beat, so notes stay where they were played (and halving the tempo moves none) */const firstNote=Math.min(...notes.map(n=>n.t));while(b0+4*spb<=firstNote-0.05)b0+=4*spb;while(b0>firstNote+0.05)b0-=spb;
   return {b0,recNotes:notes.map(n=>({midi:n.midi,beat:Math.round((n.t-b0)/spb*G)/G,dur:Math.max(1/G,Math.round(n.d/spb*G)/G),v:Math.round(n.a*100)/100})).filter(n=>n.beat>=0)};}
 let LAST=null;
 function retimeEvents(f,target){const old=LAST.def,bpm=target||Math.round(old.bpm*f*1000)/1000,spbO=60/old.bpm;let b0=old.recOffset;const T=old.recEvT;
@@ -332,8 +332,8 @@ function alignSheet(sheet,g22){const F=chromaFrames(g22),A=attackCurve(g22);cons
   const skipped=ev.length-out.length;
   log('sheet: '+sheet.kind+', '+ev.length+' '+(sheet.kind==='tab'?'notes/chords':'chords')+'; '+out.length+' lined up'+(skipped?', '+skipped+' not in this part of the recording':'')+(best.shift?' · sounds '+best.shift+' semitones higher than written'+(sheet.capo===best.shift?' (capo '+sheet.capo+')':''):''));
   return {placed:out,shift:best.shift,A};}
-// events at real times → events on the beat grid (32nds under 90 BPM, else 16ths); chords hold until the next change
-function placeEvents(placed,bpm,b0){const spb=60/bpm,G=bpm<90?8:4;const evs=[];let prev=-1;
+// events at real times → beats (1/48 beat); chords hold until the next change
+function placeEvents(placed,bpm,b0){const spb=60/bpm,G=48; /* v1.85: 1/48 beat (≈10-20 ms): steps stay where they were played; a 16th grid moved them up to ±50 ms */const evs=[];let prev=-1;
   for(const p of placed){let q=Math.round((p.t-b0)/spb*G)/G;if(q<0)continue;if(q<=prev)q=prev+1/G;prev=q;evs.push({...p.e,t:q});}
   for(let i=0;i<evs.length;i++){const gap=i+1<evs.length?evs[i+1].t-evs[i].t:(evs[i].chord||evs[i].strum?4:1);evs[i].d=evs[i].chord||evs[i].strum?Math.max(1/G,gap):Math.max(1/G,Math.min(gap,2));}
   return evs;}
