@@ -2164,8 +2164,11 @@ function recPlace(events,T,bpm,b0){const spb=60/bpm,G=48; /* v1.85: 1/48 beat, s
 function recRetime(def,bpm){const spbO=60/def.bpm,spb=60/bpm,G=48;
   if(def.events&&def.recEvT){const T=def.recEvT;let b0=def.recOffset||0;
     if(Math.abs(bpm*2-def.bpm)<0.02){let best=-1e9,pick=b0;for(const c of [b0,b0+spbO]){let sc=0;for(const t of T)sc+=Math.cos(2*Math.PI*(t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
-    while(b0+4*spb<=T[0]-0.05)b0+=4*spb;while(b0>T[0]+0.05)b0-=spb;
-    const out={...def,bpm,events:recPlace(def.events,T,bpm,b0),recOffset:b0};delete out._built;return out;}
+    /* v1.93: bar 1 must come before the first step of every version */
+    const t0=Math.min(T[0],...(def.parts||[]).filter(p=>p.recEvT&&p.recEvT.length).map(p=>p.recEvT[0]));
+    while(b0+4*spb<=t0-0.05)b0+=4*spb;while(b0>t0+0.05)b0-=spb;
+    const out={...def,bpm,events:recPlace(def.events,T,bpm,b0),recOffset:b0};
+    if(def.parts)out.parts=def.parts.map(p=>p.recEvT?{...p,events:recPlace(p.events,p.recEvT,bpm,b0)}:p);delete out._built;return out;}
   const raw=def.recRaw||def.recNotes.map(n=>({midi:n.midi,t:(def.recOffset||0)+n.beat*spbO,d:n.dur*spbO,a:n.v!=null?n.v:0.6}));
   let b0=def.recOffset||0;
   if(Math.abs(bpm*2-def.bpm)<0.02){let best=-1e9,pick=b0;for(const c of [b0,b0+spbO]){let sc=0;for(const n of raw)sc+=n.a*Math.cos(2*Math.PI*(n.t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
@@ -2228,7 +2231,7 @@ function renderList(){
   L.innerHTML=h;
   L.querySelectorAll('.item[data-id]').forEach(el=>el.onclick=ev=>{
     if(ev.target.closest('.del')||ev.target.closest('.tmp'))return;
-    const id=el.dataset.id;const def=LIB.find(x=>x.id===id)||mySongs.find(x=>x.id===id);if(def){if(def.parts&&def.parts.length>1)pickPart(def,()=>openSong(def));else openSong(def);}
+    const id=el.dataset.id;const def=LIB.find(x=>x.id===id)||mySongs.find(x=>x.id===id);if(def){if(def.parts&&def.parts.length>1&&def.kind!=='rec')pickPart(def,()=>openSong(def));else openSong(def);}
   });
   L.querySelectorAll('.item[data-gen]').forEach(el=>el.onclick=()=>{quickGen(el.dataset.gen);});
   L.querySelectorAll('.item[data-lesson]').forEach(el=>el.onclick=()=>openLesson(findLesson(el.dataset.lesson)));
@@ -2302,23 +2305,30 @@ function trimLead(ev,bpb){let first=Infinity;for(const e of ev)if(!e.rest&&e.t<f
   return {trim,events:trim?ev.map(e=>({...e,t:e.t-trim})):ev};}
 function partChordiness(ev){const n=ev.filter(e=>!e.rest&&e.notes&&e.notes.length);return n.length?n.filter(e=>e.notes.length>=2||e.chord).length/n.length:0;}
 // "Lead + rhythm": the lead where it has notes, the rhythm part in every other bar
-function comboPair(def){const P=(def.parts||[]).map((p,i)=>({i,p,c:partChordiness(p.events),n:p.events.length})).filter(x=>x.n&&!/bass|vocal|voice|drum|melody|sing/i.test(x.p.label));
+function comboPair(def){if(def.kind==='rec')return null; /* v1.93: a recording's parts are its versions, already made */const P=(def.parts||[]).map((p,i)=>({i,p,c:partChordiness(p.events),n:p.events.length})).filter(x=>x.n&&!/bass|vocal|voice|drum|melody|sing/i.test(x.p.label));
   const rh=P.filter(x=>x.c>=0.5).sort((a,b)=>b.n-a.n)[0];const ld=P.filter(x=>x.c<0.5&&(!rh||x.i!==rh.i)).sort((a,b)=>b.n-a.n)[0];return rh&&ld?{lead:ld.i,rhythm:rh.i}:null;}
 function comboEvents(def,pair){const bpb=def.bpb||4;const L=def.parts[pair.lead].events,R=def.parts[pair.rhythm].events;
   const leadBars=new Set();for(const e of L){if(e.rest)continue;const a=Math.floor(e.t/bpb+1e-6),b=Math.floor((e.t+Math.max(e.d,0.01))/bpb-1e-6);for(let k=a;k<=b;k++)leadBars.add(k);}
   return [...L.filter(e=>leadBars.has(Math.floor(e.t/bpb+1e-6))).map(e=>({...e,ld:1})),...R.filter(e=>!leadBars.has(Math.floor(e.t/bpb+1e-6))).map(e=>({...e}))].sort((a,b)=>a.t-b.t);}
 function partChoices(def){const ch=(def.parts||[]).map((p,i)=>p.events.length?{v:String(i),label:p.label,sub:p.events.length+(partChordiness(p.events)>=0.5?' chords':' notes')}:null).filter(Boolean);
   const pr=comboPair(def);if(pr)ch.unshift({v:'combo',label:'Lead + rhythm',sub:def.parts[pr.lead].label+' where it plays, '+def.parts[pr.rhythm].label+' in the other bars'});return ch;}
-function usePart(def,v){const pr=comboPair(def);let ev,src;
+function usePart(def,v){
+  /* v1.93: a recording song made from a tab AND a chord sheet keeps its versions (chords + lead, chords only, tab only):
+     each has its own steps and real times (recEvT), the same capo and tempo */
+  if(def.kind==='rec'&&def.parts&&def.parts[+v]&&def.parts[+v].recEvT){const src=def.parts[+v];
+    def.events=src.events.map(e=>({...e}));def.recEvT=src.recEvT.slice();def.trim=0;def.capo=src.capo!=null?src.capo:(def.capo||0);def.strumAuto=src.strumAuto||null;def.partSel=String(+v);delete def._built;
+    const cs=store.get('capo',{});if(cs[def.id]!=null){delete cs[def.id];store.set('capo',cs);}
+    if(def.cat==='mine')store.set('songs',mySongs);return;}
+  const pr=comboPair(def);let ev,src;
   if(v==='combo'&&pr){ev=comboEvents(def,pr);src=def.parts[pr.rhythm];}else{src=def.parts[+v]||def.parts.find(p=>p.events.length);ev=src.events.map(e=>({...e}));v=String(def.parts.indexOf(src));}
   const tl=trimLead(ev,def.bpb||4);
   def.events=tl.events;def.trim=tl.trim;def.capo=src.capo||0;def.strumAuto=src.strumAuto||null;def.partSel=v;delete def._built;
   const cs=store.get('capo',{});if(cs[def.id]!=null){delete cs[def.id];store.set('capo',cs);}
   if(def.cat==='mine')store.set('songs',mySongs);}
-function partLabel(def){const v=def.partSel||'0';if(v==='combo')return 'Lead + rhythm';const p=def.parts&&def.parts[+v];return p?p.label:'';}
+function partLabel(def){const v=def.partSel||'0';if(def.kind==='rec'&&def.parts&&def.parts[+v])return def.parts[+v].label;if(v==='combo')return 'Lead + rhythm';const p=def.parts&&def.parts[+v];return p?p.label:'';}
 function pickPart(def,then){
   const ch=partChoices(def);if(ch.length<2){then();return;}
-  showMsg('Which part?','<p class="small" style="margin-top:0">'+esc(def.title)+' has several parts.</p>'+ch.map(c=>`<button class="partPick${c.v===(def.partSel||'0')?' primary':''}" data-v="${c.v}" style="display:block;width:100%;text-align:left;margin:6px 0;padding:10px 12px"><b>${esc(c.label)}</b><br><span class="small">${esc(c.sub)}</span></button>`).join(''));
+  showMsg(def.kind==='rec'?'Which version?':'Which part?','<p class="small" style="margin-top:0">'+esc(def.title)+(def.kind==='rec'?' has several versions: switch any time with the 🎸 button.':' has several parts.')+'</p>'+ch.map(c=>`<button class="partPick${c.v===(def.partSel||'0')?' primary':''}" data-v="${c.v}" style="display:block;width:100%;text-align:left;margin:6px 0;padding:10px 12px"><b>${esc(c.label)}</b><br><span class="small">${esc(c.sub)}</span></button>`).join(''));
   document.querySelectorAll('#msgBody .partPick').forEach(b=>b.onclick=()=>{$('#msg').classList.remove('show');if(b.dataset.v!==(def.partSel||'0')||!def.events)usePart(def,b.dataset.v);then();});
 }
 function syncPartBtn(){const b=$('#partBtn');if(!b)return;const n=G.def&&G.def.parts?partChoices(G.def).length:0;b.style.display=n>1?'':'none';if(n>1){b.innerHTML='🎸<span class="lbl"> '+esc(partLabel(G.def))+'</span>';b.title='Part: '+partLabel(G.def)+' (tap to change)';}}
@@ -4138,7 +4148,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.92';
+const APP_VERSION='1.93';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

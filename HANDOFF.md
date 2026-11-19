@@ -1,7 +1,7 @@
-# Fretline: session handoff (18 Nov 2026, evening · web v1.92 · Android APK last rebuilt at v1.80)
+# Fretline: session handoff (18 Nov 2026, evening · web v1.93 · Android APK last rebuilt at v1.80)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
-how detection works now, what's open, and a changelog (newest first from v1.92 down to v1.69, then the older
+how detection works now, what's open, and a changelog (newest first from v1.93 down to v1.69, then the older
 v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conversation" below.**
 
 ## The project
@@ -43,7 +43,7 @@ v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conver
 
 ## Where things stand (18 Nov 2026, evening)
 
-**Versions:** web **v1.92** (sw cache `fretline-v80`). The APK was last rebuilt for v1.80 (Capacitor plugins:
+**Versions:** web **v1.93** (sw cache `fretline-v81`). The APK was last rebuilt for v1.80 (Capacitor plugins:
 `IncomingPlugin`, `NativeMicPlugin`, `NativeSeparatorPlugin` = Demucs on all cores + save to Downloads; minSdk 24,
 onnxruntime-android 1.22.0, arm64-v8a + armeabi-v7a only). Everything after v1.80 is web-only. The owner has the
 v1.80 APK installed.
@@ -62,6 +62,7 @@ v1.80 APK installed.
   - Tempo: auto, ½ / 2× buttons, type a BPM, tap tempo; ♩ button in My songs (v1.82). Notes keep their played
     timing (1/48 beat, v1.85).
 - v1.86: MIDI tab exports with one channel per string are read as one part (also fixes the import screen).
+- v1.93: **three switchable versions of a song from a tab + chord sheet** (Lab). One saved song gets `parts` = [Chords + lead, Chords only, Tab only] (versions that come out identical are dropped). On the song screen the 🎸 button opens "Which version?"; `usePart` for `kind:'rec'` swaps `events`, `recEvT`, `capo`, `strumAuto` from the part. `comboPair` returns null for rec songs; `recRetime` retimes every part against the same anchor so ♩ tempo changes keep all versions on the real recording times. Test: `tools/lab-tests/test_versions.py` (needs /tmp/tysk_merge.json from real_files.py auto): picker lists 3, switching 146→90→773 steps, step-time error ≤9 ms after tempo changes to 70 and 140. Regressions unchanged (strums 95/96, chord matching, sheet_tab 64/64, sheet_chords, sheet_merge). **Not yet tried on the phone.**
 - v1.92: **tuning dropdown on the song screen** (`#tuneSel`, next to the capo; same as Tuner › Tuning).
 - v1.91: **Lab: files in the second box, Auto merge** (chords strummed, the tab where it plays a lead line); real
   song checked with the owner's TYSK tab MIDI + chords MIDI (see the v1.91 section).
@@ -101,7 +102,9 @@ to `main`. They test on the phone and send Lab reports and detection reports (of
 
 ## Picking up the conversation
 
-**Latest (18 Nov, ~22:00 Central): the owner ran TYSK on the phone with the tab MIDI + chords MIDI in the Lab (v1.91, native separator 0.55× song length, 9 lead stretches / 81 strummed chords, report matches my run) and said "it plays well, I like the ability to switch strumming pattern in song". They asked for changing the tuning in song: done in v1.92 (see below).**
+**Latest: v1.93 (three versions per song, 🎸 button) is pushed; the owner needs to try the Lab on the phone with both files (Auto) and switch versions.**
+
+**Earlier (18 Nov, ~22:00 Central): the owner ran TYSK on the phone with the tab MIDI + chords MIDI in the Lab (v1.91, native separator 0.55× song length, 9 lead stretches / 81 strummed chords, report matches my run) and said "it plays well, I like the ability to switch strumming pattern in song". They asked for changing the tuning in song: done in v1.92 (see below).**
 
 Before that (~21:45): v1.91. The owner sent a chords MIDI for TYSK (`…Thought_You_Should_Know_chords.mid`:
 Track 2 = chords, Track 3 = bass, 143 BPM in the file, unquantised, guitar from beat 47.57; not in the repo) and
