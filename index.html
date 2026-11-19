@@ -393,6 +393,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field" id="sAndroid" style="display:none"><a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2);font-weight:600">📱 Get the Android app</a><div class="small">Adds “Open with Fretline” for song files and downloads from links. Your saved songs stay in this browser; the app starts fresh.</div></div>
     <div class="field"><div class="row" style="margin:0;align-items:center;gap:8px"><span class="small" id="appVer" style="flex:1"></span><button id="sUpd">Check for updates</button></div>
       <span class="small" id="sUpdMsg"></span></div>
+    <div class="field" id="sApkBox" style="display:none"><a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2);font-weight:600">📱 Download the latest Fretline.apk</a><div class="small" id="sApkMsg"></div></div>
     </div>
     <div class="row end"><button class="primary" id="sClose">Done</button></div>
   </div>
@@ -4192,6 +4193,9 @@ function sfStatus(w,g,b){const el=$('#sFilesMsg');if(!el)return;el.textContent=b
 $('#sSaveFiles').onchange=e=>{settings.saveFiles=e.target.checked;saveSettings();if(e.target.checked)sfSoon(100);};
 $('#sFilesNow').onclick=()=>{$('#sFilesMsg').textContent='Saving…';sfRun(true);};
 if(IS_APP){$('#sFilesBox').style.display='';
+  {const C=window.Capacitor,has=n=>{try{return !!(C.isPluginAvailable?C.isPluginAvailable(n):C.Plugins[n]);}catch(e){return false;}};
+   const miss=['SongFiles','KeepAlive'].filter(n=>!has(n));$('#sApkBox').style.display='';
+   $('#sApkMsg').innerHTML=miss.length?'<b>This phone has an older app build</b> (missing: '+(miss.includes('SongFiles')?'song folders':'')+(miss.length>1?', ':'')+(miss.includes('KeepAlive')?'Lab in the background':'')+'). Tap the link; when the download finishes open it and choose Install. Your songs stay.':'This phone has the newest app build. The link above only matters when a new build is announced.';}
   if(sfPlug()){$('#sSaveFiles').checked=settings.saveFiles!==false;sfSoon(4000);}
   else{$('#sFilesBox').innerHTML='<label>Song folders on the phone</label><div class="small">This copy of the Fretline app is older and cannot make song folders. <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">Install the latest Fretline.apk</a>, open it over the old one, and the folders appear.</div>';}}
 const ROUTE_NAMES={speaker:'the phone speaker',bluetooth:'Bluetooth',wired:'wired headphones',usb:'USB audio'};
@@ -4203,7 +4207,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.98';
+const APP_VERSION='1.99';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
