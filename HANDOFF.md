@@ -1,7 +1,7 @@
-# Fretline: session handoff (18 Nov 2026, evening · web v1.91 · Android APK last rebuilt at v1.80)
+# Fretline: session handoff (18 Nov 2026, evening · web v1.92 · Android APK last rebuilt at v1.80)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
-how detection works now, what's open, and a changelog (newest first from v1.91 down to v1.69, then the older
+how detection works now, what's open, and a changelog (newest first from v1.92 down to v1.69, then the older
 v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conversation" below.**
 
 ## The project
@@ -43,7 +43,7 @@ v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conver
 
 ## Where things stand (18 Nov 2026, evening)
 
-**Versions:** web **v1.91** (sw cache `fretline-v79`). The APK was last rebuilt for v1.80 (Capacitor plugins:
+**Versions:** web **v1.92** (sw cache `fretline-v80`). The APK was last rebuilt for v1.80 (Capacitor plugins:
 `IncomingPlugin`, `NativeMicPlugin`, `NativeSeparatorPlugin` = Demucs on all cores + save to Downloads; minSdk 24,
 onnxruntime-android 1.22.0, arm64-v8a + armeabi-v7a only). Everything after v1.80 is web-only. The owner has the
 v1.80 APK installed.
@@ -62,6 +62,7 @@ v1.80 APK installed.
   - Tempo: auto, ½ / 2× buttons, type a BPM, tap tempo; ♩ button in My songs (v1.82). Notes keep their played
     timing (1/48 beat, v1.85).
 - v1.86: MIDI tab exports with one channel per string are read as one part (also fixes the import screen).
+- v1.92: **tuning dropdown on the song screen** (`#tuneSel`, next to the capo; same as Tuner › Tuning).
 - v1.91: **Lab: files in the second box, Auto merge** (chords strummed, the tab where it plays a lead line); real
   song checked with the owner's TYSK tab MIDI + chords MIDI (see the v1.91 section).
 - v1.90: **Lab: a tab and a chord sheet together** (solo + strummed parts, see the v1.90 section).
@@ -100,7 +101,9 @@ to `main`. They test on the phone and send Lab reports and detection reports (of
 
 ## Picking up the conversation
 
-**Latest (18 Nov, ~21:45 Central): v1.91.** The owner sent a chords MIDI for TYSK (`…Thought_You_Should_Know_chords.mid`:
+**Latest (18 Nov, ~22:00 Central): the owner ran TYSK on the phone with the tab MIDI + chords MIDI in the Lab (v1.91, native separator 0.55× song length, 9 lead stretches / 81 strummed chords, report matches my run) and said "it plays well, I like the ability to switch strumming pattern in song". They asked for changing the tuning in song: done in v1.92 (see below).**
+
+Before that (~21:45): v1.91. The owner sent a chords MIDI for TYSK (`…Thought_You_Should_Know_chords.mid`:
 Track 2 = chords, Track 3 = bass, 143 BPM in the file, unquantised, guitar from beat 47.57; not in the repo) and
 switched to Opus. Built: files in the second box, tempo hint, tuning / capo fixes, Auto merge. Waiting for the owner to
 make TYSK in the Lab with both files (Auto) and send the Lab report.
@@ -440,6 +443,16 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.92: change the tuning in the song screen
+
+`<select id="tuneSel">` in the player's top bar (after the capo; names without the bracket part; highlighted when not
+standard). `syncTuneSel()` (called from `syncCapo`) fills / selects it. On change: stop playing if playing, `applyTuning(id)`
+(sets `settings.tuning`, clears `_built`), then `openSong(def)` so the song is rebuilt in the new tuning
+(`retuneEvents` for songs built in another one, same pitches on new frets; tab / strum shapes use `chordEvent`'s
+tuning shift), and a hint "Tuning: … retune in the Tuner". It restarts the song from the start (position not kept).
+Tested: a G-string fret-2 note → E♭ fret 3; drop D and open G leave the G string; playing stops; layout checked in
+landscape (portrait not checked).
 
 ## v1.91: Lab — files in the second box; Auto merge; checked on the real song
 
