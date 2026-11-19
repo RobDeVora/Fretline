@@ -4147,7 +4147,7 @@ const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capa
 function sfPlug(){try{const C=window.Capacitor;if(!IS_APP||!C||!C.Plugins||!C.Plugins.SongFiles)return null;if(C.isPluginAvailable&&!C.isPluginAvailable('SongFiles'))return null;return C.Plugins.SongFiles;}catch(e){return null;}}
 function sfSeg(t){let s=String(t||'').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').trim().replace(/^\.+/,'');if(s.length>80)s=s.slice(0,80).trim();return s||'Song';}
 function sfHash(str){let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return str.length+':'+(h>>>0);}
-let sfTimer=0,sfBusy=false,sfAgain=false,sfLast='';
+let sfWhere='',sfTimer=0,sfBusy=false,sfAgain=false,sfLast='';
 function sfSoon(ms){if(!sfPlug())return;clearTimeout(sfTimer);sfTimer=setTimeout(sfRun,ms==null?1500:ms);}
 async function sfRun(force){
   const P=sfPlug();if(!P||settings.saveFiles===false)return;
@@ -4160,7 +4160,7 @@ async function sfRun(force){
       else if(s.dir&&sfSeg(s.dir)!==rec.dir&&!taken.has(sfSeg(s.dir))){taken.add(sfSeg(s.dir));rec.dir=sfSeg(s.dir);rec.hash='';}
       const o={...s};delete o._built;const txt=JSON.stringify(o),h=sfHash(txt);
       if(rec.hash===h&&!force)continue;
-      try{await P.write({dir:rec.dir,name:sfSeg(s.title)+'.fretline.json',text:txt,mime:'application/json'});rec.hash=h;wrote++;}catch(e){bad++;sfLast=String(e&&e.message||e);}
+      try{const w=await P.write({dir:rec.dir,name:sfSeg(s.title)+'.fretline.json',text:txt,mime:'application/json'});rec.hash=h;wrote++;if(w&&w.path)sfWhere=w.path;}catch(e){bad++;sfLast=String(e&&e.message||e);}
     }
     for(const id of Object.keys(st)){if(live.has(id))continue;
       try{await P.removeDir({dir:st[id].dir});delete st[id];gone++;}catch(e){bad++;sfLast=String(e&&e.message||e);}}
@@ -4170,11 +4170,13 @@ async function sfRun(force){
   sfStatus(wrote,gone,bad);
   if(sfAgain){sfAgain=false;sfSoon(300);}
 }
-function sfStatus(w,g,b){const el=$('#sFilesMsg');if(!el)return;el.textContent=b?'Could not save everything: '+sfLast:(w||g)?('Saved '+w+' song'+(w===1?'':'s')+(g?', removed '+g+' folder'+(g===1?'':'s'):'')+'.'):'Everything is up to date.';}
+function sfStatus(w,g,b){const el=$('#sFilesMsg');if(!el)return;el.textContent=b?'Could not save everything: '+sfLast:(w||g)?('Saved '+w+' song'+(w===1?'':'s')+(g?', removed '+g+' folder'+(g===1?'':'s'):'')+'.'+(sfWhere?' Last one: '+sfWhere:'')):'Everything is up to date.'+(sfWhere?' Last file: '+sfWhere:'');}
 (function(){const set=store.set;store.set=function(k,v){set.call(store,k,v);if(k==='songs')sfSoon();};})();
 $('#sSaveFiles').onchange=e=>{settings.saveFiles=e.target.checked;saveSettings();if(e.target.checked)sfSoon(100);};
 $('#sFilesNow').onclick=()=>{$('#sFilesMsg').textContent='Saving…';sfRun(true);};
-if(sfPlug()){$('#sFilesBox').style.display='';$('#sSaveFiles').checked=settings.saveFiles!==false;sfSoon(4000);}
+if(IS_APP){$('#sFilesBox').style.display='';
+  if(sfPlug()){$('#sSaveFiles').checked=settings.saveFiles!==false;sfSoon(4000);}
+  else{$('#sFilesBox').innerHTML='<label>Song folders on the phone</label><div class="small">This copy of the Fretline app is older and cannot make song folders. <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">Install the latest Fretline.apk</a>, open it over the old one, and the folders appear.</div>';}}
 const ROUTE_NAMES={speaker:'the phone speaker',bluetooth:'Bluetooth',wired:'wired headphones',usb:'USB audio'};
 function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.route!==outRoute;outRoute=r.route;outName=r.name||'';
   const D=settings.soundDelays||{},P=settings.phonesBy||{};
@@ -4184,7 +4186,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.95';
+const APP_VERSION='1.96';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
