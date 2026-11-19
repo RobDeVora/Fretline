@@ -1,4 +1,4 @@
-# Fretline: session handoff (18 Nov 2026, web v1.86, Android app rebuilt for v1.80 (native separator + save to Downloads))
+# Fretline: session handoff (18 Nov 2026, web v1.87, Android app rebuilt for v1.80 (native separator + save to Downloads))
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
 how detection works now, what's open, and a changelog of everything built in the last session (v1.51 to v1.68).
@@ -375,6 +375,31 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.87: guitar tunings (Tuner) — app, imports and the Lab follow them
+
+Owner asked for tuning options in the Tuner that say how to adjust each string as it's picked.
+- **Core**: `TUNINGS` (std, eb half step down, dstd whole step down, dropd, dropdb, dropc, openg, opend, opene, dadgad,
+  cstd), `setTuning(id)` rewrites `OPEN` / `STRING_LABELS` **in place** (so every string+fret→note path follows),
+  `TUNING_ID`, `STD_OPEN`, `tuningShift()` (uniform shift or null), `tuningFromLows(lows)`, `TUNE_FLATS` (named so
+  because the voice code already has `FLAT_NAMES`). `chordEvent` pcs: in a non-standard tuning, the shape's sound
+  (uniform shift → name moved; drop/open → the shape's notes). Chord shapes stay standard fingerings.
+- **Setting**: `settings.tuning`, applied at startup before any song is built (`setTuning(settings.tuning||'std')`);
+  `applyTuning(id)` saves, drops every song's cached `_built`, refreshes the tuner and reopens a paused song.
+- **Tuner**: tuning picker; string = nearest target (or tapped = locked); target note per string (flats for flat
+  tunings), Hz vs target, "Tighten (tune up) / Loosen (tune down) N semitones (¢)" or cents, ✓ per string after
+  0.5 s within 5¢. Raw pitch (not the tuning follower's corrected value).
+- **Songs**: `def.tuning` = what the song is written for (MIDI per-string exports: each string's lowest note →
+  `tuningFromLows` — TYSK → eb; Guitar Pro track tuning; text tabs "Tuning: half step down / Drop D …" in the Lab),
+  `def.builtTuning` = the tuning its strings/frets were worked out in. `buildSong`: rec / file / library-file songs
+  whose builtTuning ≠ current get `retuneEvents` (same pitches, strings/frets for the current tuning; chords rebuilt).
+  Opening a song with `def.tuning` ≠ current asks "This song is in …" → Keep mine / Switch. Report: "tuning <id>".
+- **Lab**: core set to the user's tuning (`userTuning()` from localStorage); a sheet is read in its own tuning when
+  known (file part / text) and saved with tuning + builtTuning.
+- Tests: tuner cases via a fake analyser (/tmp/tun.py pattern: drop D low E → "Loosen 2 semitones"; E♭ high E →
+  "Loosen 1 semitone"; lock); TYSK MIDI song: tuning eb/eb, prompt, keep → standard frets, switch → E♭ frets;
+  "Tuning: half step down" chord sheet vs a standard-pitch recording → capo 1. Boogie 95/96, fingering/lyrics node
+  tests, Lab sheet tests unchanged.
 
 ## v1.86: MIDI tab exports read whole; files lined up by their own timing
 

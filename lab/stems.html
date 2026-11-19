@@ -256,22 +256,35 @@ let CORE=null;
 async function loadCore(){if(CORE)return CORE;const t=await (await fetch('../index.html',{cache:'no-cache'})).text();const m=t.match(/<script id="core">([\s\S]*?)<\/script>/);if(!m)throw new Error("could not load Fretline's tab reader");
   const a=t.indexOf('function loadScript(srcs)'),z=t.indexOf('const TAB_SITES'),sn=t.indexOf('function sniffExt(buf,ext)'),snEnd=t.indexOf('\n}\n',sn);
   const readers=a>0&&z>a&&sn>0&&snEnd>sn?t.slice(a,z)+'\n'+t.slice(sn,snEnd+3):'';
-  CORE=new Function(m[1]+'\n'+readers+';return {parseTab,parseChordSheet,chordEvent,strumEvent,transposeName,bestCapo,parseMidi,parseMusicXML,eventsFromNotes,chordEventsFromSymbols,chordChart,chordProMeta,'+
-    (readers?'readMxl,readGuitarPro,readPdfText,sniffExt':'readMxl:null,readGuitarPro:null,readPdfText:null,sniffExt:(b,e)=>e')+'};')();return CORE;}
+  CORE=new Function(m[1]+'\n'+readers+';return {parseTab,parseChordSheet,chordEvent,strumEvent,transposeName,bestCapo,parseMidi,parseMusicXML,eventsFromNotes,chordEventsFromSymbols,chordChart,chordProMeta,setTuning,tuningById,TUNINGS,'+
+    (readers?'readMxl,readGuitarPro,readPdfText,sniffExt':'readMxl:null,readGuitarPro:null,readPdfText:null,sniffExt:(b,e)=>e')+'};')();
+  if(CORE.setTuning)CORE.setTuning(userTuning());return CORE;}
+/* v1.87: the guitar's tuning (Fretline › Tuner). A sheet in another tuning is read in its own tuning (MIDI per-string
+   exports and Guitar Pro say which; a text tab can say "Tuning: half step down / Drop D …"), and the song remembers
+   it, so the app can offer to switch. */
+function userTuning(){try{return (JSON.parse(localStorage.getItem('fretline:settings')||'{}').tuning)||'std';}catch(e){return 'std';}}
+function tuningFromText(t){const x=t.slice(0,3000).toLowerCase();const has=r=>r.test(x);
+  if(!/tun(ing|ed)|drop|open|dadgad|half.?step|whole.?step|e♭|eb/.test(x))return null;
+  if(has(/dadgad/))return 'dadgad';if(has(/drop\s*(c#|d♭|db)\b/))return 'dropdb';if(has(/drop\s*c\b/))return 'dropc';if(has(/drop\s*d\b/))return 'dropd';
+  if(has(/open\s*g\b/))return 'openg';if(has(/open\s*d\b/))return 'opend';if(has(/open\s*e\b/))return 'opene';
+  if(has(/half.?step\s*down|1\/2\s*step\s*down|e♭\s*(standard|tuning)|eb\s*(standard|tuning)|tuning\s*:?\s*(eb|e♭)\b/))return 'eb';
+  if(has(/whole.?step\s*down|d\s*standard|tuning\s*:?\s*d\s*g\s*c\s*f/))return 'dstd';if(has(/c\s*standard/))return 'cstd';return null;}
 function capoFromText(t){const m=/\bcapo\b\s*(?:on|at)?\s*:?\s*(?:fret)?\s*(\d{1,2})/i.exec(t)||/(\d{1,2})(?:st|nd|rd|th)\s+fret\s+capo/i.exec(t);const n=m?parseInt(m[1],10):0;return n>0&&n<=12?n:0;}
 let SHEETFILE=null; /* {info:{bpm,bpb,parts},fmt,name} for MIDI / MusicXML / Guitar Pro */
 function fileSheet(core){const info=SHEETFILE.info,part=info.parts[+$('sheetPart').value]||info.parts[0],bpb=info.bpb||4;let kind='tab',events,capo=0;
+  const tun=part.tuning||userTuning();core.setTuning(tun);
   if(part.chords){kind='chords';events=core.chordEventsFromSymbols(part.chords,bpb,0);}
   else if($('sheetAs').value==='chords'){const cc=core.chordChart(core.eventsFromNotes(part.notes,{bpb,shift:0}),bpb,info.bpm);kind='chords';events=cc.events;capo=cc.capo||0;}
   else events=core.eventsFromNotes(part.notes,{bpb,shift:0});
   events=[...events].filter(e=>e.pcs&&e.pcs.length).map(e=>{const o={...e};delete o.label;return o;});
   // a short clip only needs the start of the file (its own tempo says roughly how much)
   const secs=+$('secs').value;if(secs&&info.bpm){const lim=secs*info.bpm/60*1.6+4*bpb,t0=events.length?events[0].t:0;events=events.filter(e=>e.t-t0<=lim);}
-  return {kind,events,capo,bpm:info.bpm,bpb,fromFile:SHEETFILE.fmt+' · '+part.label};}
-function readSheet(core,text,type){if(SHEETFILE)return fileSheet(core);let kind=type,events=[];
+  core.setTuning(userTuning());
+  return {kind,events,capo,bpm:info.bpm,bpb,fromFile:SHEETFILE.fmt+' · '+part.label,tuning:part.tuning||null,builtTuning:tun};}
+function readSheet(core,text,type){if(SHEETFILE)return fileSheet(core);let kind=type,events=[];const tt=tuningFromText(text),tun=tt||userTuning();core.setTuning(tun);
   if(type!=='chords'){const r=core.parseTab(text);if(r.events.length>=2||type==='tab'){kind='tab';events=r.events;}}
   if(kind!=='tab'){kind='chords';events=core.parseChordSheet(text,4);}
-  events=[...events].filter(e=>e.pcs&&e.pcs.length).map(e=>{const o={...e};delete o.label;return o;});return {kind,events,capo:capoFromText(text)};}
+  events=[...events].filter(e=>e.pcs&&e.pcs.length).map(e=>{const o={...e};delete o.label;return o;});core.setTuning(userTuning());return {kind,events,capo:capoFromText(text),tuning:tt,builtTuning:tun};}
 function chromaFrames(x){const W=4096,H=512,sr=22050,n=Math.max(0,Math.floor((x.length-W)/H)+1);const C=new Float32Array(n*12),E=new Float32Array(n);
   const win=new Float32Array(W);for(let i=0;i<W;i++)win[i]=0.5-0.5*Math.cos(2*Math.PI*i/(W-1));
   /* one value per semitone (its strongest bin), so high harmonics, which cover many bins, don't outweigh the
@@ -393,7 +406,7 @@ async function makeSheetSong(sheet,gL,gR,L,Rc,rL,rR,N){
   status('Lining the sheet up with the recording…');const g22=await toRate([gL,gR],22050),m22=await toRate([L,Rc],22050);const core=await loadCore();
   const t0=performance.now();const al=alignSheet(sheet,g22);log('sheet: lined up in '+((performance.now()-t0)/1000).toFixed(1)+' s');
   let placed=al.placed;if(!placed.length)throw new Error('the sheet could not be lined up with this recording');
-  if(sheet.kind==='chords'&&$('strumMode').value==='strums'){placed=strumsFromRecording(placed,al.A,core);log('sheet: '+placed.length+' strums taken from the recording');}
+  if(sheet.kind==='chords'&&$('strumMode').value==='strums'){core.setTuning(sheet.builtTuning||userTuning());placed=strumsFromRecording(placed,al.A,core);core.setTuning(userTuning());log('sheet: '+placed.length+' strums taken from the recording');}
   let bt,b0;const ft=al.fileTempo;
   if(ft){/* the file's own bars: bar 1 = the file's bar holding its first note */const bpb=sheet.bpb||4,spb=60/ft.bpm;bt={bpm:Math.round(ft.bpm*1000)/1000};b0=ft.beat0+Math.floor(ft.firstBeat/bpb+1e-6)*bpb*spb;while(b0>placed[0].t+0.05)b0-=bpb*spb;
     log('tempo: '+Math.round(bt.bpm*100)/100+' BPM from the file, bar 1 at '+b0.toFixed(2)+' s');}
@@ -403,11 +416,11 @@ async function makeSheetSong(sheet,gL,gR,L,Rc,rL,rR,N){
      than that, chord names are rewritten in the recording's key (with the capo that gives the easiest shapes) */
   let capo=al.shift>=1&&al.shift<=7?al.shift:0;
   if(al.shift&&!capo){if(sheet.kind==='chords'){const semi=al.shift-12;const names=[...new Set(placed.map(p=>p.e.chord||p.e.label).filter(Boolean))].map(n=>core.transposeName(n,semi));capo=core.bestCapo(names);
-      placed=placed.map(p=>{const nm=core.transposeName(p.e.chord||p.e.label,semi-capo);const e=p.e.strum?core.strumEvent(nm,0,1,'D'):core.chordEvent(nm,0,4);return {...p,e};});
+      core.setTuning(sheet.builtTuning||userTuning());placed=placed.map(p=>{const nm=core.transposeName(p.e.chord||p.e.label,semi-capo);const e=p.e.strum?core.strumEvent(nm,0,1,'D'):core.chordEvent(nm,0,4);return {...p,e};});core.setTuning(userTuning());
       log('sheet: the recording is '+(12-al.shift)+' semitones lower than the sheet; chords rewritten in the recording\'s key'+(capo?' (capo '+capo+')':''));}
     else log('sheet: the recording is in a different key from the tab; notes are shown as written');}
   const events=strumDirs(placeEvents(placed,bt.bpm,b0));
-  await saveRecSong({events,recEvT:placed.map(p=>Math.round(p.t*1000)/1000),bpm:bt.bpm,recOffset:b0,capo,credit:'Made from a recording and a '+(sheet.kind==='tab'?'tab':'chord sheet')+' in Fretline Lab'},gL,gR,rL,rR,null);}
+  await saveRecSong({events,recEvT:placed.map(p=>Math.round(p.t*1000)/1000),bpm:bt.bpm,recOffset:b0,capo,builtTuning:sheet.builtTuning||'std',...(sheet.tuning?{tuning:sheet.tuning}:{}),credit:'Made from a recording and a '+(sheet.kind==='tab'?'tab':'chord sheet')+' in Fretline Lab'},gL,gR,rL,rR,null);}
 async function saveRecSong(extra,gL,gR,rL,rR,notes){
   const id='m-rec-'+Date.now(),key=location.origin+'/__fretline/rec/'+id+'.wav';
   status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
@@ -440,7 +453,7 @@ $('go').onclick=async()=>{
     let sheet=null;const sheetText=$('sheet').value.trim();
     if((sheetText||SHEETFILE)&&$('mk').checked){status('Reading the sheet…');const core=await loadCore();sheet=readSheet(core,sheetText,$('sheetType').value);
       if(!sheet.events.length)throw new Error(sheet.kind==='tab'?'no tab found in the sheet (tab lines look like e|--0--3--|, six lines per block)':'no chords found in the sheet');
-      log('sheet: '+(sheet.fromFile?sheet.fromFile+' as '+(sheet.kind==='tab'?'notes':'chords'):sheet.kind==='tab'?'tab':'chord sheet')+' with '+sheet.events.length+' steps'+(sheet.capo?' · capo '+sheet.capo:''));}
+      log('sheet: '+(sheet.fromFile?sheet.fromFile+' as '+(sheet.kind==='tab'?'notes':'chords'):sheet.kind==='tab'?'tab':'chord sheet')+' with '+sheet.events.length+' steps'+(sheet.capo?' · capo '+sheet.capo:'')+(sheet.tuning?' · written for '+core.tuningById(sheet.tuning).name:'')+(sheet.builtTuning!=='std'?' · frets for '+core.tuningById(sheet.builtTuning).name.split(' (')[0]:''));}
     let native=null;
     if($('be').value==='native'&&NS){try{
       const st=await NS.status({});log('native: '+st.cores+' cores · model on the phone '+(st.modelBytes/1e6).toFixed(0)+' MB');

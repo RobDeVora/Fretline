@@ -116,6 +116,11 @@ header h1 span{color:var(--accent)}
 .tstrings{display:flex;gap:8px}
 .tstrings div{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--panel);border:1px solid var(--line);font-weight:700}
 .tstrings div.hit{background:var(--accent);color:#08110d}
+.tstrings div{position:relative;width:48px;height:48px;font-size:14px;cursor:pointer}
+.tstrings div.done::after{content:'✓';position:absolute;right:-4px;top:-6px;font-size:13px;color:var(--accent)}
+.tstrings div.lock{outline:2px solid var(--accent);outline-offset:2px}
+.tstr{color:var(--muted);font-weight:600;min-height:1.3em}
+.tadj{font-size:20px;font-weight:700;min-height:1.4em;text-align:center}
 .small{font-size:12px;color:var(--muted)}
 .gen-seed{font-variant-numeric:tabular-nums}
 </style>
@@ -301,11 +306,15 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
 <section class="screen" id="tuner">
   <header><button class="ghost" id="tunBack">‹ Back</button><h1 style="font-size:18px">Tuner</h1></header>
   <div class="tuner">
+    <label class="small" for="tTuning" style="align-self:stretch;max-width:420px;margin:0 auto;width:100%">Tuning</label>
+    <select id="tTuning" style="width:min(90vw,420px);font-size:16px;padding:10px;border-radius:12px"></select>
+    <div class="tstr" id="tStr">Pick a string</div>
     <div class="tnote" id="tNote">–</div>
     <div class="tbar"><div class="mid"></div><div class="needle" id="tNeedle"></div></div>
     <div class="tinfo" id="tInfo">Play a single string</div>
+    <div class="tadj" id="tAdj"></div>
     <div class="tstrings" id="tStrings"></div>
-    <p class="small">Standard tuning: E A D G B E (low to high)</p>
+    <p class="small" id="tHelp">Low to high. The tuner finds the string you play; tap a string to stay on it.</p>
   </div>
 </section>
 
@@ -411,8 +420,35 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
 <script id="core">
 /* ================= Music core (pure functions) ================= */
 const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const OPEN=[40,45,50,55,59,64]; // string index 0 = low E ... 5 = high e
+const OPEN=[40,45,50,55,59,64]; // string index 0 = low E ... 5 = high e (changed in place by setTuning)
 const STRING_LABELS=['E','A','D','G','B','e'];
+/* v1.87: guitar tunings. OPEN / STRING_LABELS are rewritten in place, so everything that turns a string + fret into
+   a note (tabs, string choice for MIDI / recordings, chord shapes, detection, the fretboard) follows the tuning.
+   Chord shapes stay the standard fingerings; in a tuning that lowers every string alike (E♭, D standard…) the chord
+   you hear is the shape's name moved down; in drop / open tunings it is whatever the shape's frets give. */
+const STD_OPEN=[40,45,50,55,59,64];
+const TUNINGS=[
+  {id:'std',name:'Standard (E A D G B E)',open:[40,45,50,55,59,64]},
+  {id:'eb',name:'Half step down (E♭ A♭ D♭ G♭ B♭ E♭)',open:[39,44,49,54,58,63]},
+  {id:'dstd',name:'Whole step down (D G C F A D)',open:[38,43,48,53,57,62]},
+  {id:'dropd',name:'Drop D (D A D G B E)',open:[38,45,50,55,59,64]},
+  {id:'dropdb',name:'Drop D♭ (D♭ A♭ D♭ G♭ B♭ E♭)',open:[37,44,49,54,58,63]},
+  {id:'dropc',name:'Drop C (C G C F A D)',open:[36,43,48,53,57,62]},
+  {id:'openg',name:'Open G (D G D G B D)',open:[38,43,50,55,59,62]},
+  {id:'opend',name:'Open D (D A D F♯ A D)',open:[38,45,50,54,57,62]},
+  {id:'opene',name:'Open E (E B E G♯ B E)',open:[40,47,52,56,59,64]},
+  {id:'dadgad',name:'DADGAD (D A D G A D)',open:[38,45,50,55,57,62]},
+  {id:'cstd',name:'C standard (C F B♭ E♭ G C)',open:[36,41,46,51,55,60]}];
+let TUNING_ID='std';
+const TUNE_FLATS=['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B'];
+function tuningById(id){return TUNINGS.find(t=>t.id===id)||TUNINGS[0];}
+function setTuning(id){const t=tuningById(id);TUNING_ID=t.id;for(let i=0;i<6;i++){OPEN[i]=t.open[i];const n=t.open[i]===STD_OPEN[i]?['E','A','D','G','B','E'][i]:(t.id==='std'?NOTE_NAMES:(/♭/.test(t.name)?TUNE_FLATS:NOTE_NAMES))[t.open[i]%12].replace('#','♯');STRING_LABELS[i]=i===5&&n==='E'?'e':n;}return t;}
+// every string moved by the same amount (E♭, D standard, C standard): that amount, else null
+function tuningShift(){const d=OPEN[0]-STD_OPEN[0];for(let i=1;i<6;i++)if(OPEN[i]-STD_OPEN[i]!==d)return null;return d;}
+// the tuning whose open strings fit a part's lowest note on each string (lows[s], s = 0 low … 5 high): every low is
+// at or above its open string, closest overall; null if standard fits as well or nothing fits
+function tuningFromLows(lows){let best=null;for(const t of TUNINGS){let ok=true,sum=0;for(let s=0;s<6;s++){if(lows[s]==null)continue;const d=lows[s]-t.open[s];if(d<0){ok=false;break;}sum+=Math.min(d,5);}
+  if(ok&&(!best||sum<best.sum))best={t,sum};}return best&&best.t.id!=='std'?best.t:null;}
 const PC={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
 const FLAT2SHARP={Bb:'A#',Eb:'D#',Ab:'G#',Db:'C#',Gb:'F#',Cb:'B',Fb:'E'};
 function midiToName(m){return NOTE_NAMES[((m%12)+12)%12]+(Math.floor(m/12)-1);}
@@ -550,8 +586,9 @@ function chordShape(name){
   return base[qq].map(f=>f<0?-1:f+fr);
 }
 function chordEvent(name,t,d){
-  const pcs=chordPCs(name)||[];const shape=chordShape(name);const notes=[];
+  let pcs=chordPCs(name)||[];const shape=chordShape(name);const notes=[];
   if(shape)shape.forEach((f,s)=>{if(f>=0)notes.push({s,f,midi:OPEN[s]+f});});
+  if(TUNING_ID!=='std'){const k=tuningShift();pcs=k!=null?pcs.map(p=>((p+k)%12+12)%12):notes.length?[...new Set(notes.map(n=>n.midi%12))]:pcs;} /* what the shape sounds like in this tuning */
   return {t,d,notes,chord:name,pcs,shape};
 }
 function parseChordSeq(str,cb){
@@ -979,12 +1016,16 @@ function parseMidi(bytes){
   for(const n of raw){if(n.ch===9)continue;const pr=chProg(n.track,n.ch);const key=n.track+':'+(pr!=null?'p'+pr:'c'+n.ch);if(!groups.has(key))groups.set(key,{ch:n.ch,notes:[]});groups.get(key).notes.push({beat:n.tick/div+pad,dur:n.dur/div,midi:n.midi});}
   const parts=[];
   for(const [key,g] of groups){const notes=g.notes.sort((a,b)=>a.beat-b.beat||a.midi-b.midi);
-    const tr=+key.split(':')[0],ch=g.ch;const pr=progs[key]!=null?progs[key]:(progs[tr+':'+ch]);
+    const tr=+key.split(':')[0],ch=g.ch;
+    // a per-string export (6 channels, high string first): each string's lowest note shows the tuning
+    let tuning=null;{const chs=[...new Set(raw.filter(n=>n.track===tr&&n.ch!==9&&chProg(tr,n.ch)===chProg(tr,ch)).map(n=>n.ch))].sort((a,b)=>a-b);
+      if(chs.length===6&&key.includes(':p')){const lows=chs.map(c=>Math.min(...raw.filter(n=>n.track===tr&&n.ch===c).map(n=>n.midi))).reverse();
+        let desc=true;for(let i=1;i<6;i++)if(lows[i]<lows[i-1])desc=false;if(desc){const t=tuningFromLows(lows);if(t)tuning=t.id;}}}const pr=progs[key]!=null?progs[key]:(progs[tr+':'+ch]);
     const isGuitar=pr!=null&&pr>=24&&pr<=31;
     const inst=pr==null?'':isGuitar?GM_GTR[pr-24]:GM_FAM[Math.floor(pr/8)];
     let label=tnames[tr]||inst||('Track '+(tr+1));
     if(inst&&tnames[tr]&&tnames[tr].toLowerCase()!==inst.toLowerCase())label+=' ('+inst+')';
-    parts.push({label,notes,isGuitar:isGuitar||/guit|gtr/i.test(tnames[tr]||''),hasTab:false,count:notes.length});
+    parts.push({label,notes,isGuitar:isGuitar||/guit|gtr/i.test(tnames[tr]||''),hasTab:false,count:notes.length,tuning});
   }
   // sung words: lyric events, or karaoke (.kar) text events ("/" starts a line, "\\" a verse, "@" is a header)
   let le=lyr.filter(x=>x.type===5);if(le.length<8){const tx=lyr.filter(x=>x.type===1&&!/^@/.test(x.text));le=tx.length>=16?tx:[];}
@@ -1353,10 +1394,19 @@ const LIB=[
 const LVL=['','Easy','Medium','Hard'];
 const CAT_COLOR={course:'#5ce1a6',strum:'#4dabf7',lesson:'#4cc9f0',song:'#5ce1a6',chords:'#b388ff',mine:'#ffb347',gen:'#ff8fab'};
 
+/* v1.87: songs whose notes are real pitches (MIDI / Guitar Pro imports, recordings, library files) keep the pitches
+   and get strings + frets for the guitar's current tuning; chords keep their shapes (what they sound like follows) */
+function retuneEvents(events){return events.map(e=>{
+  if(e.strum&&e.label&&e.strum!=='x'){const n=strumEvent(e.label,e.t,e.d,e.strum);return {...e,snotes:n.snotes,pcs:n.pcs,shape:n.shape};}
+  if(e.chord){const n=chordEvent(e.chord,e.t,e.d);return {...e,notes:n.notes,pcs:n.pcs,shape:n.shape};}
+  if(!e.notes||!e.notes.length)return e;
+  const ok=e.notes.every(n=>n.s!=null&&OPEN[n.s]+n.f===n.midi);if(ok)return e;
+  const ms=e.notes.map(n=>n.midi);let out=ms.length===1?[noteObj(foldRange(ms[0]))].filter(Boolean):assignStrings(ms.map(foldRange));
+  if(!out.length)return e;out=out.map((o,i)=>({...e.notes[i],...o}));return {...e,notes:out,pcs:[...new Set(out.map(n=>((n.midi%12)+12)%12))]};});}
 function buildSong(def){
   if(def._built)return def._built;
   let events;
-  if(def.events)events=def.events;
+  if(def.events)events=(def.builtTuning||'std')!==TUNING_ID&&(def.kind==='rec'||def.kind==='file'||def.libFile)?retuneEvents(def.events):def.events;
   else if(def.melody)events=parseMelody(def.melody);
   else if(def.fret)events=parseFretSeq(def.fret);
   else if(def.kind==='rec'&&def.recNotes)events=eventsFromNotes(def.recNotes,{bpb:def.bpb||4,shift:0}); /* v1.78: from Lab › split a song */
@@ -1392,6 +1442,7 @@ function gateMax(){return 0.04*Math.pow(0.65,settings.sens-1);}
 function gate(){const b=gateMax();const nf=typeof det!=='undefined'&&det.noise;return nf?Math.min(b,Math.max(nf*4,0.0012)):b;}
 let bests=store.get('best',{});
 let mySongs=store.get('songs',[]);
+setTuning(settings.tuning||'std'); /* v1.87: before any song is built */
 
 /* ================= Audio ================= */
 let micSrc=null;
@@ -2279,6 +2330,9 @@ function openSong(def){
   $('#btnRegen').style.display=canNew?'':'none';
   $('#rNew').style.display=canNew?'':'none';$('#rNew').textContent=def.cat==='gen'?'New track':'New exercise';
   resetRun();show('player');updateButtons();
+  if(def.tuning&&def.tuning!==TUNING_ID&&!def.tip){const t=tuningById(def.tuning);
+    showMsg('This song is in '+t.name.split(' (')[0],'<p>It was written for <b>'+esc(t.name)+'</b>; your guitar is set to '+esc(tuningById(TUNING_ID).name)+'.</p><p>Switch to its tuning to see the frets as written (then retune in the Tuner), or keep yours: the notes stay the same pitches, on the frets of your tuning.</p><div class="row end"><button id="msgKeepT">Keep mine</button><button class="primary" id="msgSwitchT">Switch</button></div>');
+    $('#msgKeepT').onclick=()=>$('#msg').classList.remove('show');$('#msgSwitchT').onclick=()=>{$('#msg').classList.remove('show');applyTuning(def.tuning);showHint('Tuning: '+t.name.split(' (')[0]+'. Tune your guitar in the Tuner.',5000);};}
   if(def.tip){$('#iUnit').textContent=def.unit||'';$('#iTitle').textContent=def.title;$('#iTip').textContent=def.tip;
     $('#iGoal').textContent=def.cat==='course'?'Goal: score 80% or more in Play mode to complete this lesson. Use Wait mode or lower the speed to practise first.':'Your score counts in Play mode at 100% speed or faster.';
     $('#intro').classList.add('show');}
@@ -2628,7 +2682,7 @@ function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]
 function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.notes.push(txt);}
 function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);}}
 function diagReport(){
-  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+(G.def&&G.def.recAudio?' · recording: backing '+(RECB.buf?(RECB.buf.duration).toFixed(0)+' s':'not loaded')+', real guitar '+(RECB.gbuf?'yes':G.def.recGuitar?'FAILED '+(RECB.gErr||''):'none (older song)')+', '+(G.def.recEvT?'from a sheet':'AI notes')+', offset '+(G.def.recOffset||0).toFixed(3)+' s':'')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+')'+(tuneOff?' · tuning '+(tuneOff>0?'+':'')+tuneOff+' cents':'')+' · '+G.hits+'/'+S.events.length];
+  const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+(TUNING_ID!=='std'?' · tuning '+TUNING_ID:'')+(G.def&&G.def.recAudio?' · recording: backing '+(RECB.buf?(RECB.buf.duration).toFixed(0)+' s':'not loaded')+', real guitar '+(RECB.gbuf?'yes':G.def.recGuitar?'FAILED '+(RECB.gErr||''):'none (older song)')+', '+(G.def.recEvT?'from a sheet':'AI notes')+', offset '+(G.def.recOffset||0).toFixed(3)+' s':'')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+')'+(tuneOff?' · tuning '+(tuneOff>0?'+':'')+tuneOff+' cents':'')+' · '+G.hits+'/'+S.events.length];
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
     L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.notes.length?' · '+d.notes.join(','):''));});
@@ -3162,19 +3216,36 @@ function hudUpdate(now){
 }
 
 /* ---- tuner ---- */
-$('#tStrings').innerHTML=OPEN.map((m,i)=>`<div data-s="${i}">${STRING_LABELS[i]}</div>`).join('');
-$('#btnTuner').onclick=async()=>{show('tuner');await enableMic();};
+/* v1.87: tuning presets. The tuner works out which string you're playing (the string whose target note is nearest,
+   unless you tapped one to stay on it) and says how far to tighten or loosen it, even several semitones away (drop
+   and open tunings). A string is ticked once it has stayed within 5 cents for half a second. */
+$('#tTuning').innerHTML=TUNINGS.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
+const TSTR_NAMES=['6th (low)','5th','4th','3rd','2nd','1st (high)'];
+let tunSmooth=0,tunLock=null,tunDone=new Set(),tunGood={s:null,since:0},tunLast=null;
+function tunerStrings(){$('#tStrings').innerHTML=OPEN.map((m,i)=>`<div data-s="${i}" class="${tunDone.has(i)?'done':''}${tunLock===i?' lock':''}">${esc(STRING_LABELS[i])}<small style="font-size:9px;position:absolute;bottom:3px;opacity:.7">${Math.floor(m/12)-1}</small></div>`).join('');
+  document.querySelectorAll('#tStrings div').forEach(el=>el.onclick=()=>{const i=+el.dataset.s;tunLock=tunLock===i?null:i;tunerStrings();});}
+function applyTuning(id,why){const t=setTuning(id);settings.tuning=t.id;saveSettings();
+  for(const d of [...LIB,...mySongs])if(d&&d._built)delete d._built;tunDone=new Set();tunLock=null;if($('#tTuning'))$('#tTuning').value=t.id;tunerStrings();
+  if(G.def&&curScreen==='player'&&!G.playing)openSong(G.def);return t;}
+$('#tTuning').onchange=e=>applyTuning(e.target.value);
+$('#btnTuner').onclick=async()=>{$('#tTuning').value=TUNING_ID;tunerStrings();show('tuner');await enableMic();};
 $('#tunBack').onclick=()=>show('home');
-let tunSmooth=0;
 function tunerUpdate(){
-  if(!analyser||det.midi==null){$('#tInfo').textContent=analyser?'Play a single string':'Microphone is off';return;}
-  const m=det.midi;tunSmooth=tunSmooth*0.6+det.cents*0.4;
-  const nm=midiToName(m);$('#tNote').innerHTML=esc(nm.replace(/-?\d+$/,''))+'<sub>'+nm.match(/-?\d+$/)[0]+'</sub>';
-  const c=Math.max(-50,Math.min(50,tunSmooth));$('#tNeedle').style.left=(50+c)+'%';
-  $('#tNeedle').style.background=Math.abs(c)<5?'#5ce1a6':Math.abs(c)<15?'#ffd43b':'#ff6b81';
-  $('#tInfo').textContent=det.freq.toFixed(1)+' Hz · '+(Math.abs(c)<5?'in tune':c<0?Math.round(-c)+'¢ flat, tune up':Math.round(c)+'¢ sharp, tune down');
-  let bi=0,bd=1e9;OPEN.forEach((o,i)=>{const d=Math.abs(freqToMidiFloat(det.freq)-o);if(d<bd){bd=d;bi=i;}});
-  document.querySelectorAll('#tStrings div').forEach((el,i)=>el.classList.toggle('hit',i===bi&&bd<0.5));
+  if(!analyser||det.midi==null||!det.freq){$('#tInfo').textContent=analyser?'Play a single string':'Microphone is off';if(tunLast&&performance.now()-tunLast>1500){$('#tAdj').textContent='';}return;}
+  tunLast=performance.now();const mf=freqToMidiFloat(det.freq);
+  let si=tunLock;if(si==null){let bd=1e9;OPEN.forEach((o,i)=>{const d=Math.abs(mf-o);if(d<bd){bd=d;si=i;}});}
+  const target=OPEN[si],off=(mf-target)*100; /* cents from the target note */
+  tunSmooth=Math.abs(off-tunSmooth)>60?off:tunSmooth*0.6+off*0.4;const c=tunSmooth;
+  $('#tStr').textContent=TSTR_NAMES[si]+' string → '+STRING_LABELS[si].toUpperCase()+(Math.floor(target/12)-1);
+  const nm=midiToName(Math.round(mf));$('#tNote').innerHTML=esc(nm.replace(/-?\d+$/,'').replace('#','♯'))+'<sub>'+nm.match(/-?\d+$/)[0]+'</sub>';
+  $('#tNeedle').style.left=(50+Math.max(-50,Math.min(50,c)))+'%';
+  const ac=Math.abs(c);$('#tNeedle').style.background=ac<5?'#5ce1a6':ac<15?'#ffd43b':'#ff6b81';
+  const semis=Math.round(ac/100);
+  $('#tInfo').textContent=det.freq.toFixed(1)+' Hz · target '+(440*Math.pow(2,(target-69)/12)).toFixed(1)+' Hz';
+  $('#tAdj').textContent=ac<5?'In tune ✓':(c<0?'Tighten (tune up) ':'Loosen (tune down) ')+(ac>=60?semis+' semitone'+(semis>1?'s':'')+' ('+Math.round(ac)+'¢)':Math.round(ac)+'¢');
+  $('#tAdj').style.color=ac<5?'#5ce1a6':ac<15?'#ffd43b':'#ff6b81';
+  const now=performance.now();if(ac<5){if(tunGood.s!==si){tunGood={s:si,since:now};}else if(now-tunGood.since>500&&!tunDone.has(si)){tunDone.add(si);tunerStrings();}}else tunGood={s:null,since:0};
+  document.querySelectorAll('#tStrings div').forEach((el,i)=>el.classList.toggle('hit',i===si));
 }
 
 /* ---- settings ---- */
@@ -3456,8 +3527,9 @@ async function readGuitarPro(bytes){
         pos+=dur;
       }
     });
-    const isStd=nStr===6&&[...tuning].sort((a,b)=>a-b).join()===OPEN.join();
-    if(notes.length)parts.push({label:(tr.name||'Track')+(nStr&&nStr!==6?' ('+nStr+'-string)':isStd?'':' (alt. tuning)'),notes,isGuitar:nStr===6||nStr===7,hasTab:true,count:notes.length});
+    const isStd=nStr===6&&[...tuning].sort((a,b)=>a-b).join()===STD_OPEN.join();
+    const tunId=nStr===6?(TUNINGS.find(t=>t.open.join()===[...tuning].sort((a,b)=>a-b).join())||{}).id||null:null; /* v1.87 */
+    if(notes.length)parts.push({label:(tr.name||'Track')+(nStr&&nStr!==6?' ('+nStr+'-string)':isStd?'':tunId?' ('+tuningById(tunId).name.split(' (')[0]+')':' (alt. tuning)'),notes,isGuitar:nStr===6||nStr===7,hasTab:true,count:notes.length,tuning:tunId&&tunId!=='std'?tunId:null});
   }
   if(!parts.length)throw new Error('No playable tracks found in this Guitar Pro file.');
   const mb0=mbs[0]||{};
@@ -3533,7 +3605,8 @@ $('#impSave').onclick=()=>{
   let d;
   if(impFile){d={id:'m-'+Date.now(),cat:'mine',kind:'file',fmt:impFile.fmt,title,bpm,bpb:impFile.bpb||4,events:r.events,capo:r.capo||0,strum:impStrumValue(),strumAuto:r.strumAuto||detectPattern(r.events,impFile.bpb||4)||null};
     Object.assign(d,importVocal(r));const ap=allFileParts(r);if(ap)Object.assign(d,ap);
-    const tl=trimLead(d.events,d.bpb);d.events=tl.events;d.trim=tl.trim;}
+    const tl=trimLead(d.events,d.bpb);d.events=tl.events;d.trim=tl.trim;
+    d.builtTuning=TUNING_ID;{const pt=impFile.parts[+$('#impPart').value]||impFile.parts[0];if(pt&&pt.tuning)d.tuning=pt.tuning;}} /* v1.87 */
   else d={id:'m-'+Date.now(),cat:'mine',title,bpm,bpb:4,kind:r.kind,cb:r.cb,src:$('#impText').value,capo:capoFromText($('#impText').value),strum:r.kind==='chords'?impStrumValue():''};
   mySongs.unshift(d);
   try{localStorage.setItem('fretline:songs',JSON.stringify(mySongs));}catch(e){showMsg('Not saved','<p>This song is too large to store on your phone, but you can still play it now.</p>');mySongs.shift();}
@@ -4012,7 +4085,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.86';
+const APP_VERSION='1.87';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
