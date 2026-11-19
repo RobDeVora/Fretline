@@ -17,6 +17,7 @@ sections:[
 {id:'home',title:'Home screen',items:[
  {n:'Course, Generate, Strum, Lessons, Songs, Chords, My Songs',ids:['quickLen','btnCustomGen'],t:'Tabs for the kinds of things you can play. On the Generate tab, Track length sets how long a quick track is, and "Customize a generated track…" opens the full generator (see Generate a track). Course: a step-by-step path. Generate: tracks the app makes for you. Strum: strumming and rhythm practice. Lessons: single ideas, each explained before you play it. Songs: the free song library. Chords: chord practice. My Songs: songs you added, generated or made in the Lab (tap ✕ to delete a song).'},
  {n:'🎓 Tutorials',t:'Opens a list of guitar techniques (bends and more). Each tutorial explains one technique in detail and has one practice example to play. ‹ Back returns to the list.',ids:['btnTut','tutBack','tutPlay']},
+ {n:'My Songs: filter, search, sort, pin, select',t:'The chips under Add a song (All, Recordings, Tabs, Chords, Files, Generated, Library) show only that kind of song. Search appears once you have more than 10 songs. Sort by newest, A to Z, recently played or best score. Tap ☆ on a song to pin it to the top (★). Select lets you tick several songs and delete them together. After any delete an Undo bar stays for 8 seconds; tap Undo to bring the song back.',ids:['undoBtn','tempoBtn','mySearch','mySort','mySelBtn','mySelAll','mySelDel']},
  {n:'📖 Facts',t:'Opens this page.',ids:['btnFacts']},
  {n:'Install',t:'Appears in some browsers. Adds Fretline to your home screen so it opens like an app and works offline.',ids:['btnInstall']},
  {n:'Tuner',t:'Opens the tuner (see Tuner below).',ids:['btnTuner']},
@@ -85,7 +86,7 @@ sections:[
  {n:'Get the Android app / Download the latest Fretline.apk',t:'The Android app adds "Open with Fretline" for song files, the song folders and running the Lab in the background. The link downloads the newest version; open it and choose Install over the old one.'},
  {n:'Check for updates',t:'Looks for a new version of Fretline and loads it.',ids:['sUpd']},
  {n:'Done',t:'Closes Settings.',ids:['sClose']},
- {n:'Tempo (♩ next to a song in My Songs)',t:'Changes a song\'s tempo grid (bar lines, count-in, metronome). The notes stay where they are in the recording. ½ and 2× halve or double it; Tap the beat lets you tap the tempo; Save keeps it.',ids:['teBpm','teHalf','teDouble','teTap','teCancel','teSave']},
+ {n:'Tempo (♩ Tempo button on the song screen)',t:'Changes a song\'s tempo grid (bar lines, count-in, metronome). The notes stay where they are in the recording. ½ and 2× halve or double it; Tap the beat lets you tap the tempo; Save keeps it.',ids:['teBpm','teHalf','teDouble','teTap','teCancel','teSave']},
  {n:'OK',t:'Closes a message.',ids:['msgOk']}]},
 {id:'import',title:'Add a song',items:[
  {n:'Title, Tempo (BPM)',t:'The name of the song and its speed in beats per minute. A tab pasted as text sets the speed from this number.',ids:['impTitle','impBpm']},
@@ -119,7 +120,7 @@ sections:[
  {n:'Tab starts / Tab ends',t:'Leave empty to let the Lab find where the tab plays. Or type when it plays (like 1:05 and 1:30).'},
  {n:'Where both play at once',t:'Auto strums the chords and uses the tab where it plays a lead line. Or choose that the tab\'s notes win, or the chords win.'},
  {n:'Split it',t:'Starts the job. In the Android app you can leave while it works: a notification shows progress and another tells you when the song is ready. Do not swipe the app away.'},
- {n:'Downloads and tempo',t:'Download the guitar-only or band-only audio. Half, Double or a typed tempo fix a wrong tempo. You can also change it later in My Songs › ♩.'},
+ {n:'Downloads and tempo',t:'Download the guitar-only or band-only audio. Half, Double or a typed tempo fix a wrong tempo. You can also change it later with the ♩ Tempo button on the song screen.'},
  {n:'Report',t:'Tap to copy the technical report and send it if something looks wrong.'}]},
 {id:'open',title:'Open with Fretline (Android app)',items:[
  {n:'Opening files from outside the app',t:'Download an MP3 or a MIDI, Guitar Pro or MusicXML file, tap Open and choose Fretline. A song file goes into the Lab\'s song box. A MIDI, Guitar Pro or MusicXML file goes into the first free tab or chord box.'}]},

@@ -43,6 +43,11 @@ header h1 span{color:var(--accent)}
 .item .s{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .item .best{font-size:12px;color:var(--accent);text-align:right;flex:none}
 .item .del{padding:6px 9px;font-size:13px;background:transparent}
+.item .pin{padding:6px 8px;font-size:15px;background:transparent;border:0;opacity:.45}.item .pin.on{opacity:1;color:#ffd43b}
+.myTools{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;align-items:center}.myTools button{padding:6px 12px;border-radius:16px;font-size:13px}.myTools button.on{background:var(--accent);color:#0b0d12}.myTools select,.myTools input{padding:6px 8px;font-size:14px}
+.item .pk{width:22px;height:22px;flex:none}
+details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14px;padding:4px 12px;background:var(--panel)}details.moreMusic summary{cursor:pointer;padding:8px 0;font-weight:600}
+#undoBar{position:fixed;left:12px;right:12px;bottom:78px;z-index:60;display:none;align-items:center;gap:10px;padding:10px 14px;background:#2a2e37;color:#fff;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.5)}#undoBar.show{display:flex}#undoBar span{flex:1}
 .item .tmp{padding:6px 8px;font-size:12px;background:transparent;border:1px solid var(--line,#333);border-radius:8px;margin-right:4px;white-space:nowrap}
 .item .del.armed{background:var(--bad);color:#fff}
 .note-txt{color:var(--muted);font-size:13px;padding:4px 2px 12px}
@@ -162,6 +167,7 @@ header h1 span{color:var(--accent)}
     <select id="strumSel" title="Strumming pattern" style="padding:6px 8px;display:none"></select>
     <button id="partBtn" title="Play another part of this song" style="padding:6px 10px;display:none;max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎸 Part</button>
     <button id="singBtn" title="Lyrics on screen while you play" style="padding:6px 10px;display:none">🎤 Sing</button>
+    <button id="tempoBtn" title="Change this recording's tempo grid" style="padding:6px 10px;display:none">♩ Tempo</button>
     <button id="bandBtn" title="Backing band: drums, bass and piano that fit what you're playing" style="padding:6px 10px">🥁 Band</button>
     <div class="speed"><button id="spDown">−</button><span id="spVal">100%</span><button id="spUp">+</button></div>
   </div>
@@ -435,6 +441,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="row" style="justify-content:center"><button id="tapCancel">Cancel</button><button class="primary" id="tapGo">Start</button></div>
   </div>
 </div>
+<div id="undoBar"><span id="undoTxt"></span><button id="undoBtn" class="primary">Undo</button></div>
 <div class="overlay" id="msg" style="position:fixed">
   <div class="card"><h2 id="msgTitle"></h2><div id="msgBody" style="color:var(--muted)"></div><div class="row end"><button class="primary" id="msgOk">OK</button></div></div>
 </div>
@@ -2211,7 +2218,21 @@ $('#teTap').onclick=()=>{const now=performance.now();if(teTaps.length&&now-teTap
 $('#teCancel').onclick=()=>$('#tempoEd').classList.remove('show');
 $('#teSave').onclick=()=>{const d=mySongs.find(x=>x.id===teId);let bpm=+$('#teBpm').value;if(d&&Math.abs(bpm-d.bpm)<0.006)bpm=d.bpm; /* the box shows 2 decimals */
   if(!d||!(bpm>=30&&bpm<=300)){$('#teInfo').textContent='Enter a tempo between 30 and 300 BPM.';return;}
-  const nd=recRetime(d,bpm);mySongs=mySongs.map(x=>x.id===teId?nd:x);store.set('songs',mySongs);$('#tempoEd').classList.remove('show');renderList();showHint('Tempo set to '+(Math.round(bpm*100)/100)+' BPM',2500);};
+  const nd=recRetime(d,bpm);mySongs=mySongs.map(x=>x.id===teId?nd:x);store.set('songs',mySongs);$('#tempoEd').classList.remove('show');renderList();if(curScreen==='player'&&G.def&&G.def.id===teId){G.playing=false;stopVoices();openSong(nd);}showHint('Tempo set to '+(Math.round(bpm*100)/100)+' BPM',2500);};
+/* ---- My Songs: filters, sort, pins, last played, select mode, undo ---- */
+let myView=(()=>{let v={};try{v=JSON.parse(localStorage.getItem('fretline:myView')||'{}')||{};}catch(e){}return {f:v.f||'all',s:v.s||'new',q:'',sel:false,picked:new Set()};})();
+function mySaveView(){try{localStorage.setItem('fretline:myView',JSON.stringify({f:myView.f,s:myView.s}));}catch(e){}}
+function myKindOf(d){return d.kind==='rec'?'rec':d.kind==='tab'?'tab':d.kind==='gen'?'gen':d.kind==='file'?'file':'chords';}
+function myPins(){try{return JSON.parse(localStorage.getItem('fretline:pins')||'[]')||[];}catch(e){return [];}}
+function myPlayed(){try{return JSON.parse(localStorage.getItem('fretline:played')||'{}')||{};}catch(e){return {};}}
+function markPlayed(id){try{const p=myPlayed();p[id]=Date.now();localStorage.setItem('fretline:played',JSON.stringify(p));}catch(e){}}
+function agoText(ts){const m=Math.floor((Date.now()-ts)/60000);if(m<2)return 'just now';if(m<60)return m+' min ago';const hr=Math.floor(m/60);if(hr<24)return hr+' h ago';const d=Math.floor(hr/24);return d===1?'yesterday':d<30?d+' days ago':Math.floor(d/30)+' mo ago';}
+let undoState=null;
+function flushUndo(){if(!undoState)return;clearTimeout(undoState.timer);for(const g of undoState.gone){const d=g.d;if(d.recAudio)caches.open('fretline-audio').then(c=>{c.delete(d.recAudio);if(d.recGuitar)c.delete(d.recGuitar);}).catch(()=>{});}undoState=null;$('#undoBar').classList.remove('show');}
+function delSongs(ids){const gone=[];for(const id of ids){const i=mySongs.findIndex(x=>x.id===id);if(i>=0)gone.push({d:mySongs[i],i});}if(!gone.length)return;
+  flushUndo();mySongs=mySongs.filter(x=>!ids.includes(x.id));store.set('songs',mySongs);
+  undoState={gone,timer:setTimeout(flushUndo,8000)};$('#undoTxt').textContent=gone.length===1?'Deleted “'+gone[0].d.title+'”':'Deleted '+gone.length+' songs';$('#undoBar').classList.add('show');renderList();}
+$('#undoBtn').onclick=()=>{if(!undoState)return;clearTimeout(undoState.timer);for(const x of undoState.gone.slice().sort((a,b)=>a.i-b.i))mySongs.splice(Math.min(x.i,mySongs.length),0,x.d);undoState=null;store.set('songs',mySongs);$('#undoBar').classList.remove('show');renderList();};
 function renderList(){
   const L=$('#list');let h='';
   if(curCat==='course'){
@@ -2239,7 +2260,7 @@ function renderList(){
   }else if(curCat==='mine'){
     h+=`<button class="addbtn" id="btnAdd">+ Add a song</button>`;
     h+=`<button class="addbtn" data-lib="1">📚 Browse the free song library (300+ songs)</button>`;
-    h+=`<div class="item" style="display:block;cursor:default"><div class="t">Find more free music</div>
+    h+=`<details class="moreMusic"><summary>Find more free music</summary>
       <div class="s" style="white-space:normal;margin:4px 0 8px">Download a MIDI or MusicXML file from these public-domain libraries, then tap “Add a song” and load it.</div>
       <div class="links">
         <a href="https://www.mutopiaproject.org/cgibin/make-table.cgi?Instrument=Guitar" target="_blank" rel="noopener">Mutopia: classical guitar <span>(MIDI)</span></a>
@@ -2247,16 +2268,36 @@ function renderList(){
         <a href="https://www.mutopiaproject.org/" target="_blank" rel="noopener">Mutopia: everything <span>(MIDI, 2,000+ pieces)</span></a>
         <a href="https://musescore.com/" target="_blank" rel="noopener">MuseScore <span>(public-domain scores download free as MusicXML or MIDI)</span></a>
         <a href="https://imslp.org/" target="_blank" rel="noopener">IMSLP <span>(huge library; use pieces that offer MIDI or MusicXML, as most PDFs are scans)</span></a>
-      </div></div>`;
+      </div></details>`;
     if(!mySongs.length)h+=`<div class="note-txt">Load a Guitar Pro, MIDI, MusicXML, ChordPro or PDF file, or paste a tab or chord sheet, for a song you're learning, and it becomes a scrolling track. Saved songs are stored on this device.</div>`;
-    for(const d of mySongs)h+=itemHTML({...d,cat:'mine',sub:d.kind==='rec'?'From a recording':d.kind==='tab'?'Tab':d.kind==='gen'?'Generated':d.kind==='file'?(d.fmt||'File'):'Chords'},d.kind==='rec'?'🎙':d.kind==='tab'?'T':d.kind==='gen'?'G':d.kind==='file'?'F':'♪',(d.kind==='rec'?`<button class="tmp" data-tempo="${esc(d.id)}" aria-label="Tempo">♩ ${Math.round(d.bpm)}</button>`:'')+`<button class="del" data-del="${esc(d.id)}">✕</button>`);
+    else{
+      const KN={rec:'Recordings',tab:'Tabs',chords:'Chords',file:'Files',gen:'Generated',lib:'Library'};
+      const cnt={all:mySongs.length};for(const d of mySongs){const ks=new Set([d.kind==='rec'?'rec':d.kind==='tab'?'tab':d.kind==='gen'?'gen':d.kind==='file'?'file':'chords']);if(d.lib)ks.add('lib');for(const k of ks)cnt[k]=(cnt[k]||0)+1;}
+      if(myView.f!=='all'&&!cnt[myView.f])myView.f='all';
+      h+=`<div class="myTools" id="myChips"><button data-f="all" class="${myView.f==='all'?'on':''}">All ${cnt.all}</button>`+Object.keys(KN).filter(k=>cnt[k]).map(k=>`<button data-f="${k}" class="${myView.f===k?'on':''}">${KN[k]} ${cnt[k]}</button>`).join('')+`</div>`;
+      h+=`<div class="myTools">`+(mySongs.length>10?`<input type="search" id="mySearch" placeholder="Search my songs" value="${esc(myView.q)}" style="flex:1;min-width:120px">`:'')+`<select id="mySort" aria-label="Sort my songs">${[['new','Newest first'],['az','A to Z'],['played','Recently played'],['best','Best score']].map(([v,n])=>`<option value="${v}"${myView.s===v?' selected':''}>${n}</option>`).join('')}</select><button id="mySelBtn" class="${myView.sel?'on':''}">${myView.sel?'Cancel':'Select'}</button></div>`;
+      if(myView.sel)h+=`<div class="myTools"><button id="mySelAll">Select all shown</button><button id="mySelDel" class="primary">Delete (${myView.picked.size})</button></div>`;
+      const q=myView.q.trim().toLowerCase();
+      let list=mySongs.filter(d=>(myView.f==='all'||(myView.f==='lib'?!!d.lib:myKindOf(d)===myView.f))&&(!q||d.title.toLowerCase().includes(q)));
+      const pins=myPins(),pl=myPlayed();
+      if(myView.s==='az')list.sort((a,b)=>a.title.localeCompare(b.title));
+      else if(myView.s==='played')list.sort((a,b)=>(pl[b.id]||0)-(pl[a.id]||0));
+      else if(myView.s==='best')list.sort((a,b)=>(bests[b.id]||-1)-(bests[a.id]||-1));
+      list=[...list.filter(d=>pins.includes(d.id)),...list.filter(d=>!pins.includes(d.id))];
+      if(!list.length)h+=`<div class="note-txt">No songs match. Try another filter or search.</div>`;
+      for(const d of list){const base=d.kind==='rec'?'From a recording':d.kind==='tab'?'Tab':d.kind==='gen'?'Generated':d.kind==='file'?(d.fmt||'File'):'Chords';
+        const sub=base+(d.kind==='rec'?' · ♩ '+Math.round(d.bpm):'')+(pl[d.id]?' · played '+agoText(pl[d.id]):'');
+        const extra=(myView.sel?`<input type="checkbox" class="pk" data-pk="${esc(d.id)}"${myView.picked.has(d.id)?' checked':''}>`:`<button class="pin${pins.includes(d.id)?' on':''}" data-pin="${esc(d.id)}" aria-label="Pin to top">${pins.includes(d.id)?'★':'☆'}</button><button class="del" data-del="${esc(d.id)}">✕</button>`);
+        h+=itemHTML({...d,cat:'mine',sub},d.kind==='rec'?'🎙':d.kind==='tab'?'T':d.kind==='gen'?'G':d.kind==='file'?'F':'♪',extra);}
+    }
   }else{
     if(curCat==='song')h+=`<button class="addbtn" data-lib="1">📚 Browse the free song library (300+ songs)</button>`;
     for(const d of LIB.filter(x=>x.cat===curCat))h+=itemHTML(d,d.cat==='lesson'?'L':d.cat==='song'?'♫':'#');
   }
   L.innerHTML=h;
   L.querySelectorAll('.item[data-id]').forEach(el=>el.onclick=ev=>{
-    if(ev.target.closest('.del')||ev.target.closest('.tmp'))return;
+    if(ev.target.closest('.del')||ev.target.closest('.tmp')||ev.target.closest('.pin'))return;
+    if(myView.sel&&curCat==='mine'){const c=el.querySelector('.pk');if(c){c.checked=!c.checked;c.onchange();}return;}
     const id=el.dataset.id;const def=LIB.find(x=>x.id===id)||mySongs.find(x=>x.id===id);if(def){if(def.parts&&def.parts.length>1&&def.kind!=='rec')pickPart(def,()=>openSong(def));else openSong(def);}
   });
   L.querySelectorAll('.item[data-gen]').forEach(el=>el.onclick=()=>{quickGen(el.dataset.gen);});
@@ -2266,13 +2307,19 @@ function renderList(){
   const ql=$('#quickLen');if(ql)ql.onchange=()=>{genOpt.quickLen=ql.value;store.set('gen',genOpt);};
   const cc=$('#cContinue');if(cc)cc.onclick=()=>{const nx=firstOpenLesson(courseTier);if(nx)openLesson(nx);};
   const cr=$('#cRandom');if(cr)cr.onclick=()=>openLesson(randomLesson(courseTier));
-  L.querySelectorAll('.tmp').forEach(b=>b.onclick=ev=>{ev.stopPropagation();openTempoEd(b.dataset.tempo);});
   L.querySelectorAll('.del').forEach(b=>b.onclick=ev=>{
     ev.stopPropagation();
     if(!b.classList.contains('armed')){b.classList.add('armed');b.textContent='Delete';setTimeout(()=>{b.classList.remove('armed');b.textContent='✕';},2500);return;}
-    {const gone=mySongs.find(x=>x.id===b.dataset.del);if(gone&&gone.recAudio)caches.open('fretline-audio').then(c=>{c.delete(gone.recAudio);if(gone.recGuitar)c.delete(gone.recGuitar);}).catch(()=>{});}
-    mySongs=mySongs.filter(x=>x.id!==b.dataset.del);store.set('songs',mySongs);renderList();
+    delSongs([b.dataset.del]);
   });
+  L.querySelectorAll('.pin').forEach(b=>b.onclick=ev=>{ev.stopPropagation();const p=myPins(),i=p.indexOf(b.dataset.pin);if(i>=0)p.splice(i,1);else p.push(b.dataset.pin);try{localStorage.setItem('fretline:pins',JSON.stringify(p));}catch(e){}renderList();});
+  L.querySelectorAll('#myChips button').forEach(b=>b.onclick=()=>{myView.f=b.dataset.f;mySaveView();renderList();});
+  const ms=$('#mySort');if(ms)ms.onchange=()=>{myView.s=ms.value;mySaveView();renderList();};
+  const mq=$('#mySearch');if(mq)mq.oninput=()=>{myView.q=mq.value;const pos=mq.selectionStart;renderList();const n=$('#mySearch');if(n){n.focus();try{n.setSelectionRange(pos,pos);}catch(e){}}};
+  const sb=$('#mySelBtn');if(sb)sb.onclick=()=>{myView.sel=!myView.sel;myView.picked=new Set();renderList();};
+  L.querySelectorAll('.pk').forEach(c=>{c.onclick=ev=>ev.stopPropagation();c.onchange=()=>{if(c.checked)myView.picked.add(c.dataset.pk);else myView.picked.delete(c.dataset.pk);const d=$('#mySelDel');if(d)d.textContent='Delete ('+myView.picked.size+')';};});
+  const sa=$('#mySelAll');if(sa)sa.onclick=()=>{L.querySelectorAll('.pk').forEach(c=>{c.checked=true;myView.picked.add(c.dataset.pk);});const d=$('#mySelDel');if(d)d.textContent='Delete ('+myView.picked.size+')';};
+  const sd=$('#mySelDel');if(sd)sd.onclick=()=>{const ids=[...myView.picked];if(!ids.length)return;myView.sel=false;myView.picked=new Set();delSongs(ids);};
   const a=$('#btnAdd');if(a)a.onclick=()=>openImport();
   L.querySelectorAll('[data-lib]').forEach(b=>b.onclick=()=>openLibrary());
   const cg=$('#btnCustomGen');if(cg)cg.onclick=()=>openGen();
@@ -2363,11 +2410,11 @@ function pickPart(def,then){
   document.querySelectorAll('#msgBody .partPick').forEach(b=>b.onclick=()=>{$('#msg').classList.remove('show');if(b.dataset.v!==(def.partSel||'0')||!def.events)usePart(def,b.dataset.v);then();});
 }
 function syncPartBtn(){const b=$('#partBtn');if(!b)return;const n=G.def&&G.def.parts?partChoices(G.def).length:0;b.style.display=n>1?'':'none';if(n>1){b.innerHTML='🎸<span class="lbl"> '+esc(partLabel(G.def))+'</span>';b.title='Part: '+partLabel(G.def)+' (tap to change)';}}
-function openSong(def){
+function openSong(def){if(def&&def.cat==='mine'&&def.id)markPlayed(def.id);
   if(def.libFile&&!def.events){showHint('Loading '+def.title+'…',4000);loadLibEvents(def).then(()=>openSong(def)).catch(()=>showMsg('Could not load the song','<p>Fretline couldn’t load this song. Connect to the internet and try again (after the first time, it works offline).</p>'));return;}
   G.def=def;G.base=buildSong(def);G.song=G.base;syncSingBtn();syncPartBtn();
   {const cs=store.get('capo',{});G.origCapo=G.capo=cs[def.id]!=null?cs[def.id]:(def.capo||0);}
-  setupStrum();syncCapo();G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);
+  setupStrum();syncCapo();syncTempoBtn();G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);
   $('#pTitle').textContent=G.song.title;
   const canNew=def.cat==='gen'||!!def.regen;
   $('#btnRegen').style.display=canNew?'':'none';
@@ -2462,6 +2509,8 @@ function chordSegments(S){
 }
 /* v1.92: change the guitar tuning from the song screen (same as Tuner › Tuning); the song is rebuilt in it */
 function syncTuneSel(){const s=$('#tuneSel');if(!s)return;if(!s.options.length)s.innerHTML=TUNINGS.map(t=>`<option value="${t.id}">${esc(t.name.split(' (')[0])}</option>`).join('');s.value=TUNING_ID;s.classList.toggle('on',TUNING_ID!=='std');}
+function syncTempoBtn(){const b=$('#tempoBtn');if(b)b.style.display=(G.def&&G.def.kind==='rec'&&mySongs.some(x=>x.id===G.def.id))?'':'none';}
+$('#tempoBtn').onclick=()=>{if(G.def)openTempoEd(G.def.id);};
 function syncCapo(){syncTuneSel();const s=$('#capoSel');if(!s.options.length)s.innerHTML='<option value="0">No capo</option>'+[1,2,3,4,5,6,7,8,9].map(n=>`<option value="${n}">Capo ${n}</option>`).join('');s.value=String(G.capo||0);s.classList.toggle('on',!!G.capo);}
 $('#capoSel').onchange=e=>{
   if(simpChoice().lvl){const ss=store.get('simp',{});ss[G.def.id]={...simpChoice(),capo:+e.target.value};store.set('simp',ss);resetRun();setupStrum();updateButtons();return;}
@@ -4265,7 +4314,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.111';
+const APP_VERSION='1.112';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
