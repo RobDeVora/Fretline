@@ -17,6 +17,8 @@ section of HANDOFF.md) into `/tmp/ortpkg/package/dist/`; serve the repo on 8769;
 | `sheet_chords.py` (env `SHEET=`) | v1.83: chord sheet without lengths vs synthetic strums (`make_chords90.py` builds `/tmp/chordtest`); changes within 72 ms; strum mode; transposed / capo sheets |
 | — | `sheet_tab.py` default audio `/tmp/stemtest/riff100_clean.wav` = riff100.wav through `ffmpeg -af "lowpass=f=1800,lowpass=f=1800"` |
 
+| `make_solo90.py` + `sheet_merge.py` | v1.90 a tab (solo) + a chord sheet on one recording (`/tmp/solotest/solo90.wav`): solo window, note times, no chords inside the solo; env `FROMTO='0:09.8,0:15.5'`, `STRUMS=1` | `python3 make_solo90.py && python3 sheet_merge.py` |
+
 v1.84 MIDI sheets: `MIDI=/tmp/riff.mid python3 sheet_tab.py` and `MIDI=/tmp/chords.mid python3 sheet_chords.py`.
 Make the files with `pip install mido`, then: riff.mid = 120 BPM, tracks Bass (prog 33) / Drums (ch 10) / Guitar
 (prog 25) with the riff [40,40,52,40,45,45,47,50] as 8ths from beat 8 for 8 bars; chords.mid = 100 BPM, one track,

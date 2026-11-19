@@ -1,7 +1,7 @@
-# Fretline: session handoff (18 Nov 2026, evening · web v1.89 · Android APK last rebuilt at v1.80)
+# Fretline: session handoff (18 Nov 2026, evening · web v1.90 · Android APK last rebuilt at v1.80)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
-how detection works now, what's open, and a changelog (newest first from v1.89 down to v1.69, then the older
+how detection works now, what's open, and a changelog (newest first from v1.90 down to v1.69, then the older
 v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conversation" below.**
 
 ## The project
@@ -43,7 +43,7 @@ v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conver
 
 ## Where things stand (18 Nov 2026, evening)
 
-**Versions:** web **v1.89** (sw cache `fretline-v77`). The APK was last rebuilt for v1.80 (Capacitor plugins:
+**Versions:** web **v1.90** (sw cache `fretline-v78`). The APK was last rebuilt for v1.80 (Capacitor plugins:
 `IncomingPlugin`, `NativeMicPlugin`, `NativeSeparatorPlugin` = Demucs on all cores + save to Downloads; minSdk 24,
 onnxruntime-android 1.22.0, arm64-v8a + armeabi-v7a only). Everything after v1.80 is web-only. The owner has the
 v1.80 APK installed.
@@ -62,6 +62,7 @@ v1.80 APK installed.
   - Tempo: auto, ½ / 2× buttons, type a BPM, tap tempo; ♩ button in My songs (v1.82). Notes keep their played
     timing (1/48 beat, v1.85).
 - v1.86: MIDI tab exports with one channel per string are read as one part (also fixes the import screen).
+- v1.90: **Lab: a tab and a chord sheet together** (solo + strummed parts, see the v1.90 section).
 - v1.89: **Settings › Mic & timing › Chord matching** (Strict / Standard / Beginner) and a wrong-chord check in
   every mode (see the v1.89 section).
 - v1.88: **chord blocks on the highway** for chords found in a song's notes (see the v1.88 section).
@@ -97,7 +98,9 @@ to `main`. They test on the phone and send Lab reports and detection reports (of
 
 ## Picking up the conversation
 
-**Latest (18 Nov, ~20:45 Central): chords vs single notes — done in v1.88 + v1.89.** The owner asked for chords
+**Latest (18 Nov, ~21:30 Central): the owner asked for a chord sheet AND a tab on one song (play the chords and the solo) — built in v1.90 (Lab).** Agreed rules: tab wins where both play (switch for chords), Lab first, My songs without a recording later. Waiting for the owner to try it on a real song.
+
+Before that: **chords vs single notes — done in v1.88 + v1.89.** The owner asked for chords
 drawn as blocks (repeats as a strum pattern) and for partial strums / a brushed extra string to count, as a
 setting. v1.88 = the drawing, v1.89 = the Chord matching setting + scoring. Waiting for the owner to try it on the
 phone (a song with chords, each mode) and send detection reports; the report line shows "chords beginner/standard"
@@ -430,6 +433,31 @@ Sim (`test_double_stops.py`): correct 63/64; owner's E2+B2 run 24/64 = exactly t
 Known leaks: E2+B2 played over B2+G#3 steps passes all 8 (E2's 5th overtone 412 Hz ~ G#3's 2nd 415 Hz; excluding
 recently heard notes' overtones fixed 2 but cost 5 correct steps, not used). E2+C#3 played over A2+E3 steps still passes 6 (E3 = octave of E2; A2's 5th next to C#3's 4th);
 requiring A2's lowest unshared overtone alone fixed 3 but cost 4 correct, so not used.
+
+## v1.90: Lab — a tab and a chord sheet on one recording
+
+Lab › "Use a tab or chord sheet" now has a second box, **"And the other one"** (`#sheet2`, text only): one tab and
+one chord sheet, in either box (two of the same kind: the second is ignored, logged). Both are lined up with the
+recording and merged; saved as one `kind:'rec'` song (credit "a tab and a chord sheet").
+- `makeSheetSong`: chromaFrames + attackCurve once (`cache`); the chord sheet is lined up on the whole recording
+  first; then the tab **inside a time window** (`alignSheet(sheet,g22,win,cache)` via `sliceFA`), because a solo-only
+  tab fits the strums too (its first test put the notes in the opening G strums).
+- Window: typed times `#tabFrom` / `#tabTo` (m:ss or seconds) win; otherwise `findTabWindow` tries the tab inside
+  every run of 1–8 consecutive chords (start −0.5 s, end +0.2 s), scores each by `tabQ` (mean note-name match at
+  each step's time), keeps the shortest window within 0.03 of the best; accepts ≥ 0.45, else falls back to the whole
+  recording and says so in the report.
+- `mergeTabChords`: tab wins (default): chord / strum steps inside a run of tab notes (< 1.5 s apart, +0.25 s) are
+  dropped; chords win (`#mergeWin`): tab notes kept only outside the chord sheet's runs (< 6 s apart), i.e. mostly
+  none. "Follow the recording's strums" works with it (the strums in the solo are dropped).
+- `prepPlaced` = the strums-from-recording + transposition / capo code that was inline before (single-sheet path
+  unchanged: sheet_chords.py changes within 50 ms, sheet_tab.py riff 64/64).
+- Test: `tools/lab-tests/make_solo90.py` + `sheet_merge.py` (G 2 bars, C, a 2-bar single-note solo, D, Em at 90 BPM):
+  window found 9.8–15.5 s (true solo 10.0–15.0), match 0.85; the 16 solo notes within 2–17 ms, no chord inside the
+  solo, G/C/D/Em around it; both orders; `FROMTO='0:09.8,0:15.5'` for typed times, `STRUMS=1` for strum mode.
+  The merged song opens in the main app: chord blocks / strum pattern, then single gems, then D, Em.
+- Not done: a file (MIDI / Guitar Pro) as the second sheet; the solo before the first chord / after the last is only
+  tried as one window; real songs untested (the window search assumes the chord sheet lines up well — a solo with
+  no chord change at its start gets a start pad of 0.5 s only).
 
 ## v1.89: Chord matching setting; wrong strummed chords no longer count
 
