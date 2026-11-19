@@ -120,7 +120,8 @@ async function nativeSave(a,name){const blob=await (await fetch(a.href)).blob();
   const base=($('ttl').value||'song').trim().replace(/[^A-Za-z0-9 ()-]+/g,'_');nativeSave($(id),base+(id==='dGtr'?' - guitar.wav':' - band.wav')).catch(e=>{status('Could not save: '+(e.message||e));log('save: '+(e.message||e));});}));
 function setSheetFile(sf){SHEETFILE=sf;$('sheetFileBox').style.display=sf?'':'none';$('sheet').style.display=sf?'none':'';$('sheetType').disabled=!!sf;if(!sf){$('sheetFile').value='';return;}
   $('sheetFileName').textContent=sf.name+' · '+sf.fmt+' · '+sf.info.bpm+' BPM in the file';
-  const parts=sf.info.parts;let pick=parts.findIndex(p=>p.isGuitar&&p.hasTab);if(pick<0)pick=parts.findIndex(p=>p.isGuitar);if(pick<0)pick=0;
+  const parts=sf.info.parts;let pick=parts.findIndex(p=>p.isGuitar&&p.hasTab);if(pick<0&&parts.filter(p=>p.isGuitar).length>1)pick=parts.findIndex(p=>p.isGuitar&&/lead|solo/i.test(p.label)); /* a rhythm + lead tab: the lead line is the tab, the chords come from the chord sheet */
+  if(pick<0)pick=parts.findIndex(p=>p.isGuitar);if(pick<0)pick=0;
   $('sheetPart').innerHTML=parts.map((p,i)=>'<option value="'+i+'">'+p.label.replace(/[<&]/g,'')+' ('+p.count+' '+(p.chords?'chords':'notes')+')</option>').join('');$('sheetPart').value=pick;$('sheetPart').onchange();}
 $('sheetPart').onchange=()=>{const p=SHEETFILE&&SHEETFILE.info.parts[+$('sheetPart').value];$('sheetAsBox').style.display=p&&!p.chords?'':'none';};
 $('sheetFileClear').onclick=()=>{setSheetFile(null);status('File removed.');};

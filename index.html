@@ -941,6 +941,9 @@ function eventsFromNotes(notes,opt){
   opt=opt||{};const bpb=opt.bpb||4;
   const ns=notes.filter(n=>n.midi!=null&&isFinite(n.beat)).map(n=>({...n,beat:Math.round(n.beat*48)/48}));
   ns.sort((a,b)=>a.beat-b.beat||b.midi-a.midi);
+  /* v1.102: a strummed chord is often stored string by string, a hair apart (1/48 beat each): that is one chord, not six steps */
+  {let i=0;while(i<ns.length){let j=i;while(j+1<ns.length&&ns[j+1].beat-ns[j].beat<=0.03&&ns[j+1].beat-ns[i].beat<=0.125)j++;
+    if(j>i&&new Set(ns.slice(i,j+1).map(n=>n.midi)).size>2){const b0=ns[i].beat;for(let k=i;k<=j;k++)ns[k].beat=b0;}i=j+1;}}
   const groups=[];
   for(const n of ns){const g=groups[groups.length-1];if(g&&Math.abs(g.beat-n.beat)<1e-6)g.notes.push(n);else groups.push({beat:n.beat,notes:[n]});}
   if(!groups.length)return [];
@@ -4214,7 +4217,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.101';
+const APP_VERSION='1.102';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
