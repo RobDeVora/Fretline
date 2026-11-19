@@ -63,7 +63,7 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
     <div class="row"><div><label for="tabFrom">Tab starts</label><input type="text" id="tabFrom" placeholder="0:00" inputmode="decimal" style="width:100%;font-size:15px;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text)"></div><div><label for="tabTo">Tab ends</label><input type="text" id="tabTo" placeholder="0:00" inputmode="decimal" style="width:100%;font-size:15px;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text)"></div></div>
     <div class="row"><div><label for="mergeWin">Where both play at once</label><select id="mergeWin"><option value="auto">Auto: strum the chords, the tab where it plays a lead line</option><option value="tab">The tab's notes win</option><option value="chords">The chords win (the tab only where there are no chords)</option></select></div></div>
   </details>
-  <button id="go" disabled>Split it</button>
+  <button id="go" disabled>Split it</button><div class="small" id="bgHint" style="display:none;margin-top:4px">You can leave the app while it works: a notification shows progress, and another says when your song is ready. Keep the app open in the background (do not swipe it away).</div>
   <div class="bar"><div id="prog"></div></div>
   <div id="status" class="small">Choose a file.</div>
 </div>
@@ -97,7 +97,10 @@ const MODELS={sonic:new URLSearchParams(location.search).get('modelurl')||'https
 const SEG=343980,SR=44100,OVERLAP=0.25,STEMS=['drums','bass','other','vocals','guitar','piano'],GTR=4;
 const $=id=>document.getElementById(id);const logEl=$('log');const R=[];
 let QUIET=false;function log(s){if(QUIET)return;R.push(s);logEl.textContent=R.join('\n');logEl.scrollTop=1e9;}
-function status(s){$('status').textContent=s;}
+/* Android app: while a run is going a notification shows progress and keeps the app alive, so you can leave it */
+const KA=(()=>{try{const C=window.Capacitor;if(!C||!C.Plugins||!C.Plugins.KeepAlive)return null;if(C.isPluginAvailable&&!C.isPluginAvailable('KeepAlive'))return null;return C.Plugins.KeepAlive;}catch(e){return null;}})();
+let KA_ON=false,kaAt=0;if(KA){const h=document.getElementById('bgHint');if(h)h.style.display='';}
+function status(s){$('status').textContent=s;if(KA&&KA_ON){const n=Date.now();if(n-kaAt>2500){kaAt=n;KA.update({text:String(s).slice(0,120)}).catch(()=>{});}}}
 function prog(f){$('prog').style.width=Math.round(f*100)+'%';}
 /* the Android app (from v1.79's APK) has a native separator: same model, ONNX Runtime for Android on several cores */
 const NS=(()=>{try{const C=window.Capacitor;if(!C||!C.Plugins||!C.Plugins.NativeSeparator)return null;if(C.isPluginAvailable&&!C.isPluginAvailable('NativeSeparator'))return null;return C.Plugins.NativeSeparator;}catch(e){return null;}})();
@@ -586,7 +589,7 @@ async function makeSong(gL,gR,L,Rc,rL,rR,N){
    const lag=Math.atan2(sx,cx)/(2*Math.PI)/2*bt.spb;if(Math.abs(lag)<0.2*bt.spb){b0+=lag;log('timing: notes shifted '+Math.round(-lag*1000)+' ms to the beat');}}
   const q=quantise(notes,bt.bpm,b0);const recNotes=q.recNotes;b0=q.b0;
   await saveRecSong({recNotes,recRaw:notes.map(n=>({midi:n.midi,t:Math.round(n.t*1000)/1000,d:Math.round(n.d*1000)/1000,a:Math.round(n.a*100)/100})),bpm:bt.bpm,recOffset:b0},gL,gR,rL,rR,notes);}
-$('go').onclick=async()=>{
+async function runLab(){
   $('go').disabled=true;R.length=0;prog(0);$('out').style.display='none';
   const t0=performance.now();
   try{
@@ -673,7 +676,12 @@ $('go').onclick=async()=>{
     if($('mk').checked){try{if(sheet)await makeSheetSong(sheet,gL,gR,L,Rc,rL,rR,N);else await makeSong(gL,gR,L,Rc,rL,rR,N);}catch(e){log('song: could not make one ('+(e.message||e)+')');}}
     prog(1);status('Done. Listen below, then tap the report to copy it.');window.__labDone={used,tot,N,parts:nCh};
   }catch(e){log('ERROR: '+(e&&e.message||e));if(CON.length)log('runtime messages:\n  '+CON.join('\n  '));if(/Could not find an implementation/.test(String(e&&e.message||e))&&$('mdl').value==='fp16')log('tip: the half-size model needs "Fully optimised" loading (which may run out of memory); use the Full model with Lean loading');log('(after an error like this, reload the page before trying another setting)');status('Something went wrong: '+(e&&e.message||e));window.__labDone={error:String(e&&e.message||e)};}
-  $('go').disabled=false;};
+  $('go').disabled=false;}
+$('go').onclick=async()=>{
+  window.__labDone=null;
+  if(KA){try{await KA.start({text:'Starting…'});KA_ON=true;}catch(e){KA_ON=false;}}
+  try{await runLab();}finally{
+    if(KA&&KA_ON){KA_ON=false;const ok=!!window.__labDone;try{await KA.done({title:ok?'Your song is ready':'Fretline Lab stopped',text:ok?'Open Fretline to play it from My songs.':'Open Fretline and tap the report to see what went wrong.'});}catch(e){}}}};
 </script>
 </body>
 </html>

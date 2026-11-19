@@ -1,7 +1,7 @@
-# Fretline: session handoff (18 Nov 2026, evening · web v1.94 · Android APK last rebuilt at v1.80)
+# Fretline: session handoff (18 Nov 2026, evening · web v1.95 · Android APK last rebuilt at v1.80)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
-how detection works now, what's open, and a changelog (newest first from v1.94 down to v1.69, then the older
+how detection works now, what's open, and a changelog (newest first from v1.95 down to v1.69, then the older
 v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conversation" below.**
 
 ## The project
@@ -43,7 +43,7 @@ v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conver
 
 ## Where things stand (18 Nov 2026, evening)
 
-**Versions:** web **v1.94** (sw cache `fretline-v82`). The APK was last rebuilt for v1.80, **v1.94 adds `SongFilesPlugin` so it needs a NEW APK** (Capacitor plugins:
+**Versions:** web **v1.95** (sw cache `fretline-v83`). The APK was last rebuilt for v1.80, **v1.94 adds `SongFilesPlugin` and v1.95 `KeepAlivePlugin` + `KeepAliveService`, so it needs the NEW APK** (Capacitor plugins:
 `IncomingPlugin`, `NativeMicPlugin`, `NativeSeparatorPlugin`, `SongFilesPlugin` = Demucs on all cores + save to Downloads; minSdk 24,
 onnxruntime-android 1.22.0, arm64-v8a + armeabi-v7a only). Everything after v1.80 is web-only. The owner has the
 v1.80 APK installed.
@@ -62,6 +62,7 @@ v1.80 APK installed.
   - Tempo: auto, ½ / 2× buttons, type a BPM, tap tempo; ♩ button in My songs (v1.82). Notes keep their played
     timing (1/48 beat, v1.85).
 - v1.86: MIDI tab exports with one channel per string are read as one part (also fixes the import screen).
+- v1.95: **the Lab keeps working when you leave the app (needs the new APK).** `KeepAliveService` is a foreground service (type dataSync, notification "Fretline is working on your song" showing the status line, partial wake lock capped at 3 h) and `KeepAlivePlugin` (`start/update/stop/done`; asks for the notification permission on Android 13+, the service runs even if refused). lab/stems.html: the Run handler is now `runLab()` wrapped by `$('go').onclick`, which calls `KA.start`, forwards `status()` (every 2.5 s) with `KA.update`, and in `finally` calls `KA.done` ("Your song is ready" / "Fretline Lab stopped"; ready = `window.__labDone` set). Hint text under the button appears only in the app. Manifest: FOREGROUND_SERVICE, FOREGROUND_SERVICE_DATA_SYNC, WAKE_LOCK, POST_NOTIFICATIONS + `<service>`. Limits: the owner must not swipe the app away; in a normal browser tab nothing changes (browsers pause hidden tabs); a hidden WebView throttles timers (the Lab only has two rare ones, the heavy work is native / compute loops). Untested on a phone (the Java builds in CI). Test: `tools/lab-tests/test_keepalive.py` (fake plugin).
 - v1.94: **a folder per song on the phone (needs the new APK; the web build does nothing without it).** `SongFilesPlugin.java` (`write({dir,name,text|data,mime})`, `removeDir({dir})`) writes to Downloads/Fretline/Songs/<song>/ through MediaStore (Android 10+, no permission; the app's own Downloads folder before that). index.html: `sfRun` reconciles after every `store.set('songs')` (hooked) and 4 s after start: new/changed My songs → `<title>.fretline.json` (hash kept in `fretline:songFiles` {id:{dir,hash}}), songs that vanished → folder removed. Duplicate titles get "(2)". A failed write isn't marked done and is retried. Settings › App: "Keep each song in its own folder" (`settings.saveFiles`, default on) + "Save all songs now". Lab (`saveRecSong`): sets `def.dir` and drops the tab / chord files it was made from (original MIDI/GP/etc. as given, or pasted text as Tab.txt / Chords.txt) into the folder via `SRCFILES`/`saveSources`. Audio (band + guitar WAVs) is NOT saved there on purpose: it's big and stays in the app's cache, and is cleared on delete as before. Songs made before v1.94 get only the .fretline.json (their source files weren't kept). Limits: after an uninstall/reinstall the phone no longer lets the new install delete the old files (Android rule), and the plugin can't be compiled in this sandbox, so **the Java is untested until CI builds it and the owner tries it**. Test: `tools/lab-tests/test_songfiles.py` (fake plugin; writes, no-op rerun, changed song only, delete removes folder, failure retried, switch-off).
 - v1.93: **three switchable versions of a song from a tab + chord sheet** (Lab). One saved song gets `parts` = [Chords + lead, Chords only, Tab only] (versions that come out identical are dropped). On the song screen the 🎸 button opens "Which version?"; `usePart` for `kind:'rec'` swaps `events`, `recEvT`, `capo`, `strumAuto` from the part. `comboPair` returns null for rec songs; `recRetime` retimes every part against the same anchor so ♩ tempo changes keep all versions on the real recording times. Test: `tools/lab-tests/test_versions.py` (needs /tmp/tysk_merge.json from real_files.py auto): picker lists 3, switching 146→90→773 steps, step-time error ≤9 ms after tempo changes to 70 and 140. Regressions unchanged (strums 95/96, chord matching, sheet_tab 64/64, sheet_chords, sheet_merge). **Not yet tried on the phone.**
 - v1.92: **tuning dropdown on the song screen** (`#tuneSel`, next to the capo; same as Tuner › Tuning).
@@ -103,7 +104,7 @@ to `main`. They test on the phone and send Lab reports and detection reports (of
 
 ## Picking up the conversation
 
-**Latest: v1.94 (a folder per song on the phone; needs the new APK from the android-latest release, built by CI on this push) is pushed. v1.93 (three versions per song, 🎸 button) was confirmed working by the owner.** Before that: v1.93 was pushed; the owner needs to try the Lab on the phone with both files (Auto) and switch versions.**
+**Latest: v1.95 (Lab keeps running in the background with a notification; same new APK) and v1.94 (a folder per song on the phone; needs the new APK from the android-latest release, built by CI on this push) is pushed. v1.93 (three versions per song, 🎸 button) was confirmed working by the owner.** Before that: v1.93 was pushed; the owner needs to try the Lab on the phone with both files (Auto) and switch versions.**
 
 **Earlier (18 Nov, ~22:00 Central): the owner ran TYSK on the phone with the tab MIDI + chords MIDI in the Lab (v1.91, native separator 0.55× song length, 9 lead stretches / 81 strummed chords, report matches my run) and said "it plays well, I like the ability to switch strumming pattern in song". They asked for changing the tuning in song: done in v1.92 (see below).**
 

@@ -59,6 +59,8 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+        <!-- keeps the Lab running while the phone is on another app or the screen is off -->
+        <service android:name=".KeepAliveService" android:exported="false" android:foregroundServiceType="dataSync" />
     </application>
 
     <!-- Permissions -->
@@ -67,5 +69,10 @@
     <!-- the microphone is how Fretline hears what you play -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Lab: keep working with the screen off, and show its progress / "song ready" notification -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 </manifest>
