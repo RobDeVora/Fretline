@@ -739,6 +739,8 @@ $('go').onclick=async()=>{
   if(KA){try{await KA.start({text:'Starting…'});KA_ON=true;}catch(e){KA_ON=false;}}
   try{await runLab();if(window.__labDone)clearKept();}finally{
     if(KA&&KA_ON){KA_ON=false;const ok=!!window.__labDone;try{await KA.done({title:ok?'Your song is ready':'Fretline Lab stopped',text:ok?'Open Fretline to play it from My songs.':'Open Fretline and tap the report to see what went wrong.'});}catch(e){}}}};
+/* phone back button / gesture: the app asks the page what to close; in the Lab that means going back to Fretline */
+window.fretlineBack=()=>{if(KA_ON)return false;location.href='../index.html';return true;}; // while a split runs, back just puts the app in the background so the work continues
 </script>
 </body>
 </html>
