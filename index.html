@@ -390,6 +390,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="small" id="appBuild" style="margin-bottom:8px"></div>
     <div class="field"><a href="lab/stems.html" style="color:var(--accent2);font-weight:600">🧪 Lab: split a song into guitar + band</a><div class="small">Test of on-device AI (Demucs) that pulls the guitar out of a recording. Downloads a large model once; use Wi-Fi.</div></div>
     <div class="field" id="sFilesBox" style="display:none"><label><input type="checkbox" id="sSaveFiles"> Keep each song in its own folder on the phone</label><div class="small" id="sFilesInfo">Saves every song, and the tab and chord files it was made from, to <b>Downloads › Fretline › Songs › (song name)</b>. Deleting a song here deletes its folder too, so nothing is left taking up space.</div><div class="row" style="margin:6px 0 0"><button id="sFilesNow">Save all songs now</button></div><span class="small" id="sFilesMsg"></span></div>
+    <div class="field"><label>Saved data on this phone</label><div class="small" id="sStoreMsg"></div></div>
     <div class="field" id="sAndroid" style="display:none"><a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2);font-weight:600">📱 Get the Android app</a><div class="small">Adds “Open with Fretline” for song files and downloads from links. Your saved songs stay in this browser; the app starts fresh.</div></div>
     <div class="field"><div class="row" style="margin:0;align-items:center;gap:8px"><span class="small" id="appVer" style="flex:1"></span><button id="sUpd">Check for updates</button></div>
       <span class="small" id="sUpdMsg"></span></div>
@@ -4145,6 +4146,10 @@ const IS_APP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capa
    Downloads/Fretline/Songs/<song name>/ gets the song file; the Lab adds the tab / chord files it was made from.
    Every change to My songs goes through store.set('songs'), so one reconcile pass keeps the folders in step:
    new or changed songs are written, songs that are gone have their folder removed. */
+function showStore(){const el=$('#sStoreMsg');if(!el)return;try{let used=0;for(const k of Object.keys(localStorage))used+=(localStorage.getItem(k)||'').length;
+  const big=mySongs.map(x=>({t:x.title,n:JSON.stringify(x).length})).sort((a,b)=>b.n-a.n).slice(0,3);
+  el.innerHTML='Fretline can keep about 5 MB of songs and settings in the app, and is using <b>'+(used/1048576).toFixed(1)+' MB</b> ('+mySongs.length+' songs).'+(used>3.8*1048576?' <b>It is nearly full: new songs from the Lab will not save until you delete a few (✕ in My songs). The song folders on the phone keep their files either way.</b>':'')+(big.length?' Biggest: '+big.map(b=>esc(b.t)+' ('+Math.round(b.n/1024)+' KB)').join(', ')+'.':'');}catch(e){}}
+const _syncSettingsUI=syncSettingsUI;syncSettingsUI=function(){_syncSettingsUI.apply(this,arguments);showStore();};
 function sfPlug(){try{const C=window.Capacitor;if(!IS_APP||!C||!C.Plugins||!C.Plugins.SongFiles)return null;if(C.isPluginAvailable&&!C.isPluginAvailable('SongFiles'))return null;return C.Plugins.SongFiles;}catch(e){return null;}}
 function sfSeg(t){let s=String(t||'').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').trim().replace(/^\.+/,'');if(s.length>80)s=s.slice(0,80).trim();return s||'Song';}
 function sfHash(str){let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return str.length+':'+(h>>>0);}
@@ -4207,7 +4212,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.99';
+const APP_VERSION='1.100';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
@@ -4264,6 +4269,9 @@ $('#impUrlGo').onclick=async()=>{
   P.getPending().then(r=>handle(r&&r.item)).catch(()=>{});P.addListener('incoming',handle);
 })();
 if(!IS_APP&&/android/i.test(navigator.userAgent))$('#sAndroid').style.display='';
+/* coming back from the Lab with the Back button must show songs it saved, and must never write an old list over them */
+window.addEventListener('pageshow',e=>{if(e.persisted)location.reload();});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')return;try{const now=localStorage.getItem('fretline:songs')||'[]';if(now!==JSON.stringify(mySongs.map(x=>{const o={...x};delete o._built;return o;}))){const arr=JSON.parse(now);if(arr.length!==mySongs.length||arr.some((x,i)=>!mySongs[i]||x.id!==mySongs[i].id)){mySongs=arr;renderList();}}}catch(e){}});
 /* ---- "Open with Fretline" for song files (where the browser supports file handling) ---- */
 if('launchQueue' in window)launchQueue.setConsumer(async lp=>{if(!lp.files||!lp.files.length)return;try{const f=await lp.files[0].getFile();openImport();await loadImportFile(f);}catch(e){}});
 </script>

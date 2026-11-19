@@ -1,7 +1,7 @@
-# Fretline: session handoff (18 Nov 2026, evening · web v1.99 · Android APK last rebuilt at v1.80)
+# Fretline: session handoff (18 Nov 2026, evening · web v1.100 · Android APK last rebuilt at v1.80)
 
 Read this first in a new session. It covers how the project is set up, where things stand, how the owner works,
-how detection works now, what's open, and a changelog (newest first from v1.99 down to v1.69, then the older
+how detection works now, what's open, and a changelog (newest first from v1.100 down to v1.69, then the older
 v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conversation" below.**
 
 ## The project
@@ -43,7 +43,7 @@ v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conver
 
 ## Where things stand (18 Nov 2026, evening)
 
-**Versions:** web **v1.99** (sw cache `fretline-v87`). The APK was last rebuilt for v1.80, **v1.94 adds `SongFilesPlugin` and v1.95 `KeepAlivePlugin` + `KeepAliveService`, so it needs the NEW APK** (Capacitor plugins:
+**Versions:** web **v1.100** (sw cache `fretline-v88`). The APK was last rebuilt for v1.80, **v1.94 adds `SongFilesPlugin` and v1.95 `KeepAlivePlugin` + `KeepAliveService`, so it needs the NEW APK** (Capacitor plugins:
 `IncomingPlugin`, `NativeMicPlugin`, `NativeSeparatorPlugin`, `SongFilesPlugin` = Demucs on all cores + save to Downloads; minSdk 24,
 onnxruntime-android 1.22.0, arm64-v8a + armeabi-v7a only). Everything after v1.80 is web-only. The owner has the
 v1.80 APK installed.
@@ -62,6 +62,7 @@ v1.80 APK installed.
   - Tempo: auto, ½ / 2× buttons, type a BPM, tap tempo; ♩ button in My songs (v1.82). Notes keep their played
     timing (1/48 beat, v1.85).
 - v1.86: MIDI tab exports with one channel per string are read as one part (also fixes the import screen).
+- v1.100: the owner said new Lab songs were not showing in My songs or saving to the folder, and the Lab's "Open Fretline › My songs" link was gone (that card only shows after a save completes, so the save was failing before it). I could not reproduce it with the real TYSK files plus fake plugins (saves, folder files and card all fine), so the leading suspect is **localStorage being full (~5 MB in this WebView; a three-version song is ~155 KB)**. Fixes: `saveRecSong` logs the storage size, retries without `recRaw`, and when it still cannot save says so on screen (and shows the card) instead of failing silently; an always-visible "Open My songs" link at the top of the Lab; Settings › App shows "Saved data on this phone" (MB used, biggest songs, warning above 3.8 MB); the main page reloads on `pageshow` from bfcache and re-reads the song list when it becomes visible, so a stale list can never overwrite what the Lab saved. Real fix still to do if this is confirmed: move song data out of localStorage (IndexedDB). Test: `tools/lab-tests/test_storage_full.py`. **Waiting for the owner's Lab report / Settings storage line.**
 - v1.99: the owner (on the app) found no APK link: the in-app link used to show only when `NativeMic.outputRoute` was missing, and "Check for updates" only checks the web version. Settings › App now always shows "Download the latest Fretline.apk" in the app, with a line saying whether SongFiles / KeepAlive plugins are present (= whether the installed build is new enough). APK asset confirmed live: android-latest/Fretline.apk, 35 MB.
 - v1.98: **"Open with Fretline" goes to the Lab (audio part needs the new APK).** Manifest VIEW filter gained `audio/*` (mp3 etc.); `MainActivity.MAX_BYTES` 20→40 MB. index.html `Incoming` handler: audio / MIDI / Guitar Pro / MusicXML files are put in Cache `fretline-incoming` (list in localStorage `fretline:labIncoming`) and the app goes to `lab/stems.html`; other shared things (text, chordpro, pdf, links) still go to the import screen as before, and MIDI no longer goes to the import screen from outside the app (the import button still takes MIDI). lab/stems.html: `labReceive(file)` puts audio in `#file` (title filled, Split enabled), MIDI/GP/XML in the first free sheet box (then the second; if both are full the first), text sheets in the textarea; it also reads the stash on load and listens to `Incoming` while the Lab is open. Test: `tools/lab-tests/test_openwith.py` (fake Incoming plugin; needs /tmp/tysk.mid, /tmp/tysk_chords.mid). Untested on a phone.
 - v1.97: the owner confirmed song folders work but each had only one .json and asked for the original files. Web-only (no new APK). `sfMidi`/`sfMidis` write a standard .mid per song, and one per version (Chords + lead / Chords only / Tab only) for songs with `parts`, into the song folder next to the .json (chord names as MIDI markers; bpm and time signature included; hash suffix `|m1` forces one rewrite of every existing song). Songs made in the Lab since v1.94 also hold the exact tab / chord files that were uploaded (those can't be recovered for older songs, hence the generated MIDI). Test: `tools/lab-tests/test_songmidi.py` (notes read back with `parseMidi` = 471/453/773 as in the song).
