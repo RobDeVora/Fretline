@@ -16,6 +16,7 @@ sections:[
  {n:'Score, Streak, Left, You',t:'Score is notes hit out of notes so far. Streak is how many in a row you hit. Left is the time remaining. You shows the note the app hears you playing right now.'}]},
 {id:'home',title:'Home screen',items:[
  {n:'Course, Generate, Strum, Lessons, Songs, Chords, My Songs',ids:['quickLen','btnCustomGen'],t:'Tabs for the kinds of things you can play. On the Generate tab, Track length sets how long a quick track is, and "Customize a generated track…" opens the full generator (see Generate a track). Course: a step-by-step path. Generate: tracks the app makes for you. Strum: strumming and rhythm practice. Lessons: single ideas, each explained before you play it. Songs: the free song library. Chords: chord practice. My Songs: songs you added, generated or made in the Lab (tap ✕ to delete a song).'},
+ {n:'🎓 Tutorials',t:'Opens a list of guitar techniques (bends and more). Each tutorial explains one technique in detail and has one practice example to play. ‹ Back returns to the list.',ids:['btnTut','tutBack','tutPlay']},
  {n:'📖 Facts',t:'Opens this page.',ids:['btnFacts']},
  {n:'Install',t:'Appears in some browsers. Adds Fretline to your home screen so it opens like an app and works offline.',ids:['btnInstall']},
  {n:'Tuner',t:'Opens the tuner (see Tuner below).',ids:['btnTuner']},
