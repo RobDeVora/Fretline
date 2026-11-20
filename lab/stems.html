@@ -87,6 +87,8 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
 <div class="card"><b>Report</b> <span class="small">(📋 tap to copy and send it)</span><div id="log"></div></div>
 
 <script src="../songdb.js"></script>
+<script src="fbank.js"></script>
+<script src="ctcalign.js"></script>
 <script>
 /* Fretline Lab: Demucs htdemucs_6s (ONNX export by StemSplit, MIT, original by facebookresearch/demucs; Rouard,
    Massa & Défossez, ICASSP 2023). Input "mix" [1,2,343980] (7.8 s stereo at 44.1 kHz), output "stems"
@@ -662,14 +664,53 @@ function alignLyrics(text,env,bpm,b0){const lines=lyrLines(text);if(!lines.lengt
   return {sec,beats,n:lines.length,phrases:segs.length,onsets:onsets.length};}
 function lyrBeats(sec,bpm,b0){const spb=60/bpm;return sec.map(L=>({t0:(L.t0-b0)/spb,segs:L.segs.map(w=>({t:(w.t-b0)/spb,d:w.d/spb,text:w.text}))}));}
 window.alignLyrics=alignLyrics;window.alignLyricsOld=alignLyricsOld;window.lyrLines=lyrLines;window.vocalPhrases=vocalPhrases;
+
+/* v1.121: time the lyrics with a speech model (lab/ctc_en.int8.onnx, NeMo Conformer-CTC small, ~46 MB, downloaded once and kept) */
+async function ctcModel(){const url=new URL('ctc_en.int8.onnx',location.href).href;let cache=null;
+  try{cache=await caches.open('fretline-models');const hit=await cache.match(url);if(hit){const b=new Uint8Array(await hit.arrayBuffer());if(b.length>4e7)return b;await cache.delete(url);}}catch(e){}
+  status('Downloading the speech model (46 MB, once)…');const r=await fetch(url);if(!r.ok)throw new Error('speech model '+r.status);const b=new Uint8Array(await r.arrayBuffer());
+  if(b.length<4e7)throw new Error('speech model incomplete');try{if(cache)await cache.put(url,new Response(b,{headers:{'content-type':'application/octet-stream'}}));}catch(e){}return b;}
+async function ctcLyrics(text,mixL,mixR,bpm,b0){
+  const lines=lyrLines(text);if(!lines.length)return null;
+  status('Preparing the lyrics…');const x=await toRate([mixL,mixR],16000);
+  if(!window.ort)await loadScript(ORT_BASE+'ort.webgpu.min.js');
+  ort.env.wasm.wasmPaths=ORT_BASE;ort.env.wasm.numThreads=self.crossOriginIsolated?Math.min(4,navigator.hardwareConcurrency||2):1;
+  const model=await ctcModel();const sess=await ort.InferenceSession.create(model,{executionProviders:['wasm']});
+  CTC.loadTokens(await (await fetch(new URL('ctc_tokens.txt',location.href).href)).text());
+  const fb=makeFbank(),CH=16000*30,V=1025,parts=[];let T=0;const ts=performance.now();
+  for(let s=0;s<x.length;s+=CH){status('Listening for the words… '+Math.round(s/x.length*100)+'%');const seg=x.subarray(s,Math.min(x.length,s+CH));if(seg.length<1600)break;
+    const f=fb(seg),nb=f.bins,nf=f.frames;const m=new Float32Array(nb),sd=new Float32Array(nb);
+    for(let b=0;b<nb;b++){let a=0;for(let i=0;i<nf;i++)a+=f.data[i*nb+b];m[b]=a/nf;}
+    for(let b=0;b<nb;b++){let a=0;for(let i=0;i<nf;i++){const d=f.data[i*nb+b]-m[b];a+=d*d;}sd[b]=Math.sqrt(a/nf);}
+    const inp=new Float32Array(nb*nf);for(let i=0;i<nf;i++)for(let b=0;b<nb;b++)inp[b*nf+i]=(f.data[i*nb+b]-m[b])/(sd[b]+1e-5);
+    const o=await sess.run({audio_signal:new ort.Tensor('float32',inp,[1,nb,nf]),length:new ort.Tensor('int64',BigInt64Array.from([BigInt(nf)]),[1])});
+    const lp=o[sess.outputNames[0]];parts.push(lp.data);T+=lp.dims[1];await new Promise(r=>setTimeout(r,0));}
+  const all=new Float32Array(T*V);let off=0;for(const p of parts){all.set(p,off);off+=p.length;}try{sess.release&&sess.release();}catch(e){}
+  log('lyrics: the speech model listened in '+((performance.now()-ts)/1000).toFixed(1)+' s');
+  const ws=CTC.alignLines(lines,all,T,V);if(!ws)return null;
+  /* a word the model has no pieces for (digits…) gets a time between its neighbours */
+  const flat=[];ws.forEach((l,li)=>l.forEach((w,wi)=>flat.push({li,wi,w})));
+  for(let i=0;i<flat.length;i++){if(flat[i].w)continue;let a=i-1;while(a>=0&&!flat[a].w)a--;let z=i+1;while(z<flat.length&&!flat[z].w)z++;
+    const ta=a>=0?flat[a].w.t:0,tz=z<flat.length?flat[z].w.t:ta+1;flat[i].w={t:ta+(tz-ta)*(i-a)/(z-a),e:ta+(tz-ta)*(i-a)/(z-a)+0.2};}
+  const spb=60/bpm,sec=[],beats=[];let last=-1;
+  lines.forEach((l,li)=>{const row=ws[li].map((w,wi)=>{let t=w.t;if(t<=last)t=last+0.03;last=t;return {t,e:Math.max(w.e,t+0.1),text:l.words[wi]+(wi<l.words.length-1?' ':'')};});
+    row.forEach((w,k)=>{const nt=k+1<row.length?row[k+1].t:w.e;w.d=Math.max(0.1,Math.min(Math.max(nt,w.t+0.1)-w.t,4));});
+    sec.push({t0:row[0].t,segs:row.map(w=>({t:w.t,d:w.d,text:w.text}))});beats.push({t0:(row[0].t-b0)/spb,segs:row.map(w=>({t:(w.t-b0)/spb,d:w.d/spb,text:w.text}))});});
+  return {sec,beats,n:lines.length,speech:true};}
 async function saveRecSong(extra,gL,gR,rL,rR,notes){
   const id='m-rec-'+Date.now(),key=location.origin+'/__fretline/rec/'+id+'.wav';
   status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
   const gkey=location.origin+'/__fretline/rec/'+id+'-gtr.wav';await c.put(gkey,new Response(wav(gL,gR),{headers:{'content-type':'audio/wav'}}));
   const title=($('ttl').value||'Recording').trim()+(+$('secs').value?' (first '+$('secs').value+' s)':'');
   const def={id,cat:'mine',kind:'rec',title,bpb:4,recAudio:key,recGuitar:gkey,credit:'Made from a recording in Fretline Lab',...extra};
-  {const lt=$('lyr').value.trim();if(lt){if(!VOC)log('lyrics: not timed, because this run had no singing track (the app on the phone needs the latest update, or the song was too quiet)');
-    else{const r=alignLyrics(lt,VOC,def.bpm,def.recOffset);if(!r)log('lyrics: not timed, no singing was found in the recording');else{def.recLyr=r.sec;def.lyrics=r.beats;log('lyrics: '+r.n+' lines timed to '+r.phrases+' sung phrases (check them with 🎤 Sing in the song)');try{const mm=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0');log('lyrics timing, '+(r.onsets||0)+' note starts found for '+lyrLines(lt).reduce((s,l)=>s+l.syl.reduce((x,y)=>x+y,0),0)+' syllables. Each line: start · words:');r.sec.forEach((L,i)=>log('  '+mm(L.t0)+'.'+String(Math.floor((L.t0%1)*10))+'  '+L.segs.map(w=>w.text).join('').slice(0,40)));}catch(e){}}}}}
+  {const lt=$('lyr').value.trim();if(lt){let done=false;
+    try{const mL=new Float32Array(gL.length),mR=new Float32Array(gL.length);for(let i=0;i<mL.length;i++){mL[i]=(gL[i]||0)+(rL[i]||0);mR[i]=(gR[i]||0)+(rR[i]||0);}
+      const r=await ctcLyrics(lt,mL,mR,def.bpm,def.recOffset);if(r){def.recLyr=r.sec;def.lyrics=r.beats;done=true;log('lyrics: '+r.n+' lines timed word by word with the speech model');
+        try{const mm=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0');log('lyrics timing. Each line: start · words:');r.sec.forEach(L=>log('  '+mm(L.t0)+'.'+String(Math.floor((L.t0%1)*10))+'  '+L.segs.map(w=>w.text).join('').slice(0,40)));}catch(e){}}}
+    catch(e){log('lyrics: the speech model could not be used ('+String(e&&e.message||e).slice(0,120)+'), using the loudness method');}
+    if(!done){if(!VOC)log('lyrics: not timed, because this run had no singing track (the app on the phone needs the latest update, or the song was too quiet)');
+    else{const r=alignLyrics(lt,VOC,def.bpm,def.recOffset);if(!r)log('lyrics: not timed, no singing was found in the recording');else{def.recLyr=r.sec;def.lyrics=r.beats;log('lyrics: '+r.n+' lines timed to '+r.phrases+' sung phrases (check them with 🎤 Sing in the song)');try{const mm=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0');log('lyrics timing, '+(r.onsets||0)+' note starts found for '+lyrLines(lt).reduce((s,l)=>s+l.syl.reduce((x,y)=>x+y,0),0)+' syllables. Each line: start · words:');r.sec.forEach((L,i)=>log('  '+mm(L.t0)+'.'+String(Math.floor((L.t0%1)*10))+'  '+L.segs.map(w=>w.text).join('').slice(0,40)));}catch(e){}}}}}}
+
   if(SFP){def.dir=await pickSongDir(title);}
   {let used=0;try{for(const k of Object.keys(localStorage))used+=(localStorage.getItem(k)||'').length;}catch(e){}log('storage: '+(SongDB.ok?'songs are kept in the phone\'s own storage':'songs are kept in the browser (about 5 MB)')+'; the settings use '+Math.round(used/1024)+' KB; this song is '+Math.round(JSON.stringify(def).length/1024)+' KB');}
   let saved=false;
