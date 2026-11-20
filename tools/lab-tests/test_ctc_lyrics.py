@@ -20,7 +20,7 @@ with sync_playwright() as p:
   pg.on('console',lambda m:logs.append(m.text) if m.type=='error' else None)
   pg.goto('http://localhost:8769/lab/stems.html?ortbase=http://localhost:8771/ortpkg/package/dist/');pg.wait_for_timeout(800)
   r=pg.evaluate("""async(t)=>{const f=new File([await (await fetch('http://localhost:8771/mm.mp3')).arrayBuffer()],'mm.mp3');const [L,R]=await decode(f,0);
-    const s=performance.now();const r=await ctcLyrics(t,L,R,142.93,0.68);return {ms:performance.now()-s,sec:r.sec.map(x=>[x.t0,x.segs.map(w=>w.text).join('').slice(0,30)]),log:R_()}}""".replace(",log:R_()",""),LYR)
-  print('ms',round(r['ms']))
+    const s=performance.now();const vox=await toRate([L],16000);const r=await ctcLyrics(t,L,R,142.93,0.68,vox);return {ms:performance.now()-s,logtxt:document.getElementById('log')?document.getElementById('log').textContent.slice(-600):'',sec:r.sec.map(x=>[x.t0,x.segs.map(w=>w.text).join('').slice(0,30)]),log:R_()}}""".replace(",log:R_()",""),LYR)
+  print('ms',round(r['ms']));print(r['logtxt'])
   for t,s in r['sec']:print('%d:%04.1f'%(t//60,t%60),s)
   print(errs,logs[:3]);b.close()

@@ -692,15 +692,21 @@ function dropUnheard(sec,log){if(!VOC)return sec;const ph=vocalPhrases(VOC).segs
     log('  '+mm(L.t0)+'  heard '+(L.conf==null?'?':L.conf.toFixed(1))+' · singing '+Math.round(v*100)+'%  '+L.segs.map(w=>w.text).join('').slice(0,28));
     if(L.conf!=null&&L.conf<-5.5&&v<0.25&&n>=3)gone.push(L);else out.push(L);});
   if(gone.length)log('lyrics: '+gone.length+' line(s) left out because nobody sings them there: '+gone.map(L=>'"'+L.segs.map(w=>w.text).join('').trim().slice(0,24)+'"').join(', '));return out;}
+
+/* v1.125: a short last word sung right after a held one (Marlboro·Man) can get a single frame and the next line starts on top of it.
+   Keep the last word at least 0.35 s before the next line starts (and after the word before it) so it still lights up. */
+function tidyEnds(sec){let n=0;for(let i=0;i+1<sec.length;i++){const L=sec[i],S=L.segs,k=S.length;if(k<2)continue;const lim=sec[i+1].t0-0.35,last=S[k-1],prev=S[k-2];
+    if(last.t>lim){const nt=Math.max(lim,prev.t+0.1);if(nt<last.t){last.t=nt;last.d=Math.max(0.35,sec[i+1].t0-nt);prev.d=Math.max(0.1,Math.min(prev.d,nt-prev.t));n++;}}}
+  return n;}
 async function ctcLyrics(text,mixL,mixR,bpm,b0,vox){
   const lines=lyrLines(text);if(!lines.length)return null;
   status('Preparing the lyrics…');const x=await toRate([mixL,mixR],16000);
   if(!window.ort)await loadScript(ORT_BASE+'ort.webgpu.min.js');
   ort.env.wasm.wasmPaths=ORT_BASE;ort.env.wasm.numThreads=self.crossOriginIsolated?Math.min(4,navigator.hardwareConcurrency||2):1;
-  const model=await ctcModel();const sess=await ort.InferenceSession.create(model,{executionProviders:['wasm']});
+  const model=await ctcModel();let sess=null;const getSess=async()=>sess||(sess=await ort.InferenceSession.create(model,{executionProviders:['wasm']}));
   CTC.loadTokens(await (await fetch(new URL('ctc_tokens.txt',location.href).href)).text());
   const fb=makeFbank(),CH=16000*30,V=1025;const ts=performance.now();
-  const listen=async(sig,tag)=>{const parts=[];let T=0;
+  const listen=async(sig,tag)=>{const parts=[];let T=0;const sess=await getSess();
     for(let s=0;s<sig.length;s+=CH){status('Listening for the words ('+tag+')… '+Math.round(s/sig.length*100)+'%');const seg=sig.subarray(s,Math.min(sig.length,s+CH));if(seg.length<1600)break;
       const f=fb(seg),nb=f.bins,nf=f.frames;const m=new Float32Array(nb),sd=new Float32Array(nb);
       for(let b=0;b<nb;b++){let a=0;for(let i=0;i<nf;i++)a+=f.data[i*nb+b];m[b]=a/nf;}
@@ -709,11 +715,19 @@ async function ctcLyrics(text,mixL,mixR,bpm,b0,vox){
       const o=await sess.run({audio_signal:new ort.Tensor('float32',inp,[1,nb,nf]),length:new ort.Tensor('int64',BigInt64Array.from([BigInt(nf)]),[1])});
       const lp=o[sess.outputNames[0]];parts.push(lp.data);T+=lp.dims[1];await new Promise(r=>setTimeout(r,0));}
     const all=new Float32Array(T*V);let off=0;for(const p of parts){all.set(p,off);off+=p.length;}return {all,T};};
-  let {all,T}=await listen(x,'mix');
-  /* the singing alone (when the split gave it) is heard by the model too; the two opinions are averaged, which helps most where guitars cover the words */
-  if(vox&&vox.length>16000*5){try{let pk=0;for(let i=0;i<vox.length;i+=7)pk=Math.max(pk,Math.abs(vox[i]));const g=pk>1e-6?0.5/pk:1;const vs=new Float32Array(vox.length);for(let i=0;i<vox.length;i++)vs[i]=vox[i]*g;
-    const b2=await listen(vs,'voice');if(b2.T===T){for(let i=0;i<all.length;i++)all[i]=(all[i]+b2.all[i])/2;log('lyrics: the model also listened to the singing alone');}else log('lyrics: the singing-alone listen did not line up ('+b2.T+' vs '+T+' frames), mix only');}catch(e){log('lyrics: listening to the singing alone failed ('+String(e&&e.message||e).slice(0,80)+')');}}
-  try{sess.release&&sess.release();}catch(e){}
+  /* both listens (mix, singing alone) run side by side, each in its own thread; if a thread can't start, the same work runs here one after the other */
+  let vs=null;if(vox&&vox.length>16000*5){let pk=0;for(let i=0;i<vox.length;i+=7)pk=Math.max(pk,Math.abs(vox[i]));const g=pk>1e-6?0.5/pk:1;vs=new Float32Array(vox.length);for(let i=0;i<vox.length;i++)vs[i]=vox[i]*g;}
+  const prog={mix:0,voice:0};const showProg=()=>status('Listening for the words… '+Math.round((vs?(prog.mix+prog.voice)/2:prog.mix)*100)+'%');
+  const viaWorker=(sig,tag)=>new Promise((ok,bad)=>{let w;try{w=new Worker('ctcworker.js');}catch(e){return bad(e);}
+    w.onmessage=m=>{const d=m.data;if(d.prog!=null){prog[tag]=d.prog;showProg();}else if(d.error){w.terminate();bad(new Error(d.error));}else{prog[tag]=1;w.terminate();ok({all:d.all,T:d.T});}};
+    w.onerror=e=>{try{w.terminate();}catch(_){}bad(new Error(e.message||'worker failed'));};
+    w.postMessage({sig:sig.slice(),model:model.slice(),ortBase:ORT_BASE,tag,id:tag});});
+  const one=async(sig,tag)=>{try{return await viaWorker(sig,tag);}catch(e){log('lyrics: side-by-side listen not possible here ('+String(e&&e.message||e).slice(0,70)+'), listening one after the other');return await listen(sig,tag);}};
+  let all,T;
+  if(vs){const r=await Promise.all([one(x,'mix'),one(vs,'voice')]);all=r[0].all;T=r[0].T;const b2=r[1];
+    if(b2.T===T){for(let i=0;i<all.length;i++)all[i]=(all[i]+b2.all[i])/2;log('lyrics: the model also listened to the singing alone');}else log('lyrics: the singing-alone listen did not line up ('+b2.T+' vs '+T+' frames), mix only');}
+  else{const r=await one(x,'mix');all=r.all;T=r.T;}
+  try{sess&&sess.release&&sess.release();}catch(e){}
   log('lyrics: the speech model listened in '+((performance.now()-ts)/1000).toFixed(1)+' s');
   const ws=CTC.alignLines(lines,all,T,V);if(!ws)return null;
   /* a word the model has no pieces for (digits…) gets a time between its neighbours */
@@ -725,6 +739,7 @@ async function ctcLyrics(text,mixL,mixR,bpm,b0,vox){
     row.forEach((w,k)=>{const nt=k+1<row.length?row[k+1].t:w.e;w.d=Math.max(0.1,Math.min(Math.max(nt,w.t+0.1)-w.t,4));});
     sec.push({t0:row[0].t,conf:row.reduce((s,w)=>s+w.c,0)/row.length,segs:row.map(w=>({t:w.t,d:w.d,text:w.text}))});});
   let nf=0;try{nf=fixSqueezed(sec);}catch(e){}if(nf)log('lyrics: '+nf+' line(s) the model could not hear were placed by the loudness of the singing');
+  {const nt=tidyEnds(sec);if(nt)log('lyrics: '+nt+' line(s) had a last word too close to the next line; moved it earlier so it shows');}
   const keep=dropUnheard(sec,log);sec.length=0;keep.forEach(L=>sec.push(L));
   sec.forEach(L=>beats.push({t0:(L.t0-b0)/spb,segs:L.segs.map(w=>({t:(w.t-b0)/spb,d:w.d/spb,text:w.text}))}));
   return {sec,beats,n:sec.length,speech:true};}
@@ -769,7 +784,7 @@ async function runLab(){
   $('go').disabled=true;R.length=0;prog(0);$('out').style.display='none';
   const t0=performance.now();
   try{
-    log('Fretline Lab (page v1.124) · split a song · '+new Date().toISOString().slice(0,16).replace('T',' '));
+    log('Fretline Lab (page v1.125) · split a song · '+new Date().toISOString().slice(0,16).replace('T',' '));
     log('device: '+navigator.userAgent.replace(/\s+/g,' ').slice(0,160));
     log('cores '+(navigator.hardwareConcurrency||'?')+' · memory '+(navigator.deviceMemory?navigator.deviceMemory+' GB':'?')+' · WebGPU '+(('gpu' in navigator)?'present':'absent')+' · threads '+(self.crossOriginIsolated?'yes (cross-origin isolated)':'no (single thread)'));
     log('service worker: '+(navigator.serviceWorker&&navigator.serviceWorker.controller?'in charge':'not in charge')+' · reload done '+(sessionStorage.getItem('labReload')?'yes':'no'));
