@@ -39,6 +39,11 @@ the phone. The model is downloaded once (a few hundred MB, so use Wi-Fi) and kep
   <label style="display:flex;gap:8px;align-items:center;font-weight:600"><input type="checkbox" id="mk" checked style="width:auto"> Also make a highway song from the guitar</label>
   <input type="text" id="ttl" placeholder="Song title (from the file name if empty)" style="width:100%;font-size:15px;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text);margin-top:6px">
   <div class="small">The song is saved to Fretline's My songs with the band (without the guitar) as its backing track.</div>
+  <details id="lyrBox" style="margin-top:10px"><summary style="font-weight:600">Add the lyrics (optional)</summary>
+    <div class="small">Paste the lyrics, one line per sung line (or load a text file). The Lab listens to where the singing is in the recording and times each line and word to it, so they show on the highway with 🎤 Sing. It works best on clear lead vocals. Chords in [brackets] and headings like [Chorus] are ignored.</div>
+    <textarea id="lyr" rows="6" placeholder="First line of the song&#10;Second line of the song&#10;…" style="width:100%;font:14px system-ui,sans-serif;padding:8px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text)"></textarea>
+    <input type="file" id="lyrFile" accept=".txt,.text,.lrc,.pro,.cho,.chopro,text/plain">
+  </details>
   <details id="sheetBox" style="margin-top:10px"><summary style="font-weight:600">Use a tab or chord sheet for the notes (optional)</summary>
     <div class="small">Paste the song's tab or chord sheet (or load a text file). Its notes or chords are used as written, and lined up with the recording's guitar, instead of the AI writing the notes down.</div>
     <textarea id="sheet" rows="6" placeholder="e|-----0---3---|&#10;B|---1-------1-|&#10;…  or  G  C  D  Em" style="width:100%;font:13px ui-monospace,monospace;padding:8px;border-radius:10px;border:1px solid var(--line);background:#0b0d12;color:var(--text);margin-top:6px"></textarea>
@@ -267,7 +272,7 @@ let LAST=null;
 function retimeEvents(f,target){const old=LAST.def,bpm=target||Math.round(old.bpm*f*1000)/1000,spbO=60/old.bpm;let b0=old.recOffset;const T=old.recEvT;
   if(Math.abs(bpm*2-old.bpm)<0.02){const spb=60/bpm;let best=-1e9;let pick=b0;for(const c of [b0,b0+spbO]){let sc=0;for(const t of T)sc+=Math.cos(2*Math.PI*(t-c)/spb);if(sc>best){best=sc;pick=c;}}b0=pick;}
   const spb=60/bpm;const t0=Math.min(T[0],...(old.parts||[]).filter(p=>p.recEvT&&p.recEvT.length).map(p=>p.recEvT[0]));while(b0+4*spb<=t0-0.05)b0+=4*spb;while(b0>t0+0.05)b0-=spb;
-  const events=strumDirs(placeEvents(old.events.map((e,i)=>({e,t:T[i]})),bpm,b0));const def={...old,bpm,events,recOffset:b0};
+  const events=strumDirs(placeEvents(old.events.map((e,i)=>({e,t:T[i]})),bpm,b0));const def={...old,bpm,events,recOffset:b0};if(old.recLyr)def.lyrics=lyrBeats(old.recLyr,bpm,b0);
   if(old.parts)def.parts=old.parts.map(p=>p.recEvT?{...p,events:strumDirs(placeEvents(p.events.map((e,i)=>({e,t:p.recEvT[i]})),bpm,b0))}:p);
   SongDB.update(def).catch(e=>log('ERROR: could not save the new tempo ('+String(e&&e.message||e)+')'));
   LAST.def=def;window.__labSong=def;log('tempo: changed to '+Math.round(bpm*100)/100+' BPM, bar 1 at '+b0.toFixed(2)+' s');tempoButtons();status('Song updated: '+Math.round(bpm)+' BPM.');} /* the last song made here, for the tempo buttons */
@@ -579,12 +584,50 @@ async function saveSources(dir){
   let ok=0;for(const f of SRCFILES){try{const nm=(f.kind==='tab'?'Tab - ':'Chords - ')+f.name.replace(/^(tab|chords)( - )?/i,'')||f.name;
     await SFP.write(f.text!=null?{dir,name:f.name,text:f.text,mime:'text/plain'}:{dir,name:nm,data:b64(f.bytes),mime:'application/octet-stream'});ok++;}catch(e){log('files: could not save '+f.name+' ('+String(e&&e.message||e).slice(0,100)+')');}}
   if(ok)log('files: '+ok+' sheet file'+(ok>1?'s':'')+' saved in Downloads/Fretline/Songs/'+dir);}
+
+/* ---- lyrics: time each line and word to where the singing is (v1.114) ----
+   The vocal stem gives the loudness of the singing every 10 ms. Where it is loud is "singing time". Each lyric line gets a share of
+   that singing time in proportion to its syllables, then the line start snaps to the nearest real phrase start (after a pause) within 1.5 s.
+   Words inside a line share the line's singing time by syllables. Line level, not exact word level. */
+let VOC=null;
+function sylCount(w){const x=w.toLowerCase().replace(/[^a-z]/g,'');if(!x)return 1;let n=(x.match(/[aeiouy]+/g)||[]).length;if(/[^aeiou]e$/.test(x)&&n>1)n--;return Math.max(1,n);}
+function lyrLines(text){const out=[];for(const raw of String(text).split(/\r?\n/)){let s=raw.replace(/\[\d+:\d+(?:\.\d+)?\]/g,'').replace(/\{[^}]*\}/g,'').replace(/\[[^\]]*\]/g,'').trim();if(!s)continue;
+  if(/^(verse|chorus|bridge|intro|outro|pre-?chorus|refrain|solo|interlude|instrumental|hook|tag|coda)\b[^a-z]*\d*\s*:?\s*$/i.test(s))continue;
+  if(/^\(.*\)$/.test(s)&&s.length<30)continue;const words=s.split(/\s+/).filter(Boolean);if(words.length)out.push({words,syl:words.map(sylCount)});}return out;}
+function vocalPhrases(env){const n=env.length,sm=new Float32Array(n),r=3;for(let i=0;i<n;i++){let s=0,c=0;for(let j=Math.max(0,i-r);j<=Math.min(n-1,i+r);j++){s+=env[j];c++;}sm[i]=s/c;}
+  const so=Float32Array.from(sm).sort();const p95=so[Math.floor(n*0.95)]||0;if(p95<=1e-5)return {segs:[]};const thr=p95*0.18;
+  let segs=[],a=-1;for(let i=0;i<n;i++){if(sm[i]>thr){if(a<0)a=i;}else if(a>=0){segs.push([a,i]);a=-1;}}if(a>=0)segs.push([a,n]);
+  const m=[];for(const s of segs){if(m.length&&s[0]-m[m.length-1][1]<25)m[m.length-1][1]=s[1];else m.push([s[0],s[1]]);}
+  return {segs:m.filter(s=>s[1]-s[0]>=15).map(s=>[s[0]/100,s[1]/100])};}
+function alignLyrics(text,env,bpm,b0){const lines=lyrLines(text);if(!lines.length)return null;const segs=vocalPhrases(env).segs;if(!segs.length)return null;
+  const cum=[0];for(const [a,b] of segs)cum.push(cum[cum.length-1]+(b-a));const T=cum[cum.length-1];
+  const A=t=>{let i=0;while(i<segs.length&&segs[i][1]<=t)i++;if(i>=segs.length)return T;return cum[i]+Math.max(0,Math.min(t,segs[i][1])-segs[i][0]);};
+  const inv=a=>{a=Math.max(0,Math.min(T,a));let i=0;while(i<segs.length-1&&cum[i+1]<a)i++;return segs[i][0]+Math.min(a-cum[i],segs[i][1]-segs[i][0]);};
+  const total=lines.reduce((s,l)=>s+l.syl.reduce((x,y)=>x+y,0),0);let pre=0;
+  const anchors=segs.filter((s,j)=>j===0||s[0]-segs[j-1][1]>=0.5).map(s=>s[0]);
+  const aLine=lines.map(l=>{const v=pre/total*T;pre+=l.syl.reduce((x,y)=>x+y,0);return v;});
+  const aAnc=anchors.map(A);const n=lines.length,m=anchors.length,PEN=2.0;
+  /* best way to pair lines with phrase starts, in singing time, keeping the order (a line may stay unpaired at a cost) */
+  const memo=new Map();const f=(i,j)=>{if(i>=n)return {c:0,k:-1};const key=i*(m+1)+j;if(memo.has(key))return memo.get(key);
+    let best={c:f(i+1,j).c+PEN,k:-1};for(let k=j;k<m;k++){const d=Math.abs(aLine[i]-aAnc[k]);if(d>3)continue;const c=d+f(i+1,k+1).c;if(c<best.c)best={c,k};}memo.set(key,best);return best;};
+  const starts=[];{let j=0;for(let i=0;i<n;i++){const r=f(i,j);if(r.k>=0){starts.push(anchors[r.k]);j=r.k+1;}else starts.push(inv(aLine[i]));}}
+  let last=-1;for(let i=0;i<starts.length;i++){if(starts[i]<=last)starts[i]=last+0.3;last=starts[i];}
+  const endAll=segs[segs.length-1][1],spb=60/bpm;const sec=[],beats=[];
+  lines.forEach((l,i)=>{const t0=starts[i],t1=i+1<starts.length?starts[i+1]:endAll,a0=A(t0),a1=Math.max(a0+0.2,A(t1)),sy=l.syl.reduce((x,y)=>x+y,0);let c=0;
+    const ws=l.words.map((w,k)=>{const t=inv(a0+c/sy*(a1-a0));c+=l.syl[k];return {t,text:w+(k<l.words.length-1?' ':'')};});
+    ws.forEach((w,k)=>{w.d=Math.max(0.1,(k+1<ws.length?ws[k+1].t:Math.min(t1,inv(a1)+0.3))-w.t);});
+    sec.push({t0,segs:ws});beats.push({t0:(t0-b0)/spb,segs:ws.map(w=>({t:(w.t-b0)/spb,d:w.d/spb,text:w.text}))});});
+  return {sec,beats,n:lines.length,phrases:segs.length};}
+function lyrBeats(sec,bpm,b0){const spb=60/bpm;return sec.map(L=>({t0:(L.t0-b0)/spb,segs:L.segs.map(w=>({t:(w.t-b0)/spb,d:w.d/spb,text:w.text}))}));}
+window.alignLyrics=alignLyrics;window.lyrLines=lyrLines;window.vocalPhrases=vocalPhrases;
 async function saveRecSong(extra,gL,gR,rL,rR,notes){
   const id='m-rec-'+Date.now(),key=location.origin+'/__fretline/rec/'+id+'.wav';
   status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
   const gkey=location.origin+'/__fretline/rec/'+id+'-gtr.wav';await c.put(gkey,new Response(wav(gL,gR),{headers:{'content-type':'audio/wav'}}));
   const title=($('ttl').value||'Recording').trim()+(+$('secs').value?' (first '+$('secs').value+' s)':'');
   const def={id,cat:'mine',kind:'rec',title,bpb:4,recAudio:key,recGuitar:gkey,credit:'Made from a recording in Fretline Lab',...extra};
+  {const lt=$('lyr').value.trim();if(lt){if(!VOC)log('lyrics: not timed, because this run had no singing track (the app on the phone needs the latest update, or the song was too quiet)');
+    else{const r=alignLyrics(lt,VOC,def.bpm,def.recOffset);if(!r)log('lyrics: not timed, no singing was found in the recording');else{def.recLyr=r.sec;def.lyrics=r.beats;log('lyrics: '+r.n+' lines timed to '+r.phrases+' sung phrases (line level; check them with 🎤 Sing in the song)');}}}}
   if(SFP){def.dir=await pickSongDir(title);}
   {let used=0;try{for(const k of Object.keys(localStorage))used+=(localStorage.getItem(k)||'').length;}catch(e){}log('storage: '+(SongDB.ok?'songs are kept in the phone\'s own storage':'songs are kept in the browser (about 5 MB)')+'; the settings use '+Math.round(used/1024)+' KB; this song is '+Math.round(JSON.stringify(def).length/1024)+' KB');}
   let saved=false;
@@ -658,12 +701,12 @@ async function runLab(){
     const stride=Math.round(SEG*(1-OVERLAP));const nCh=Math.max(1,Math.ceil(Math.max(0,N-SEG)/stride)+1);
     const W=new Float32Array(SEG);for(let i=0;i<SEG;i++)W[i]=Math.min(i+1,SEG-i)/(SEG/2);
     const gL=new Float32Array(N),gR=new Float32Array(N),rL=new Float32Array(N),rR=new Float32Array(N),ws=new Float32Array(N);
-    const inp=new Float32Array(2*SEG);const times=[];
+    const inp=new Float32Array(2*SEG);const times=[];const NB=Math.ceil(N/441),vE=new Float32Array(NB),vW=new Float32Array(NB);let vGot=false;VOC=null;
     for(let c=0;c<nCh;c++){
       const st=c*stride;inp.fill(0);for(let i=0;i<SEG&&st+i<N;i++){inp[i]=(L[st+i]-mean)/sd;inp[SEG+i]=(Rc[st+i]-mean)/sd;}
       const tc=performance.now();let res=null,ot=null,G=null,B=null;
       if(native){let r=null;for(let k=0;;k++){try{r=await NS.run({mix:f32ToB64(inp),n:SEG});break;}catch(e){if(k>=1)throw e;log('part '+(c+1)+': native run failed ('+String(e&&e.message||e).slice(0,120)+'), trying again');}}
-        G=b64ToF32(r.guitar);B=b64ToF32(r.band);if(c===0)log('model: native part took '+(r.ms/1000).toFixed(1)+' s inside the app');}
+        G=b64ToF32(r.guitar);B=b64ToF32(r.band);if(r.vocal){const vv=b64ToF32(r.vocal),bo=Math.round(st/441);for(let b=0;b<vv.length;b++){const ix=bo+b;if(ix<NB){const w=W[Math.min(SEG-1,b*441+220)];vE[ix]+=w*vv[b]*vv[b];vW[ix]+=w;}}vGot=true;}if(c===0)log('model: native part took '+(r.ms/1000).toFixed(1)+' s inside the app');}
       else{
       const rebuild=async ep=>{try{session.release&&await session.release();}catch(_){}const m2=await getModel(MODELS[$('mdl').value]);session=await tryEp(ep,m2);used=ep;};
       if(used==='webgpu'&&gpuFresh)await rebuild('webgpu');
@@ -678,6 +721,7 @@ async function runLab(){
           await new Promise(z=>setTimeout(z,300));}}
       if(c===0)log('model: in '+session.inputNames.join(',')+' → out '+session.outputNames.join(',')+' '+JSON.stringify(ot.dims));const S=ot.data;/* [1,6,2,SEG] */
       G=new Float32Array(2*SEG);B=new Float32Array(2*SEG);
+      {const nb=Math.floor(SEG/441),bo=Math.round(st/441),o0=(3*2)*SEG,o1=(3*2+1)*SEG;for(let b=0;b<nb;b++){const ix=bo+b;if(ix>=NB)break;let s=0;for(let i=b*441;i<b*441+441;i++){s+=S[o0+i]*S[o0+i]+S[o1+i]*S[o1+i];}const w=W[b*441+220];vE[ix]+=w*s/882;vW[ix]+=w;}vGot=true;}
       for(let ch=0;ch<2;ch++)for(let k=0;k<6;k++){const o=(k*2+ch)*SEG,q=ch*SEG;if(k===GTR)for(let i=0;i<SEG;i++)G[q+i]=S[o+i];else for(let i=0;i<SEG;i++)B[q+i]+=S[o+i];}
       if(ot.dispose)ot.dispose();}
       const dt=performance.now()-tc;times.push(dt);
@@ -685,6 +729,7 @@ async function runLab(){
       prog(0.3+0.4*(c+1)/nCh);status('Splitting… part '+(c+1)+' of '+nCh+' ('+(dt/1000).toFixed(1)+' s for 7.8 s of audio)');
       log('part '+(c+1)+'/'+nCh+': '+(dt/1000).toFixed(1)+' s'+(used==='webgpu'?' (graphics chip)':used==='native'?' (all cores)':' (processor)'));}
     for(let i=0;i<N;i++){const w=ws[i]||1;gL[i]=gL[i]/w*sd+mean;gR[i]=gR[i]/w*sd+mean;rL[i]=rL[i]/w*sd+5*mean;rR[i]=rR[i]/w*sd+5*mean;}
+    if(vGot){VOC=new Float32Array(NB);for(let i=0;i<NB;i++)VOC[i]=vW[i]?Math.sqrt(vE[i]/vW[i]):0;}
     const tot=times.reduce((a,b)=>a+b,0)/1000;
     log('done on '+used+(gpuLost?' (graphics chip reset '+gpuLost+'×)':'')+': '+tot.toFixed(1)+' s of model time for '+(N/SR).toFixed(1)+' s of audio ('+(tot/(N/SR)).toFixed(2)+'× the song length); whole run '+((performance.now()-t0)/1000).toFixed(1)+' s');
     let eg=0,er=0;for(let i=0;i<N;i++){eg+=gL[i]*gL[i]+gR[i]*gR[i];er+=rL[i]*rL[i]+rR[i]*rR[i];}
@@ -734,6 +779,7 @@ $('sheetFileClear').addEventListener('click',()=>keepFile('sheet1',null));if($('
     const h=async it=>{if(!it)return;if(it.error){status('Could not open the file: '+it.error);return;}if(!it.data)return;try{await labReceive(labItemFile(it));}catch(e){status('Could not open '+it.name+': '+(e.message||e));}};
     const r=await P.getPending();await h(r&&r.item);P.addListener('incoming',h);}catch(e){}
 })();
+$('lyrFile').onchange=async e=>{const f=e.target.files[0];if(f)$('lyr').value=(await f.text()).replace(/\r/g,'');};
 $('go').onclick=async()=>{
   window.__labDone=null;
   if(KA){try{await KA.start({text:'Starting…'});KA_ON=true;}catch(e){KA_ON=false;}}

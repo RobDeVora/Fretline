@@ -49,6 +49,7 @@ import ai.onnxruntime.OrtSession;
 @CapacitorPlugin(name = "NativeSeparator")
 public class NativeSeparatorPlugin extends Plugin {
     private static final int GUITAR = 4; // stem order: drums, bass, other, vocals, guitar, piano
+    private static final int VOCALS = 3;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private OrtEnvironment env;
@@ -205,6 +206,7 @@ public class NativeSeparatorPlugin extends Plugin {
                 in.get(mix, 0, Math.min(mix.length, in.remaining()));
                 input = OnnxTensor.createTensor(env, FloatBuffer.wrap(mix), new long[]{1, 2, n});
                 float[] guitar = new float[2 * n], band = new float[2 * n];
+                float[] vocal = null; // loudness of the singing every 10 ms (441 samples), so the Lab can time lyrics
                 try (OrtSession.Result res = session.run(Collections.singletonMap(inName, input))) {
                     OnnxValue v = res.get(0);
                     FloatBuffer out = ((OnnxTensor) v).getFloatBuffer(); // [1, 6, 2, n]
@@ -213,6 +215,18 @@ public class NativeSeparatorPlugin extends Plugin {
                     int stems = all.length / (2 * n);
                     for (int k = 0; k < stems; k++) {
                         int base = k * 2 * n;
+                        if (k == VOCALS) {
+                            int nb = n / 441;
+                            vocal = new float[nb];
+                            for (int b = 0; b < nb; b++) {
+                                double s = 0;
+                                for (int ch = 0; ch < 2; ch++) {
+                                    int o = base + ch * n + b * 441;
+                                    for (int i = 0; i < 441; i++) { float x = all[o + i]; s += x * x; }
+                                }
+                                vocal[b] = (float) Math.sqrt(s / 882.0);
+                            }
+                        }
                         if (k == GUITAR) System.arraycopy(all, base, guitar, 0, 2 * n);
                         else for (int i = 0; i < 2 * n; i++) band[i] += all[base + i];
                     }
@@ -220,6 +234,7 @@ public class NativeSeparatorPlugin extends Plugin {
                 JSObject r = new JSObject();
                 r.put("guitar", encode(guitar));
                 r.put("band", encode(band));
+                if (vocal != null) r.put("vocal", encode(vocal));
                 r.put("ms", System.currentTimeMillis() - t0);
                 call.resolve(r);
             } catch (Throwable e) {
