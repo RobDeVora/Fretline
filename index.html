@@ -393,8 +393,8 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     </div>
     <div class="stab" data-t="sing">
     <div class="small" style="margin-bottom:6px">Turn lyrics on or off for each song with 🎤 Sing while playing.</div>
-    <div class="field inline"><label>Vocal guide: play the singing melody</label><input type="checkbox" id="sVoxOn"></div>
-    <div class="field"><label>Vocal guide volume: <span id="sVoxV"></span></label><input type="range" id="sVoxVol" min="0" max="1" step="0.05"><span class="small">A flute plays the tune you sing, with or without the band. Where the melody comes from:</span></div>
+    <div class="field"><label>Lyrics earlier / later: <span id="sLynV"></span></label><input type="range" id="sLyn" min="-3" max="3" step="0.1"><span class="small">If the words run behind the singing, slide this to the right to show them sooner (left shows them later).</span></div>
+    <div class="small" style="margin-bottom:6px">Where the sung tune for the lyrics comes from:</div>
     <div class="field inline"><label>Real tunes in library songs</label><input type="checkbox" id="sVoxLib"></div>
     <div class="field inline"><label>Melody and words from MIDI and MusicXML files</label><input type="checkbox" id="sVoxFile"></div>
     <div class="field inline"><label>Make up a melody for chord sheets</label><input type="checkbox" id="sVoxMade"></div>
@@ -1946,7 +1946,9 @@ function barRole(evs){
 function songLyrics(S){if(!S)return null;
   if(S.lyricsSrc==='tune'&&settings.vocalLibrary===false)return S.sheetLyrics||null;
   if(S.lyricsSrc==='file'&&settings.vocalFiles===false)return null;
-  return S.lyrics&&S.lyrics.length?S.lyrics:null;}
+  const L=S.lyrics&&S.lyrics.length?S.lyrics:null;const nz=+settings.lyrNudge||0;if(!L||!nz)return L;
+  const k=nz+'|'+S.bpm;if(S._ln&&S._ln.k===k&&S._ln.src===L)return S._ln.v;const sh=-nz*(S.bpm||90)/60;
+  const v=L.map(l=>({...l,t0:l.t0+sh,segs:l.segs.map(s=>({...s,t:s.t+sh}))}));S._ln={k,src:L,v};return v;}
 // {notes,abs}: abs = written at the song's real pitch (tunes, files); otherwise made up from the chord shapes
 function songVocal(S){if(!S)return null;
   if(S.vocal&&S.vocalSrc==='tune'&&settings.vocalLibrary!==false)return {notes:S.vocal,abs:true,src:'tune'};
@@ -2000,13 +2002,13 @@ function voxNote(midi,t,dur){
   g.gain.setValueAtTime(vv,t);g.gain.setValueAtTime(vv,t+Math.max(0.05,dur-0.06));g.gain.linearRampToValueAtTime(0.0001,t+dur);
   src.connect(g);g.connect(voxOut());src.start(t);src.stop(t+dur+0.05);
 }
-function voxActive(){return settings.sing&&settings.vocalGuide!==false&&!!(G.vox&&G.vox.length);}
+function voxActive(){return false;} /* v1.118: the flute vocal guide was removed at the owner's request */
 function setupVox(){const V=settings.vocalGuide!==false?songVocal(G.song):null;
   if(!V||!V.notes.length){G.vox=null;G.voxIdx=0;return;}
   // made-up tunes follow the chord shapes plus capo; real tunes move only if you choose a different capo
   const sh=V.abs?(G.origCapo||0)-((G.def&&G.def.capo)||0):(G.capo||0);
   let ns=V.notes.map(n=>({t:n.t,d:n.d,midi:n.midi+sh}));const med=ns.map(n=>n.midi).sort((a,b)=>a-b)[ns.length>>1];if(med<64)ns=ns.map(n=>({...n,midi:n.midi+12}));
-  G.vox=ns;G.voxSrc=V.src;voxSeek();if(settings.sing)loadVoiceFont();}
+  G.vox=ns;G.voxSrc=V.src;voxSeek();}
 function voxSeek(){const E=G.vox||[];let i=0;while(i<E.length&&E[i].t<G.clock-1e-6)i++;G.voxIdx=i;}
 function voxTick(){
   if(!voxActive()||!actx||G.waiting||G.mode==='wait')return;
@@ -3422,8 +3424,8 @@ function tunerUpdate(){
 /* ---- settings ---- */
 let settingsOpen=false;
 function syncSettingsUI(){{const P=IS_APP&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;
-  $('#appBuild').innerHTML=!IS_APP?'':P&&P.outputRoute?'Android app: latest build (full screen, sound delay per output'+(outRoute?' · sound now on '+ROUTE_NAMES[outRoute]:'')+')':'Android app: an older build. <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">Install the latest Fretline.apk</a> for full screen and a sound delay for each output.';}$('#sFingerGuide').checked=settings.fingerGuide!==false;$('#cNoteBy').value=settings.noteBy==='string'?'string':'finger';$('#sVoxOn').checked=settings.vocalGuide!==false;$('#sVoxLib').checked=settings.vocalLibrary!==false;$('#sVoxFile').checked=settings.vocalFiles!==false;$('#sVoxMade').checked=settings.vocalMadeUp!==false;
-  $('#sVoxVol').value=settings.vocalVol==null?0.7:settings.vocalVol;$('#sVoxV').textContent=Math.round((settings.vocalVol==null?0.7:settings.vocalVol)*100)+'%';$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sChordM').value=settings.chordMatch||'strict';$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+  $('#appBuild').innerHTML=!IS_APP?'':P&&P.outputRoute?'Android app: latest build (full screen, sound delay per output'+(outRoute?' · sound now on '+ROUTE_NAMES[outRoute]:'')+')':'Android app: an older build. <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">Install the latest Fretline.apk</a> for full screen and a sound delay for each output.';}$('#sFingerGuide').checked=settings.fingerGuide!==false;$('#cNoteBy').value=settings.noteBy==='string'?'string':'finger';$('#sLyn').value=settings.lyrNudge||0;$('#sLynV').textContent=((settings.lyrNudge||0)>0?'+':'')+(+settings.lyrNudge||0).toFixed(1)+' s';$('#sVoxLib').checked=settings.vocalLibrary!==false;$('#sVoxFile').checked=settings.vocalFiles!==false;$('#sVoxMade').checked=settings.vocalMadeUp!==false;
+  $('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sChordM').value=settings.chordMatch||'strict';$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();fillMicList();};
@@ -3461,9 +3463,9 @@ $('#sBand').onchange=e=>{settings.band=e.target.checked;saveSettings();};
 $('#sPhones').onchange=e=>{settings.headphones=e.target.checked;saveSettings();};
 $('#sDel').oninput=e=>{const v=+e.target.value;settings.soundDelay=v<0?-1:v;saveSettings();syncSettingsUI();};
 $('#sDead').onchange=e=>{settings.deadStrings=e.target.checked;saveSettings();};
-for(const [id,k] of [['#sVoxOn','vocalGuide'],['#sVoxLib','vocalLibrary'],['#sVoxFile','vocalFiles'],['#sVoxMade','vocalMadeUp']])
+for(const [id,k] of [['#sVoxLib','vocalLibrary'],['#sVoxFile','vocalFiles'],['#sVoxMade','vocalMadeUp']])
   $(id).onchange=e=>{settings[k]=e.target.checked;saveSettings();if(G.song){setupBand();syncSingBtn();}};
-$('#sVoxVol').oninput=e=>{settings.vocalVol=+e.target.value;saveSettings();$('#sVoxV').textContent=Math.round(settings.vocalVol*100)+'%';if(voxBus)voxBus.gain.value=settings.vocalVol;};
+$('#sLyn').oninput=e=>{settings.lyrNudge=+e.target.value;saveSettings();$('#sLynV').textContent=(settings.lyrNudge>0?'+':'')+settings.lyrNudge.toFixed(1)+' s';};
 $('#sBandVol').oninput=e=>{settings.bandVol=+e.target.value;saveSettings();$('#sBandV').textContent=Math.round(settings.bandVol*100)+'%';if(bandBus)bandBus.gain.value=settings.bandVol;};
 $('#sMetro').onchange=e=>{settings.metronome=e.target.checked;saveSettings();};
 /* ---- colours & theme settings ---- */
@@ -4318,7 +4320,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.117';
+const APP_VERSION='1.118';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

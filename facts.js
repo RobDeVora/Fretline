@@ -67,8 +67,7 @@ sections:[
  {n:'I\'m using headphones',t:'Turn on when the app\'s sound goes to headphones. The microphone then cannot hear the band or the hit and miss sounds, so Fretline stops making allowances for them and reacts faster to your playing.',ids:['sPhones']},
  {n:'Metronome click while playing',t:'A click on every beat while you play.',ids:['sMetro']}]},
 {id:'settings-sing',title:'Settings › Singing',items:[
- {n:'Vocal guide: play the singing melody',t:'A flute plays the tune that is sung, with or without the band. Turn lyrics on or off for each song with 🎤 Sing.',ids:['sVoxOn']},
- {n:'Vocal guide volume',t:'How loud the flute is.',ids:['sVoxVol']},
+ {n:'Lyrics earlier / later',t:'If the words run behind the singing, slide to the right to show them sooner. Left shows them later. It moves every song by the same amount.',ids:['sLyn']},
  {n:'Real tunes in library songs',t:'Use the real melody for library songs that have one.',ids:['sVoxLib']},
  {n:'Melody and words from MIDI and MusicXML files',t:'When you load a MIDI or MusicXML file with a vocal part, use it as the tune and the words.',ids:['sVoxFile']},
  {n:'Make up a melody for chord sheets',t:'Chord sheets only have chords and words, so the app writes a tune that fits them. It is not the song\'s real tune. If a song has a real tune, that is used first.',ids:['sVoxMade']}]},
