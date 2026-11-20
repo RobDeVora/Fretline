@@ -600,7 +600,7 @@ function vocalPhrases(env){const n=env.length,sm=new Float32Array(n),r=3;for(let
   let segs=[],a=-1;for(let i=0;i<n;i++){if(sm[i]>thr){if(a<0)a=i;}else if(a>=0){segs.push([a,i]);a=-1;}}if(a>=0)segs.push([a,n]);
   const m=[];for(const s of segs){if(m.length&&s[0]-m[m.length-1][1]<25)m[m.length-1][1]=s[1];else m.push([s[0],s[1]]);}
   return {segs:m.filter(s=>s[1]-s[0]>=15).map(s=>[s[0]/100,s[1]/100])};}
-function alignLyrics(text,env,bpm,b0){const lines=lyrLines(text);if(!lines.length)return null;const segs=vocalPhrases(env).segs;if(!segs.length)return null;
+function alignLyricsOld(text,env,bpm,b0){const lines=lyrLines(text);if(!lines.length)return null;const segs=vocalPhrases(env).segs;if(!segs.length)return null;
   const cum=[0];for(const [a,b] of segs)cum.push(cum[cum.length-1]+(b-a));const T=cum[cum.length-1];
   const A=t=>{let i=0;while(i<segs.length&&segs[i][1]<=t)i++;if(i>=segs.length)return T;return cum[i]+Math.max(0,Math.min(t,segs[i][1])-segs[i][0]);};
   const inv=a=>{a=Math.max(0,Math.min(T,a));let i=0;while(i<segs.length-1&&cum[i+1]<a)i++;return segs[i][0]+Math.min(a-cum[i],segs[i][1]-segs[i][0]);};
@@ -619,8 +619,49 @@ function alignLyrics(text,env,bpm,b0){const lines=lyrLines(text);if(!lines.lengt
     ws.forEach((w,k)=>{w.d=Math.max(0.1,(k+1<ws.length?ws[k+1].t:Math.min(t1,inv(a1)+0.3))-w.t);});
     sec.push({t0,segs:ws});beats.push({t0:(t0-b0)/spb,segs:ws.map(w=>({t:(w.t-b0)/spb,d:w.d/spb,text:w.text}))});});
   return {sec,beats,n:lines.length,phrases:segs.length};}
+
+/* v1.117: syllable-level alignment. The first version spread each line over the singing by syllable COUNT, so one held word or a
+   breath pushed everything after it off, and the lyrics drifted and then snapped back. Now the singing's own note starts are used:
+   onset candidates = quick rises of the vocal loudness (and the start of every phrase). Every syllable is matched, in order, to one
+   of them by a dynamic programme: a match costs how far the onset is from where the singing-time estimate expects that syllable (so it
+   stays on course), skipped onsets (consonants, backing noise) cost a little, and a syllable left without an onset (a word held over
+   two notes, or a missed onset) costs more. Unmatched syllables are placed between their neighbours. */
+function vocalOnsets(env,segs){const n=env.length,sm=new Float32Array(n);for(let i=0;i<n;i++){let s=0,c=0;for(let j=Math.max(0,i-1);j<=Math.min(n-1,i+1);j++){s+=env[j];c++;}sm[i]=s/c;}
+  const so=Float32Array.from(sm).sort();const p95=so[Math.floor(n*0.95)]||1e-6,fl=p95*0.05;const e=new Float32Array(n);for(let i=0;i<n;i++)e[i]=Math.log(fl+sm[i]);
+  const d=new Float32Array(n);for(let i=4;i<n;i++)d[i]=e[i]-e[i-4];const on=[];
+  for(let i=4;i<n-1;i++){if(d[i]>0.35&&d[i]>=d[i-1]&&d[i]>=d[i+1]&&sm[i]>p95*0.1){const t=i/100;if(on.length&&t-on[on.length-1].t<0.09){if(d[i]>on[on.length-1].s)on[on.length-1]={t,s:d[i]};}else on.push({t,s:d[i]});}}
+  for(const [a] of segs){const t=a;if(!on.some(o=>Math.abs(o.t-t)<0.12))on.push({t,s:2});}
+  on.sort((x,y)=>x.t-y.t);return on.map((o,i)=>({t:o.t,s:Math.min(o.s,2),pre:i?o.t-on[i-1].t:5}));}
+function alignLyrics(text,env,bpm,b0){const lines=lyrLines(text);if(!lines.length)return null;const segs=vocalPhrases(env).segs;if(!segs.length)return null;
+  const cum=[0];for(const [a,b] of segs)cum.push(cum[cum.length-1]+(b-a));const T=cum[cum.length-1];
+  const A=t=>{let i=0;while(i<segs.length&&segs[i][1]<=t)i++;if(i>=segs.length)return T;return cum[i]+Math.max(0,Math.min(t,segs[i][1])-segs[i][0]);};
+  const inv=a=>{a=Math.max(0,Math.min(T,a));let i=0;while(i<segs.length-1&&cum[i+1]<a)i++;return segs[i][0]+Math.min(a-cum[i],segs[i][1]-segs[i][0]);};
+  const syl=[];lines.forEach((l,li)=>l.words.forEach((w,wi)=>{for(let k=0;k<l.syl[wi];k++)syl.push({li,wi,first:k===0});}));const S=syl.length;
+  const onsets=vocalOnsets(env,segs);if(onsets.length<3)return alignLyricsOld(text,env,bpm,b0);
+  const prior=syl.map((s,i)=>inv((i+0.5)/S*T)),ratio=onsets.length/S,W=Math.max(30,Math.round(0.2*onsets.length));
+  const cand=prior.map((tp,i)=>{const c=[],ctr=i*ratio;for(let j=Math.max(0,Math.floor(ctr-W));j<onsets.length&&j<=ctr+W;j++)c.push(j);return c;});
+  const SKIPS=1.5,SKIPO=0.3,MAXSK=3;
+  /* dp[i] = Map onsetIndex -> {c, from:[i',j']}; "start" = index -1 */
+  const dp=new Array(S).fill(null).map(()=>new Map());
+  const edge=(i,j,i0,j0)=>{const dev=Math.min(1,Math.abs(j-i*ratio)*0.03);const sk=(i-i0-1)*SKIPS;const so=(j0>=0?Math.min(j-j0-1,6):Math.min(j,6))*SKIPO;const ls=syl[i].first&&syl[i].wi===0,pg=Math.min(1,onsets[j].pre/0.5);return dev+sk+so-0.5*onsets[j].s+(ls?-1.2*pg+0.4:0.3*pg*pg);};
+  for(let i=0;i<S;i++){for(const j of cand[i]){let best=null;
+    for(let k=1;k<=MAXSK+1&&i-k>=-1;k++){const i0=i-k;if(i0<0){const c=edge(i,j,-1,-1);if(!best||c<best.c)best={c,from:null};continue;}
+      for(const [j0,st] of dp[i0]){if(j0>=j)continue;const c=st.c+edge(i,j,i0,j0);if(!best||c<best.c)best={c,from:[i0,j0]};}}
+    if(best)dp[i].set(j,best);}}
+  let bi=-1,bj=-1,bc=1e18;for(let i=S-1;i>=Math.max(0,S-1-MAXSK);i--){for(const [j,st] of dp[i]){const c=st.c+(S-1-i)*SKIPS;if(c<bc){bc=c;bi=i;bj=j;}}if(bi>=0)break;}
+  if(bi<0)return alignLyricsOld(text,env,bpm,b0);
+  const st=new Array(S).fill(null);let ci=bi,cj=bj;while(ci>=0){st[ci]=onsets[cj].t;const f=dp[ci].get(cj).from;if(!f)break;ci=f[0];cj=f[1];}
+  /* fill syllables without an onset between their neighbours (or from the singing-time estimate at the ends) */
+  const tt=st.slice();for(let i=0;i<S;i++){if(tt[i]!=null)continue;let a=i-1;while(a>=0&&tt[a]==null)a--;let z=i+1;while(z<S&&tt[z]==null)z++;
+    if(a>=0&&z<S)tt[i]=tt[a]+(tt[z]-tt[a])*(i-a)/(z-a);else if(a>=0)tt[i]=Math.max(tt[a]+0.15,prior[i]);else if(z<S)tt[i]=Math.min(tt[z]-0.15,prior[i]);else tt[i]=prior[i];}
+  for(let i=1;i<S;i++)if(tt[i]<=tt[i-1])tt[i]=tt[i-1]+0.05;
+  const endAll=segs[segs.length-1][1],spb=60/bpm;const sec=[],beats=[];let si=0;
+  lines.forEach((l,li)=>{const ws=[];l.words.forEach((w,wi)=>{ws.push({t:tt[si],text:w+(wi<l.words.length-1?' ':'')});si+=l.syl[wi];});
+    const nextT=si<S?tt[si]:endAll;ws.forEach((w,k)=>{const nt=k+1<ws.length?ws[k+1].t:nextT;w.d=Math.max(0.1,Math.min(nt-w.t,k+1<ws.length?4:2.5));});
+    sec.push({t0:ws[0].t,segs:ws});beats.push({t0:(ws[0].t-b0)/spb,segs:ws.map(w=>({t:(w.t-b0)/spb,d:w.d/spb,text:w.text}))});});
+  return {sec,beats,n:lines.length,phrases:segs.length,onsets:onsets.length};}
 function lyrBeats(sec,bpm,b0){const spb=60/bpm;return sec.map(L=>({t0:(L.t0-b0)/spb,segs:L.segs.map(w=>({t:(w.t-b0)/spb,d:w.d/spb,text:w.text}))}));}
-window.alignLyrics=alignLyrics;window.lyrLines=lyrLines;window.vocalPhrases=vocalPhrases;
+window.alignLyrics=alignLyrics;window.alignLyricsOld=alignLyricsOld;window.lyrLines=lyrLines;window.vocalPhrases=vocalPhrases;
 async function saveRecSong(extra,gL,gR,rL,rR,notes){
   const id='m-rec-'+Date.now(),key=location.origin+'/__fretline/rec/'+id+'.wav';
   status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
