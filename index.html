@@ -173,10 +173,12 @@ details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14p
     <button id="singBtn" title="Lyrics on screen while you play" style="padding:6px 10px;display:none">🎤 Sing</button>
     <button id="tempoBtn" title="Change this recording's tempo grid" style="padding:6px 10px;display:none">♩ Tempo</button>
     <button id="bandBtn" title="Backing band: drums, bass and piano that fit what you're playing" style="padding:6px 10px">🥁 Band</button>
+    <button id="loopBtn" title="Repeat a few bars: drag the highway to where you want, then tap (1, 2, 4 or 8 bars)" style="padding:6px 10px">🔁 Loop</button>
     <div class="speed"><button id="spDown">−</button><span id="spVal">100%</span><button id="spUp">+</button></div>
   </div>
   <div class="stage">
     <canvas id="cv"></canvas>
+    <div id="slowOffer" style="display:none;position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:5;background:#2a2340;border:1px solid #6c5ce7;border-radius:12px;padding:8px 12px;font-size:14px;text-align:center;max-width:92%"></div>
     <div class="hud">
       <div>Score <b id="hScore">0/0</b></div>
       <div>Streak <b id="hStreak">0</b></div>
@@ -213,6 +215,7 @@ details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14p
         <p class="small" id="rStrings" style="margin-top:-4px;color:var(--warn)"></p>
         <p class="small" id="rGrades" style="margin-top:-4px"></p>
         <p class="small" id="rTiming" style="margin-top:-4px"></p>
+        <div id="rMissed" style="margin:4px 0"></div>
         <div id="rReport" style="margin:4px 0"></div>
         <div class="row" style="justify-content:center">
           <button id="rBack">Back</button>
@@ -2440,7 +2443,7 @@ function pickPart(def,then){
 function syncPartBtn(){const b=$('#partBtn');if(!b)return;const n=G.def&&G.def.parts?partChoices(G.def).length:0;b.style.display=n>1?'':'none';if(n>1){b.innerHTML='🎸<span class="lbl"> '+esc(partLabel(G.def))+'</span>';b.title='Part: '+partLabel(G.def)+' (tap to change)';}}
 function openSong(def){if(def&&def.cat==='mine'&&def.id)markPlayed(def.id);
   if(def.libFile&&!def.events){showHint('Loading '+def.title+'…',4000);loadLibEvents(def).then(()=>openSong(def)).catch(()=>showMsg('Could not load the song','<p>Fretline couldn’t load this song. Connect to the internet and try again (after the first time, it works offline).</p>'));return;}
-  G.def=def;G.base=buildSong(def);G.song=G.base;syncSingBtn();syncPartBtn();
+  G.loop=null;loopLabel();G.def=def;G.base=buildSong(def);G.song=G.base;syncSingBtn();syncPartBtn();
   {const cs=store.get('capo',{});G.origCapo=G.capo=cs[def.id]!=null?cs[def.id]:(def.capo||0);}
   setupStrum();syncCapo();syncTempoBtn();G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);
   $('#pTitle').textContent=G.song.title;
@@ -2463,7 +2466,7 @@ function resetRun(){
   if(!G.song)return;
   G.state=new Uint8Array(G.song.events.length);
   G.clock=-G.song.bpb;G.hits=0;G.misses=0;G.streak=0;G.best=0;G.scan=0;G.playedIdx=0;G.fxIdx=0;G.fxOn=true;G.fxSched={};G.lastClickBeat=Math.floor(G.clock)-1;
-  G.playing=false;G.listen=false;G.finished=false;G.pops=[];G.lastHitKey=null;G.lastHitAt=-1;G.cf=0;G.cfIdx=-1;G.usedOnset=performance.now();G.wrongOnset=performance.now();G.wrongAt=0;G.wp=null;G.frames=null;G.grades={perfect:0,good:0,okay:0};G.ignoreOnsetUntil=0;G.offs=[];G.diag={};G.cc=null;G.strFb=null;G.deadStats=null;
+  G.missRun=0;G.playing=false;G.listen=false;G.finished=false;G.pops=[];G.lastHitKey=null;G.lastHitAt=-1;G.cf=0;G.cfIdx=-1;G.usedOnset=performance.now();G.wrongOnset=performance.now();G.wrongAt=0;G.wp=null;G.frames=null;G.grades={perfect:0,good:0,okay:0};G.ignoreOnsetUntil=0;G.offs=[];G.diag={};G.cc=null;G.strFb=null;G.deadStats=null;
   $('#results').classList.remove('show');G.bandIdx=0;updateButtons();
 }
 /* v1.120: jump to a beat (drag the highway) and carry on from there; also used to resume a paused Listen */
@@ -2877,6 +2880,7 @@ function update(dt,now){
     return;
   }
   const eff=G.mode==='wait'?G.clock:G.clock-settings.latency/1000*b;
+  if(G.loop&&G.clock>=G.loop.b){stopVoices();seekTo(G.loop.a);return;} /* v1.129: repeat the chosen bars */
   /* v1.73: "also play the right note" with headphones in Play mode: each note is played exactly on the beat
      (scheduled early by the sound delay, like Listen and the band) while you're hitting notes; a miss cuts it and the
      sound comes back after your next hit. Played on credit instead, it came 50-300 ms late and uneven, which sounded
@@ -2894,7 +2898,7 @@ function update(dt,now){
     /* v1.72: a two-note step picked inside its window gets up to 300 ms after that pick to be confirmed (the second
        note's check needs a moment; a slightly late first step after a fret change used to run out of window) */
     let waX=wa;if(!ch&&!e.strum&&e.notes.length>=2&&G.mode==='play'){const pk=Math.max(det.onsetAt,det.pitchOnsetAt||-1);if(pk>G.lastHitAt){const pc=eff-(now-pk)/1000*b;const gp=ev[i+1]?ev[i+1].t-e.t:9;if(pc>=e.t-wb&&pc<=e.t+Math.min(wa+0.12*b,gp*0.9))waX=Math.max(wa,pc-e.t+0.3*b);}} /* picks are detected up to ~110 ms late on a fret change over a ringing string */
-    if(G.mode==='play'&&e.t+Math.max(waX,ch?Math.min(e.d*0.6,1.5):0)<eff){fxCut(e,i);diagEnd(i,'miss',now);st[i]=2;G.misses++;G.streak=0;const w=G.wp&&G.wp.i===i?G.wp:null;if(w){G.wp=null;diagNote(i,w.txt);}addPop(w?w.pop:'Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
+    if(G.mode==='play'&&e.t+Math.max(waX,ch?Math.min(e.d*0.6,1.5):0)<eff){fxCut(e,i);diagEnd(i,'miss',now);st[i]=2;G.misses++;G.streak=0;slowCheck();const w=G.wp&&G.wp.i===i?G.wp:null;if(w){G.wp=null;diagNote(i,w.txt);}addPop(w?w.pop:'Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
     if(!ch&&!e.strum&&analyser&&det.onsetAt>G.lastHitAt&&det.onsetAt>(G.wrongOnset||0)&&now-det.onsetAt<700){
       if(G.wnPick!==det.onsetAt){G.wnPick=det.onsetAt;G.wnMax=0;}
       const cp=G.capo||0;G.wnMax=Math.max(G.wnMax,...e.notes.map(n=>targetScore(n,cp)));
@@ -2913,7 +2917,7 @@ function update(dt,now){
       fxHit(e,now,i);
       if(settings.deadStrings&&e.shape&&e.strum!=='x'&&analyser){const pv=ev[i-1];const first=e.chord||!(pv&&pv.label===e.label)||now-(G.ccAt||0)>650;
         if(first){G.cc={e,i,onset:now,best:null,prevShape:pv&&pv.shape};G.ccAt=now;}/* timed from when the strum was credited, so the previous chord can't leak in */}
-      st[i]=1;G.hits++;G.streak++;G.best=Math.max(G.best,G.streak);G.lastHitAt=now;G.lastHitKey=evKey(e);
+      st[i]=1;G.hits++;G.streak++;G.missRun=0;G.best=Math.max(G.best,G.streak);G.lastHitAt=now;G.lastHitKey=evKey(e);
       if(G.hitOff==null)addPop(G.streak>=10&&G.streak%10===0?G.streak+' streak!':'Good','#5ce1a6');
       else{const g=timingGrade(G.hitOff);(G.grades=G.grades||{perfect:0,good:0,okay:0})[g.k]++;if(G.diag&&G.diag[i])G.diag[i].grade=g.k+' '+(G.hitOff>=0?'+':'')+Math.round(G.hitOff)+' ms';
         addPop(G.streak>=10&&G.streak%10===0?G.streak+' streak!':g.text,g.color);}
@@ -2941,6 +2945,31 @@ function wrongSettle(now){const w=G.wp;if(!w)return;
   if(now-w.at<WRONG_WAIT)return;
   G.wp=null;if(G.state[w.i]===2)return; // already a miss, which has its own feedback
   G.wrongAt=now;diagNote(w.i,w.txt);fxMiss(w.e,now);addPop(w.pop,'#ff5d73');}
+/* v1.129: Loop button, slow-down offer, most-missed bars, share-as-file */
+function loopLabel(){const b=$('#loopBtn');if(!b)return;const S=G.song,bpb=S?S.bpb||4:4;b.classList.toggle('on',!!G.loop);
+  if(!G.loop){b.textContent='🔁 Loop';return;}const a=Math.round(G.loop.a/bpb)+1,z=Math.round(G.loop.b/bpb);b.textContent='🔁 bar'+(z>a?'s '+a+'–'+z:' '+a);}
+function setLoop(a,b){const S=G.song;if(!S)return;const bpb=S.bpb||4,len=S.length||bpb;G.loop={a:Math.max(0,a),b:Math.min(Math.max(a+bpb,b),Math.ceil(len/bpb-1e-6)*bpb)};loopLabel();}
+$('#loopBtn').onclick=()=>{const S=G.song;if(!S)return;const bpb=S.bpb||4;
+  if(!G.loop){const a=Math.max(0,Math.floor(G.clock/bpb+1e-6))*bpb;setLoop(a,a+2*bpb);showHint('Looping 2 bars. Tap again for more, then Play',3500);return;}
+  const n=Math.round((G.loop.b-G.loop.a)/bpb);const nx=n<2?2:n<4?4:n<8?8:0;
+  if(!nx){G.loop=null;loopLabel();showHint('Loop off',2000);return;}
+  setLoop(G.loop.a,G.loop.a+nx*bpb);showHint('Looping '+nx+' bars',2500);};
+let slowShown=-1e9;
+function slowCheck(){G.missRun=(G.missRun||0)+1;
+  if(G.missRun<4||G.mode!=='play'||G.speed<=0.71||G.loop||performance.now()-slowShown<60000)return;
+  slowShown=performance.now();G.missRun=0;const el=$('#slowOffer');if(!el)return;
+  el.innerHTML='Tough bit? <button id="soSlow" class="small">Slow to 70%</button> <button id="soNo" class="small">No</button>';el.style.display='block';
+  const hide=()=>{el.style.display='none';};$('#soNo').onclick=hide;$('#soSlow').onclick=()=>{G.speed=0.7;updateButtons();hide();};setTimeout(hide,9000);}
+function missedBars(){const S=G.song,st=G.state;if(!S||!st||G.mode!=='play')return[];const bpb=S.bpb||4,m=new Map();
+  S.events.forEach((e,i)=>{if(st[i]===2){const k=Math.max(0,Math.floor(e.t/bpb+1e-6));m.set(k,(m.get(k)||0)+1);}});
+  return[...m.entries()].sort((x,y)=>y[1]-x[1]||x[0]-y[0]).slice(0,3);}
+function showMissed(){const box=$('#rMissed');if(!box)return;box.innerHTML='';const t=missedBars();if(!t.length)return;
+  const p=document.createElement('div');p.className='small';p.textContent='Most missed:';box.appendChild(p);
+  for(const [bar,n] of t){const b=document.createElement('button');b.className='small';b.style.margin='3px';b.textContent='Bar '+(bar+1)+' ×'+n+' · practise';
+    b.onclick=()=>{const bpb=G.song.bpb||4;resetRun();setLoop(bar*bpb,(bar+2)*bpb);seekTo(bar*bpb);G.speed=Math.min(G.speed,0.8);updateButtons();$('#btnPlay').onclick();};box.appendChild(b);}}
+function shareReportFile(txt){const name='fretline-report-'+(G.def&&G.def.id||'song').replace(/[^\w-]+/g,'_')+'.txt';
+  try{const f=new File([txt],name,{type:'text/plain'});if(navigator.canShare&&navigator.canShare({files:[f]})){return navigator.share({files:[f],title:'Fretline detection report'}).then(()=>true).catch(()=>false);}}catch(e){}
+  try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);return Promise.resolve(true);}catch(e){return Promise.resolve(false);}}
 function finish(){
   $('#rNext').style.display='none';
   G.playing=false;G.finished=true;recStop();keepAwake(false);updateButtons();
@@ -2965,7 +2994,9 @@ function finish(){
       try{await navigator.clipboard.writeText(txt);ok=true;b.textContent='✓ Copied. Paste it in a message';}catch(e){}
       if(!ok)try{if(navigator.share){await navigator.share({title:'Fretline detection report',text:txt});ok=true;}}catch(e){}
       if(!ok){showMsg('Detection report','<textarea readonly style="min-height:220px">'+esc(txt)+'</textarea><p class="small">Select all and copy.</p>');}};
-    box.appendChild(b);}}}
+    box.appendChild(b);
+    const b2=document.createElement('button');b2.textContent='↗ Share as .txt file';b2.className='small';b2.style.marginLeft='6px';b2.onclick=async()=>{const ok=await shareReportFile(diagReport());b2.textContent=ok?'✓ Shared / saved':'Could not share, use Copy';};box.appendChild(b2);}}}
+  showMissed();
   {const ds=G.deadStats;const box=$('#rStrings');if(box){box.textContent='';if(ds&&G.mode==='play'){const fmt=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([s,n])=>SNAME[s]+' ×'+n).join(', ');
     const parts=[];if(Object.keys(ds.dead).length)parts.push('Dead strings: '+fmt(ds.dead));if(Object.keys(ds.ring).length)parts.push('Muted strings that rang: '+fmt(ds.ring));
     box.textContent=parts.length?parts.join(' · '):'';}}}
@@ -4364,7 +4395,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.128';
+const APP_VERSION='1.129';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
