@@ -2443,9 +2443,16 @@ function resetRun(){
   G.playing=false;G.listen=false;G.finished=false;G.pops=[];G.lastHitKey=null;G.lastHitAt=-1;G.cf=0;G.cfIdx=-1;G.usedOnset=performance.now();G.wrongOnset=performance.now();G.wrongAt=0;G.wp=null;G.frames=null;G.grades={perfect:0,good:0,okay:0};G.ignoreOnsetUntil=0;G.offs=[];G.diag={};G.cc=null;G.strFb=null;G.deadStats=null;
   $('#results').classList.remove('show');G.bandIdx=0;updateButtons();
 }
+/* v1.120: jump to a beat (drag the highway) and carry on from there; also used to resume a paused Listen */
+function resumeFrom(){const S=G.song;if(!S)return;const ev=S.events;let i=0;while(i<ev.length&&ev[i].t<G.clock-1e-6)i++;
+  if(G.listen)G.playedIdx=i;G.fxIdx=i;G.fxSched={};G.fxOn=true;G.lastClickBeat=Math.floor(G.clock+1e-6)-1;try{bandSeek();}catch(e){}}
+function seekTo(beat){const S=G.song;if(!S)return;const ev=S.events;const c=Math.max(-S.bpb,Math.min(S.length||0,beat));G.clock=c;
+  for(let i=0;i<ev.length;i++)G.state[i]=ev[i].t<c-1e-6?3:0;G.scan=0;while(G.scan<ev.length&&G.state[G.scan])G.scan++;
+  G.finished=false;G.waiting=false;G.cf=0;G.cfIdx=-1;G.pops=[];try{$('#results').classList.remove('show');}catch(e){}
+  resumeFrom();}
 function updateButtons(){
   $('#btnPlay').textContent=G.playing&&!G.listen?'❚❚ Pause':'▶ Play';
-  $('#btnListen').textContent=G.listen&&G.playing?'■ Stop':'Listen';
+  $('#btnListen').textContent=G.listen?(G.playing?'❚❚ Pause':'▶ Resume'):'Listen';
   $('#btnListen').classList.toggle('on',G.listen);
   $('#lsTune').style.display=G.listen&&G.playing&&(!settings.listenTuned||G.tuneAsked)?'inline-flex':'none';syncLsVal();
   document.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.mode===G.mode));
@@ -2468,7 +2475,8 @@ $('#btnPlay').onclick=async()=>{
 $('#btnListen').onclick=async()=>{
   await ensureAudio();
   if(settings.sound!=='basic'&&sampler.id!==settings.sound)await loadForPlayer();
-  if(G.listen&&G.playing){resetRun();return;}
+  if(G.listen&&G.playing){G.playing=false;stopVoices();keepAwake(false);updateButtons();return;} /* v1.120: pause, not stop */
+  if(G.listen&&!G.playing&&!G.finished&&G.clock>-G.song.bpb+1e-6){await prepBand();resumeFrom();G.playing=true;keepAwake(true);updateButtons();return;}
   resetRun();diag.sample=0;diag.basic=0;diag.missing.clear();diag.where=(G.def&&G.def.title||'')+' ['+(G.def&&G.def.cat)+']';diag.sound=sampler.id+' / setting '+settings.sound;
   if(settings.sound!=='basic')showHint('🎸 '+((SOUNDS.find(s=>s[0]===sampler.id)||[,'Basic sound'])[1]),2500);
   await prepBand();
@@ -2957,6 +2965,14 @@ function resizeCanvas(){
   G._gb=gb;G._ctrlH=gb&&bt?bt.getBoundingClientRect().height:0;
   if(gb){G._Z=Math.round(G._ctrlH+Math.max(34,32*k));const hh=G._Z-4;if(bt)bt.style.paddingLeft=Math.round(hh*1.3+hh*0.22+16)+'px';}
   const r=cv.getBoundingClientRect();if(!r.width)return;const dpr=Math.min(2,window.devicePixelRatio||1);cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr);cx.setTransform(dpr,0,0,dpr,0,0);CW=r.width;CH=r.height;}
+let hwDrag=null;
+cv.style.touchAction='none';
+cv.addEventListener('pointerdown',e=>{if(!G.song||curScreen!=='player')return;hwDrag={id:e.pointerId,x0:e.clientX,c0:G.clock,was:G.playing,moved:false};try{cv.setPointerCapture(e.pointerId);}catch(_){}});
+cv.addEventListener('pointermove',e=>{const d=hwDrag;if(!d||e.pointerId!==d.id)return;const dx=e.clientX-d.x0;
+  if(!d.moved){if(Math.abs(dx)<8)return;d.moved=true;if(G.playing){G.playing=false;stopVoices();}showHint('Drag to move through the song, let go to carry on',2500);}
+  const ppb=ppb0||60;seekTo(d.c0-dx/ppb);});
+function endDrag(e){const d=hwDrag;if(!d||(e&&e.pointerId!==d.id))return;hwDrag=null;if(d.moved){if(d.was){G.playing=true;keepAwake(true);}updateButtons();}}
+cv.addEventListener('pointerup',endDrag);cv.addEventListener('pointercancel',endDrag);
 window.addEventListener('resize',()=>{if(curScreen==='player')resizeCanvas();});
 const SCOL=['#ff6b81','#ffa94d','#ffd43b','#69db7c','#4dabf7','#b197fc'];
 const STRC=SCOL.slice(); /* v1.75: colours of the strings themselves (lines, letters, lanes, target rings); notes keep SCOL */
@@ -4320,7 +4336,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.119';
+const APP_VERSION='1.120';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
