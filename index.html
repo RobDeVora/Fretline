@@ -361,6 +361,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field"><label>Timing window</label><select id="sTiming"><option value="1">Normal</option><option value="1.5">Relaxed</option><option value="2">Very relaxed</option></select><span class="small">How early or late a note can be and still count.</span></div>
     <div class="field"><label>Chord matching</label><select id="sChordM"><option value="strict">Strict</option><option value="standard">Standard</option><option value="beginner">Beginner</option></select><span class="small">How complete a strummed chord must sound to count. Strict: every string. Standard: most strings, but a wrong extra note counts against you. Beginner: most strings, and a brushed extra string is fine. A different chord never counts, and single notes aren't affected.</span></div>
     <div class="field inline"><label>Show what I'm playing in the strike zone</label><input type="checkbox" id="sPlayed"></div>
+    <div class="field inline"><label>Standard chord shapes in songs (F at fret 1, not 5-6-5)</label><input type="checkbox" id="sStd"></div>
     <div class="field inline"><label>Show the timing window as a shaded band</label><input type="checkbox" id="sBand"></div>
     <div class="small" style="margin-top:-6px">Off: just aim for the rings on the hit line. The window still works the same.</div>
     <div class="field"><label>Sound delay: <span id="sDelV"></span></label><input type="range" id="sDel" min="-10" max="400" step="10"><span class="small">How long the app's sound takes to reach your ears. Bluetooth headphones add 150–300 ms; slide left to the end for Auto. The band, Listen and the count-in play this much early so you hear them right on the line.</span>
@@ -1441,6 +1442,23 @@ function retuneEvents(events){return events.map(e=>{
   const ok=e.notes.every(n=>n.s!=null&&OPEN[n.s]+n.f===n.midi);if(ok)return e;
   const ms=e.notes.map(n=>n.midi);let out=ms.length===1?[noteObj(foldRange(ms[0]))].filter(Boolean):assignStrings(ms.map(foldRange));
   if(!out.length)return e;out=out.map((o,i)=>({...e.notes[i],...o}));return {...e,notes:out,pcs:[...new Set(out.map(n=>((n.midi%12)+12)%12))]};});}
+/* v1.126: a song written out as upper-neck triads (F as 5-6-5 on the top strings, C as 3-5-5) is played as the common open /
+   first-position chord of the same name (F at fret 1) instead. Only steps of 3+ notes that clearly name one chord, no
+   hammer-ons/slides; the pitch classes stay the same, so listening works as before. Turn off: Settings › Standard chord shapes. */
+function standardShapes(events){
+  if(!events||!events.some(e=>e.notes&&e.notes.length>=3))return events;
+  const out=events.map(e=>{
+    if(!e.notes||e.notes.length<3||e.strum||e.chord||e.rest||e.ld||e.notes.some(n=>n.tech||n.bend))return e;
+    const c=estChord([e],e.t,e.t+(e.d||1),null);if(!c||!c.name)return e;
+    const pcs=chordPCs(c.name);if(!pcs)return e;
+    if(!e.notes.every(n=>pcs.includes(((n.midi%12)+12)%12)))return e;
+    const ce=chordEvent(c.name,e.t,e.d);if(!ce.notes.length)return e;
+    const maxF=Math.max(...e.notes.map(n=>n.f)),newMax=Math.max(...ce.notes.map(n=>n.f));
+    if(newMax>=maxF&&maxF<=4)return e; /* already low on the neck */
+    return {...e,...ce};});
+  if(events.lyrics)out.lyrics=events.lyrics;
+  return out;
+}
 function buildSong(def){
   if(def._built)return def._built;
   let events;
@@ -1453,6 +1471,7 @@ function buildSong(def){
     if(def.kind==='tab')events=parseTab(def.src).events;
     else events=parseChordSheet(def.src,def.cb||4);
   }
+  if(!def.noChords&&(typeof settings==='undefined'||settings.stdShapes!==false)&&def.cat!=='lesson'&&def.cat!=='gen'&&!def.gen&&!def.lesson)events=standardShapes(events);
   if(!def.noChords)inferChords(events,def.bpb||4);
   const song={id:def.id,title:def.title,cat:def.cat,bpm:def.bpm||90,bpb:def.bpb||4,events,length:songLength(events),gen:def.gen||null,key:def.key||null,lyrics:(events&&events.lyrics)||def.lyrics||null,
     lyricsSrc:events&&events.lyrics?'sheet':def.lyrics?'file':null,sheetLyrics:(events&&events.lyrics)||null,vocal:def.vocal||null,vocalSrc:def.vocal?'file':null};
@@ -3445,7 +3464,7 @@ function tunerUpdate(){
 let settingsOpen=false;
 function syncSettingsUI(){{const P=IS_APP&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;
   $('#appBuild').innerHTML=!IS_APP?'':P&&P.outputRoute?'Android app: latest build (full screen, sound delay per output'+(outRoute?' · sound now on '+ROUTE_NAMES[outRoute]:'')+')':'Android app: an older build. <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">Install the latest Fretline.apk</a> for full screen and a sound delay for each output.';}$('#sFingerGuide').checked=settings.fingerGuide!==false;$('#cNoteBy').value=settings.noteBy==='string'?'string':'finger';$('#sLyn').value=settings.lyrNudge||0;$('#sLynV').textContent=((settings.lyrNudge||0)>0?'+':'')+(+settings.lyrNudge||0).toFixed(1)+' s';$('#sVoxLib').checked=settings.vocalLibrary!==false;$('#sVoxFile').checked=settings.vocalFiles!==false;$('#sVoxMade').checked=settings.vocalMadeUp!==false;
-  $('#sPlayed').checked=settings.played!==false;$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sChordM').value=settings.chordMatch||'strict';$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+  $('#sPlayed').checked=settings.played!==false;$('#sStd').checked=settings.stdShapes!==false;$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sChordM').value=settings.chordMatch||'strict';$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();fillMicList();};
@@ -3480,6 +3499,7 @@ $('#sStrumView').onchange=e=>{settings.strumView=e.target.value;saveSettings();}
 $('#sTiming').onchange=e=>{settings.timing=+e.target.value;saveSettings();};
 $('#sChordM').onchange=e=>{settings.chordMatch=e.target.value;saveSettings();};
 $('#sPlayed').onchange=e=>{settings.played=e.target.checked;saveSettings();};
+$('#sStd').onchange=e=>{settings.stdShapes=e.target.checked;saveSettings();G.def&&delete G.def._built;showHint('Applies the next time you open a song',3000);};
 $('#sBand').onchange=e=>{settings.band=e.target.checked;saveSettings();};
 $('#sPhones').onchange=e=>{settings.headphones=e.target.checked;saveSettings();};
 $('#sDel').oninput=e=>{const v=+e.target.value;settings.soundDelay=v<0?-1:v;saveSettings();syncSettingsUI();};
@@ -4341,7 +4361,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.126';
+const APP_VERSION='1.127';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

@@ -68,6 +68,7 @@ sections:[
  {n:'I\'m using headphones',t:'Turn on when the app\'s sound goes to headphones. The microphone then cannot hear the band or the hit and miss sounds, so Fretline stops making allowances for them and reacts faster to your playing.',ids:['sPhones']},
  {n:'Metronome click while playing',t:'A click on every beat while you play.',ids:['sMetro']}]},
 {id:'settings-sing',title:'Settings › Singing',items:[
+ {n:'Standard chord shapes in songs',t:'Some song files write chords as small triads high on the neck (F as 5-6-5 on the top three strings). With this on, Fretline plays those as the common open or first-position chord of the same name instead (F at fret 1), with the same notes, so listening still works. Lessons are left as written. Turn it off to play the song exactly as the file has it. It applies the next time you open a song.',ids:['sStd']},
  {n:'Show what I\'m playing in the strike zone',t:'While you play, a ring in the strike zone shows the string and fret Fretline thinks you are playing (green if it is the right note, red if not). Turn it off if it distracts you while you fiddle between notes. Hits and misses are judged the same either way.',ids:['sPlayed']},
  {n:'Lyrics earlier / later',t:'If the words run behind the singing, slide to the right to show them sooner. Left shows them later. It moves every song by the same amount.',ids:['sLyn']},
  {n:'Real tunes in library songs',t:'Use the real melody for library songs that have one.',ids:['sVoxLib']},
