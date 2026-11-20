@@ -9,16 +9,17 @@ async def main():
     async def route(r):await r.fulfill(path=S+r.request.url.split('/')[-1],content_type='audio/mpeg')
     await pg.route(re.compile(r'.*(jsdelivr|unpkg).*tonejs.*'),route)
     await pg.goto('file://'+sys.argv[1]+'/index.html');await pg.wait_for_timeout(500)
+    if os.environ.get('SKIP'):await pg.evaluate('window.__skip='+os.environ['SKIP']+';window.__seq='+(os.environ.get('SEQ') or '[[62,4],[62,4],[62,4],[62,4],[57,3],[57,3],[57,3],[60,4],[60,4]]')+';')
     r=await pg.evaluate("""async()=>{await ensureAudio();await loadSound('rec/acoustic');const sr=44100;
       // [chord, what actually happens]
-      const seq=[[60,4],[62,4],[63,4],[60,4],[64,5],[62,4],[62,4],[57,3],[60,4],[57,3],[60,4],[55,3],[52,2],[52,2],[50,2],[52,2],[57,3]];const plan=seq;
+      const seq=window.__seq||[[60,4],[62,4],[63,4],[60,4],[64,5],[62,4],[62,4],[57,3],[60,4],[57,3],[60,4],[55,3],[52,2],[52,2],[50,2],[52,2],[57,3]];const plan=seq;
       const gap=window.__gap||0.5,T0=0.3;const off=new OfflineAudioContext(1,Math.round(sr*(T0+plan.length*gap+1)),sr);const an=off.createAnalyser();an.fftSize=4096;an.smoothingTimeConstant=0;
       const ring={};
-      seq.forEach(([m,st],i)=>{const t=T0+i*gap;const key=Object.keys(sampler.buffers).map(Number).reduce((a,b)=>Math.abs(b-m)<Math.abs(a-m)?b:a);const src=off.createBufferSource();src.buffer=sampler.buffers[key];src.playbackRate.value=Math.pow(2,(m-key)/12);const g=off.createGain();g.gain.value=window.__gain||0.5;src.connect(g);g.connect(an);if(ring[st])ring[st].stop(t);src.start(t);ring[st]=src;});
+      seq.forEach(([m,st,m2,st2],i)=>{if((window.__skip||[]).includes(i))return;const t=T0+i*gap;const play=(m,st)=>{const key=Object.keys(sampler.buffers).map(Number).reduce((a,b)=>Math.abs(b-m)<Math.abs(a-m)?b:a);const src=off.createBufferSource();src.buffer=sampler.buffers[key];src.playbackRate.value=Math.pow(2,(m-key)/12);const g=off.createGain();g.gain.value=window.__gain||0.5;src.connect(g);g.connect(an);if(ring[st])ring[st].stop(t);src.start(t);ring[st]=src;};play(m,st);if(m2!=null)play(m2,st2);});
       {const nb=off.createBuffer(1,off.length,sr);const nd=nb.getChannelData(0);for(let i=0;i<nd.length;i++)nd[i]=(Math.random()-0.5)*(window.__noise||0.0015);const ns=off.createBufferSource();ns.buffer=nb;ns.connect(an);ns.start(0);}
       const realA=actx;actx=off;analyser=an;timeBuf=new Float32Array(4096);freqBuf=new Float32Array(2048);
       det.onsetAt=-1e9;det.stableMidi=null;det.hist=[];det.armed=true;det.lastRms=0;muteUntil=0;settings.latency=0;settings.headphones=true;settings.deadStrings=true;settings.fx='off';settings.backing=false;
-      const evs=seq.map(([m,st],i)=>({t:i,d:1,notes:[{s:st,f:m-OPEN[st],midi:m}]}));
+      const evs=seq.map(([m,st,m2,st2],i)=>({t:i,d:1,notes:[{s:st,f:m-OPEN[st],midi:m}].concat(m2!=null?[{s:st2,f:m2-OPEN[st2],midi:m2}]:[])}));
       G.song={bpm:60/gap,bpb:4,events:evs,length:plan.length};G.speed=1;G.mode='play';G.state=new Uint8Array(evs.length);G.scan=0;G.playing=true;G.listen=false;G.hits=0;G.misses=0;G.streak=0;G.pops=[];
       G.lastHitAt=-1;G.usedOnset=-1;G.ignoreOnsetUntil=0;G.cc=null;G.ccHist={};G.deadStats=null;G.band=null;
       const out=plan.map(()=>({pops:[],fb:''}));let lastPops=0,lastFb=null;const step=1/60;

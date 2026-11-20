@@ -698,6 +698,8 @@ function dropUnheard(sec,log){if(!VOC)return sec;const ph=vocalPhrases(VOC).segs
 function tidyEnds(sec){let n=0;for(let i=0;i+1<sec.length;i++){const L=sec[i],S=L.segs,k=S.length;if(k<2)continue;const lim=sec[i+1].t0-0.35,last=S[k-1],prev=S[k-2];
     if(last.t>lim){const nt=Math.max(lim,prev.t+0.1);if(nt<last.t){last.t=nt;last.d=Math.max(0.35,sec[i+1].t0-nt);prev.d=Math.max(0.1,Math.min(prev.d,nt-prev.t));n++;}}}
   return n;}
+/* a pause between chunks that is NOT a timer: after ~5 minutes in the background the browser slows timers to one tick a minute, which stalled the lyric step until the app was opened again */
+const yieldNow=()=>new Promise(r=>{const c=new MessageChannel();c.port1.onmessage=()=>{c.port1.close();r();};c.port2.postMessage(0);});
 async function ctcLyrics(text,mixL,mixR,bpm,b0,vox){
   const lines=lyrLines(text);if(!lines.length)return null;
   status('Preparing the lyrics…');const x=await toRate([mixL,mixR],16000);
@@ -713,14 +715,14 @@ async function ctcLyrics(text,mixL,mixR,bpm,b0,vox){
       for(let b=0;b<nb;b++){let a=0;for(let i=0;i<nf;i++){const d=f.data[i*nb+b]-m[b];a+=d*d;}sd[b]=Math.sqrt(a/nf);}
       const inp=new Float32Array(nb*nf);for(let i=0;i<nf;i++)for(let b=0;b<nb;b++)inp[b*nf+i]=(f.data[i*nb+b]-m[b])/(sd[b]+1e-5);
       const o=await sess.run({audio_signal:new ort.Tensor('float32',inp,[1,nb,nf]),length:new ort.Tensor('int64',BigInt64Array.from([BigInt(nf)]),[1])});
-      const lp=o[sess.outputNames[0]];parts.push(lp.data);T+=lp.dims[1];await new Promise(r=>setTimeout(r,0));}
+      const lp=o[sess.outputNames[0]];parts.push(lp.data);T+=lp.dims[1];await yieldNow();}
     const all=new Float32Array(T*V);let off=0;for(const p of parts){all.set(p,off);off+=p.length;}return {all,T};};
   /* both listens (mix, singing alone) run side by side, each in its own thread; if a thread can't start, the same work runs here one after the other */
   let vs=null;if(vox&&vox.length>16000*5){let pk=0;for(let i=0;i<vox.length;i+=7)pk=Math.max(pk,Math.abs(vox[i]));const g=pk>1e-6?0.5/pk:1;vs=new Float32Array(vox.length);for(let i=0;i<vox.length;i++)vs[i]=vox[i]*g;}
   const prog={mix:0,voice:0};const showProg=()=>status('Listening for the words… '+Math.round((vs?(prog.mix+prog.voice)/2:prog.mix)*100)+'%');
   const viaWorker=(sig,tag)=>new Promise((ok,bad)=>{let w;try{w=new Worker('ctcworker.js');}catch(e){return bad(e);}
     w.onmessage=m=>{const d=m.data;if(d.prog!=null){prog[tag]=d.prog;showProg();}else if(d.error){w.terminate();bad(new Error(d.error));}else{prog[tag]=1;w.terminate();ok({all:d.all,T:d.T});}};
-    w.onerror=e=>{try{w.terminate();}catch(_){}bad(new Error(e.message||'worker failed'));};
+    w.onerror=e=>{try{w.terminate();}catch(_){}bad(new Error((e.message||'worker failed')+(e.filename?' @'+String(e.filename).split('/').pop()+':'+e.lineno:'')));};
     w.postMessage({sig:sig.slice(),model:model.slice(),ortBase:ORT_BASE,tag,id:tag});});
   const one=async(sig,tag)=>{try{return await viaWorker(sig,tag);}catch(e){log('lyrics: side-by-side listen not possible here ('+String(e&&e.message||e).slice(0,70)+'), listening one after the other');return await listen(sig,tag);}};
   let all,T;
@@ -784,7 +786,7 @@ async function runLab(){
   $('go').disabled=true;R.length=0;prog(0);$('out').style.display='none';
   const t0=performance.now();
   try{
-    log('Fretline Lab (page v1.125) · split a song · '+new Date().toISOString().slice(0,16).replace('T',' '));
+    log('Fretline Lab (page v1.126) · split a song · '+new Date().toISOString().slice(0,16).replace('T',' '));
     log('device: '+navigator.userAgent.replace(/\s+/g,' ').slice(0,160));
     log('cores '+(navigator.hardwareConcurrency||'?')+' · memory '+(navigator.deviceMemory?navigator.deviceMemory+' GB':'?')+' · WebGPU '+(('gpu' in navigator)?'present':'absent')+' · threads '+(self.crossOriginIsolated?'yes (cross-origin isolated)':'no (single thread)'));
     log('service worker: '+(navigator.serviceWorker&&navigator.serviceWorker.controller?'in charge':'not in charge')+' · reload done '+(sessionStorage.getItem('labReload')?'yes':'no'));

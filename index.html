@@ -360,6 +360,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field"><label>Latency compensation: <span id="sLatV"></span> ms</label><input type="range" id="sLat" min="0" max="600" step="10"><span class="small">Raise this if you play on time but notes count as late.</span></div>
     <div class="field"><label>Timing window</label><select id="sTiming"><option value="1">Normal</option><option value="1.5">Relaxed</option><option value="2">Very relaxed</option></select><span class="small">How early or late a note can be and still count.</span></div>
     <div class="field"><label>Chord matching</label><select id="sChordM"><option value="strict">Strict</option><option value="standard">Standard</option><option value="beginner">Beginner</option></select><span class="small">How complete a strummed chord must sound to count. Strict: every string. Standard: most strings, but a wrong extra note counts against you. Beginner: most strings, and a brushed extra string is fine. A different chord never counts, and single notes aren't affected.</span></div>
+    <div class="field inline"><label>Show what I'm playing in the strike zone</label><input type="checkbox" id="sPlayed"></div>
     <div class="field inline"><label>Show the timing window as a shaded band</label><input type="checkbox" id="sBand"></div>
     <div class="small" style="margin-top:-6px">Off: just aim for the rings on the hit line. The window still works the same.</div>
     <div class="field"><label>Sound delay: <span id="sDelV"></span></label><input type="range" id="sDel" min="-10" max="400" step="10"><span class="small">How long the app's sound takes to reach your ears. Bluetooth headphones add 150–300 ms; slide left to the end for Auto. The band, Listen and the count-in play this much early so you hear them right on the line.</span>
@@ -2776,7 +2777,10 @@ function matchEvent(e,i,now){
     if(mi.score>=0.6){const fm=midiToFreq(mh);for(const n of e.notes){const t=n.midi+cp,ft=midiToFreq(t);
       const hs=[1,2,3,4,5,6,7,8].filter(x=>{const f=ft*x,k=Math.round(f/fm);return ft*x>=150&&!(k>=1&&Math.abs(f-k*fm)/f<0.015);}).slice(0,4);
       const inf={};const sc=hs.length?targetScoreBuf(timeBuf,actx.sampleRate,t,hs,inf):0;if(sc<0.6||(inf.T||0)<0.2*mi.T){G.tcf=0;G.tRiseAt=null;return false;}}}}
-  if(ti.score>=0.63&&(rose||legato)&&(!tn||e.notes.length<2||partnerOk(e,tn,cp))){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){G.tHist=[];G.tHistOK=[];return true;}return false;}
+  /* v1.126: a note that jumped in strength must also come with a pick made inside this step's window (before, a
+     chord or note still ringing from the step before could jump on its own and be credited as the next step, "picks 0/0") */
+  const pickedHere=legato||(pick>G.lastHitAt&&(G._winAt==null||pick>=G._winAt-30));
+  if(ti.score>=0.63&&(rose||legato)&&pickedHere&&(!tn||e.notes.length<2||partnerOk(e,tn,cp))){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){G.tHist=[];G.tHistOK=[];return true;}return false;}
   G.tcf=0;G.tRiseAt=null;return false;
 }
 // the right pitch (any octave if allowed); a bent note counts anywhere from the fretted pitch up to its target
@@ -3071,7 +3075,7 @@ function drawGuideBottom(W,H,Z,ctrlH,k){
     if(n.shape||(n.notes&&n.notes.length>1)){const t=n.label||n.chord||'chord';if(t===lastChip)continue;lastChip=t;cx.font='bold '+Math.round(r2*1.25)+'px -apple-system,sans-serif';const tw=cx.measureText(t).width+10;if(x+tw>W-6)break;
       cx.fillStyle='rgba(255,255,255,.14)';rr(x,ty-r2,tw,r2*2,r2);cx.fill();cx.fillStyle='#fff';cx.textAlign='center';cx.fillText(t,x+tw/2,ty+1);x+=tw+5;shown++;continue;}
     lastChip=null;const fg=(n.notes||[]).map(m=>m.fg).find(v=>v!=null);if(fg==null)continue;
-    cx.beginPath();cx.arc(x+r2,ty,r2,0,7);cx.fillStyle=FCOL[fg];cx.fill();cx.fillStyle=ink(FCOL[fg]);cx.textAlign='center';cx.font='bold '+Math.round(r2*1.1)+'px -apple-system,sans-serif';cx.fillText(String(fg),x+r2,ty+1);x+=r2*2+5;shown++;}
+    cx.beginPath();cx.arc(x+r2,ty,r2,0,7);cx.fillStyle=FCOL[fg];cx.fill();cx.fillStyle=ink(FCOL[fg]);cx.textAlign='center';{const nf=(n.notes||[]).find(m=>m.fg===fg),lb=String(nf&&nf.f!=null?nf.f:fg);cx.font='bold '+Math.round(r2*(lb.length>1?0.9:1.1))+'px -apple-system,sans-serif';cx.fillText(lb,x+r2,ty+1);}x+=r2*2+5;shown++;}
   cx.textAlign=ta;cx.textBaseline=tb;
 }
 function drawFingerGuide(y,W,h,k,shade){
@@ -3120,7 +3124,7 @@ function drawFingerGuide(y,W,h,k,shade){
       const t=n.label||n.chord||'chord';if(t===lastChip){shown--;continue;}lastChip=t;cx.font='bold '+Math.round(r2*1.3)+'px -apple-system,sans-serif';const tw=cx.measureText(t).width+8;if(x+tw>W-4)break;
       cx.fillStyle='rgba(255,255,255,.14)';rr(x,qy-r2,tw,r2*2,r2);cx.fill();cx.fillStyle='#fff';cx.textAlign='center';cx.fillText(t,x+tw/2,qy+1);x+=tw+4;continue;}
     lastChip=null;const fg=fgs.length?fgs[0]:null;if(fg==null)continue;
-    cx.beginPath();cx.arc(x+r2,qy,r2,0,7);cx.fillStyle=FCOL[fg];cx.fill();cx.fillStyle=ink(FCOL[fg]);cx.textAlign='center';cx.font='bold '+Math.round(r2*1.1)+'px -apple-system,sans-serif';cx.fillText(String(fg),x+r2,qy+1);x+=r2*2+4;}
+    cx.beginPath();cx.arc(x+r2,qy,r2,0,7);cx.fillStyle=FCOL[fg];cx.fill();cx.fillStyle=ink(FCOL[fg]);cx.textAlign='center';{const nf=(n.notes||[]).find(m=>m.fg===fg),lb=String(nf&&nf.f!=null?nf.f:fg);cx.font='bold '+Math.round(r2*(lb.length>1?0.9:1.1))+'px -apple-system,sans-serif';cx.fillText(lb,x+r2,qy+1);}x+=r2*2+4;}
   cx.textAlign=ta;cx.textBaseline=tb;
 }
 function drawLyrics(lines,y,W,h,k,shade){
@@ -3270,7 +3274,7 @@ function draw(now){
     cx.restore();}}
   // what you're playing right now, on the string you most likely played it on: green when it's the right note,
   // red when it isn't, so a wrong string shows up as a red mark on that string
-  if(G.playing&&!G.listen&&det.stableMidi!=null&&analyser&&det.rms>=gate()&&performance.now()-Math.max(det.onsetAt,det.pitchOnsetAt||-1)<1500){
+  if(settings.played!==false&&G.playing&&!G.listen&&det.stableMidi!=null&&analyser&&det.rms>=gate()&&performance.now()-Math.max(det.onsetAt,det.pitchOnsetAt||-1)<1500){
     const ni=firstPending();const ne=ni>=0?ev[ni]:null;const want=ne&&!ne.strum&&!ne.chord&&ne.notes.length?ne.notes[0]:null;
     const prevE=G.lastHitKey&&ni>0?ev[ni-1]:null;
     const pp=playedPos(det.stableMidi,want||(prevE&&prevE.notes[0])||null);
@@ -3441,7 +3445,7 @@ function tunerUpdate(){
 let settingsOpen=false;
 function syncSettingsUI(){{const P=IS_APP&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;
   $('#appBuild').innerHTML=!IS_APP?'':P&&P.outputRoute?'Android app: latest build (full screen, sound delay per output'+(outRoute?' · sound now on '+ROUTE_NAMES[outRoute]:'')+')':'Android app: an older build. <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">Install the latest Fretline.apk</a> for full screen and a sound delay for each output.';}$('#sFingerGuide').checked=settings.fingerGuide!==false;$('#cNoteBy').value=settings.noteBy==='string'?'string':'finger';$('#sLyn').value=settings.lyrNudge||0;$('#sLynV').textContent=((settings.lyrNudge||0)>0?'+':'')+(+settings.lyrNudge||0).toFixed(1)+' s';$('#sVoxLib').checked=settings.vocalLibrary!==false;$('#sVoxFile').checked=settings.vocalFiles!==false;$('#sVoxMade').checked=settings.vocalMadeUp!==false;
-  $('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sChordM').value=settings.chordMatch||'strict';$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+  $('#sPlayed').checked=settings.played!==false;$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sChordM').value=settings.chordMatch||'strict';$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();fillMicList();};
@@ -3475,6 +3479,7 @@ $('#cNoteBy').onchange=e=>{settings.noteBy=e.target.value;saveSettings();};
 $('#sStrumView').onchange=e=>{settings.strumView=e.target.value;saveSettings();};
 $('#sTiming').onchange=e=>{settings.timing=+e.target.value;saveSettings();};
 $('#sChordM').onchange=e=>{settings.chordMatch=e.target.value;saveSettings();};
+$('#sPlayed').onchange=e=>{settings.played=e.target.checked;saveSettings();};
 $('#sBand').onchange=e=>{settings.band=e.target.checked;saveSettings();};
 $('#sPhones').onchange=e=>{settings.headphones=e.target.checked;saveSettings();};
 $('#sDel').oninput=e=>{const v=+e.target.value;settings.soundDelay=v<0?-1:v;saveSettings();syncSettingsUI();};
@@ -4336,7 +4341,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.125';
+const APP_VERSION='1.126';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

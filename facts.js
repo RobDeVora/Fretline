@@ -59,7 +59,7 @@ sections:[
  {n:'Strums show',t:'Chord fingering draws the fret number on each string. Big D / U arrows draws the chord name with large down and up arrows.',ids:['sStrumView']},
  {n:'Show note names instead of fret numbers',t:'Notes show their letter (like E or G) instead of the fret.',ids:['sNames']},
  {n:'Show fretboard below the highway',t:'A picture of the neck under the highway. Turn off to hide it and give the highway more room.',ids:['sFretboard']},
- {n:'Finger guide',t:'A strip under the strings showing where your hand sits, which finger plays the next note and the fingers coming up (1 index, 2 middle, 3 ring, 4 pinky, 0 open string).',ids:['sFingerGuide']},
+ {n:'Finger guide',t:'A strip under the strings showing where your hand sits, which finger plays the next note and the notes coming up after "then". The next-note circles keep the finger colour (1 blue, 2 green, 3 yellow, 4 red, grey open) but show the FRET number to play, so 5 means fret 5, not finger 5. In the first part (what to press now) the number inside the circle is the finger and the text next to it is the string and fret.',ids:['sFingerGuide']},
  {n:'Point out dead strings in chords',t:'After you strum a chord, a ✓ or ✕ beside each string shows which rang, and an orange ! marks a muted string that rang. A string that cannot be told apart from another one in the chord is left unmarked.',ids:['sDead']}]},
 {id:'settings-sound',title:'Settings › Sound',items:[
  {n:'Guitar sound',t:'The sound Listen uses. Basic is built in and works offline. Starred choices are real guitar recordings that download the first time you use them. ▶ Test plays the sound.',ids:['sSound','sPreview']},
@@ -68,6 +68,7 @@ sections:[
  {n:'I\'m using headphones',t:'Turn on when the app\'s sound goes to headphones. The microphone then cannot hear the band or the hit and miss sounds, so Fretline stops making allowances for them and reacts faster to your playing.',ids:['sPhones']},
  {n:'Metronome click while playing',t:'A click on every beat while you play.',ids:['sMetro']}]},
 {id:'settings-sing',title:'Settings › Singing',items:[
+ {n:'Show what I\'m playing in the strike zone',t:'While you play, a ring in the strike zone shows the string and fret Fretline thinks you are playing (green if it is the right note, red if not). Turn it off if it distracts you while you fiddle between notes. Hits and misses are judged the same either way.',ids:['sPlayed']},
  {n:'Lyrics earlier / later',t:'If the words run behind the singing, slide to the right to show them sooner. Left shows them later. It moves every song by the same amount.',ids:['sLyn']},
  {n:'Real tunes in library songs',t:'Use the real melody for library songs that have one.',ids:['sVoxLib']},
  {n:'Melody and words from MIDI and MusicXML files',t:'When you load a MIDI or MusicXML file with a vocal part, use it as the tune and the words.',ids:['sVoxFile']},
