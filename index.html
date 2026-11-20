@@ -29,6 +29,7 @@ label{color:var(--muted);font-size:13px}
 header{display:flex;align-items:center;gap:8px;padding:10px 14px;flex-wrap:wrap}
 header h1{font-size:22px;margin:0;flex:1 1 90px;letter-spacing:.3px}
 header h1 span{color:var(--accent)}
+#homeNav{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:0 14px 10px}#homeNav button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px;font-size:12px;white-space:nowrap}#homeNav button b{font-size:18px;font-weight:400}
 .banner{margin:0 14px 8px;padding:10px 12px;border-radius:12px;background:var(--panel);border:1px solid var(--line);display:flex;align-items:center;gap:10px;font-size:14px}
 .banner .dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
 .banner.ok .dot{background:var(--accent)} .banner.err .dot{background:var(--bad)}
@@ -137,11 +138,14 @@ details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14p
   <header>
     <h1>Fret<span>line</span></h1>
     <button id="btnInstall" class="primary" style="display:none">Install</button>
-    <button id="btnTuner">Tuner</button>
-    <button id="btnTut">🎓 Tutorials</button>
-    <button id="btnFacts">📖 Facts</button>
-    <button id="btnSettings">Settings</button>
+    <button id="btnSettings">⚙ Settings</button>
   </header>
+  <nav id="homeNav">
+    <button id="btnTuner"><b>🎚</b>Tuner</button>
+    <button id="btnLab"><b>🧪</b>Lab</button>
+    <button id="btnTut"><b>🎓</b>Tutorials</button>
+    <button id="btnFacts"><b>📖</b>Facts</button>
+  </nav>
   <div class="banner" id="micBanner"><span class="dot"></span><span class="grow" id="micText">Microphone is off. It turns on when you start playing.</span><button id="btnMic">Enable mic</button></div>
   <div class="tabs" id="tabs">
     <button data-cat="course">Course</button>
@@ -411,7 +415,6 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     </div>
     <div class="stab" data-t="app">
     <div class="small" id="appBuild" style="margin-bottom:8px"></div>
-    <div class="field"><a href="lab/stems.html" style="color:var(--accent2);font-weight:600">🧪 Lab: split a song into guitar + band</a><div class="small">Test of on-device AI (Demucs) that pulls the guitar out of a recording. Downloads a large model once; use Wi-Fi.</div></div>
     <div class="field" id="sFilesBox" style="display:none"><label><input type="checkbox" id="sSaveFiles"> Keep each song in its own folder on the phone</label><div class="small" id="sFilesInfo">Saves every song, and the tab and chord files it was made from, to <b>Downloads › Fretline › Songs › (song name)</b>. Deleting a song here deletes its folder too, so nothing is left taking up space.</div><div class="row" style="margin:6px 0 0"><button id="sFilesNow">Save all songs now</button></div><span class="small" id="sFilesMsg"></span></div>
     <div class="field"><label>Saved data on this phone</label><div class="small" id="sStoreMsg"></div></div>
     <div class="field" id="sAndroid" style="display:none"><a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2);font-weight:600">📱 Get the Android app</a><div class="small">Adds “Open with Fretline” for song files and downloads from links. Your saved songs stay in this browser; the app starts fresh.</div></div>
@@ -3382,6 +3385,7 @@ function tutRender(){const T=window.TUTORIALS||[];const t=tutCur&&T.find(x=>x.id
   $('#tutDoc').innerHTML='<h3 style="margin:8px 0 4px">What it is</h3><div class="small">'+esc(t.what)+'</div><h3 style="margin:14px 0 4px">How to do it</h3>'+L(t.how)+'<h3 style="margin:14px 0 4px">How Fretline shows it</h3><div class="small">'+esc(t.show)+'</div><h3 style="margin:14px 0 4px">Common mistakes</h3>'+L(t.mistakes)+'<h3 style="margin:14px 0 4px">Try it</h3><div class="small">'+esc(t.note)+'</div><button id="tutPlay" class="primary" style="margin:10px 0">▶ Play the example</button>'+(t.lessons&&t.lessons.length?'<h3 style="margin:14px 0 4px">Lessons that use it</h3>'+t.lessons.map(id=>{const d=[...LIB].find(x=>x.id===id);return d?'<button class="tutLes" data-l="'+esc(id)+'" style="display:block;width:100%;text-align:left;margin:6px 0;padding:10px">'+esc(d.title)+'</button>':'';}).join(''):'')+(t.video?'<h3 style="margin:14px 0 4px">Watch</h3><a id="tutVid" href="'+esc(t.video.url)+'" target="_blank" rel="noopener">'+esc(t.video.title)+'</a><div class="small">'+esc(t.video.by)+' · '+esc(t.video.licence)+'</div>':'');
   $('#tutPlay').onclick=()=>openSong({...t.practice});
   document.querySelectorAll('.tutLes').forEach(b=>b.onclick=()=>{const d=[...LIB].find(x=>x.id===b.dataset.l);if(d)openSong(d);});}
+$('#btnLab').onclick=()=>{location.href='lab/stems.html';};
 $('#btnTut').onclick=async()=>{tutCur=null;show('tutorials');$('#tutDoc').innerHTML='<p class="small">Loading…</p>';try{await tutLoad();tutRender();}catch(e){$('#tutDoc').innerHTML='<p class="small">Tutorials need to be downloaded once. Connect to the internet and try again.</p>';}};
 $('#tutBack').onclick=()=>{if(tutCur){tutCur=null;tutRender();}else show('home');};
 /* ---- Facts: what everything does (content in facts.js; the disclaimer lives here and nowhere else) ---- */
@@ -4314,7 +4318,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.112';
+const APP_VERSION='1.113';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

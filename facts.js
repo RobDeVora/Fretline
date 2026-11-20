@@ -111,7 +111,7 @@ sections:[
 {id:'tuner',title:'Tuner',items:[
  {n:'Tuner',t:'Play a single string; the tuner finds which one it is and shows if it is flat or sharp. Tap a string to stay on it. Low to high.',ids:['tTuning']}]},
 {id:'lab',title:'The Lab (split a song)',items:[
- {n:'What it does',t:'The Lab uses an AI model (Demucs) on your phone to pull the guitar out of a recording and leave you the band to practise over. Your audio never leaves the phone. The model downloads once (a few hundred MB, so use Wi-Fi). Open it from Settings › App › Lab.'},
+ {n:'What it does',ids:['btnLab'],t:'Open it with the 🧪 Lab button on the Home screen. The Lab uses an AI model (Demucs) on your phone to pull the guitar out of a recording and leave you the band to practise over. Your audio never leaves the phone. The model downloads once (a few hundred MB, so use Wi-Fi). Open it from Settings › App › Lab.'},
  {n:'Audio file, How much, Run on, Loading, Model',t:'Pick the song file, how much of it to use (a short test or the whole song), and what runs it. Leave Run on, Loading and Model on their first choices unless you are experimenting.'},
  {n:'Also make a highway song from the guitar',t:'Writes the guitar\'s notes down and saves a song to My Songs, with the band (without the guitar) as the backing track.'},
  {n:'Use a tab or chord sheet for the notes',t:'Paste or load a tab or chord sheet (text, ChordPro, PDF, MIDI, MusicXML or Guitar Pro). Its notes are used as written and lined up with the recording instead of the AI writing them down. Track picks the instrument in a file. For a tab with a rhythm and a lead guitar, the lead is picked.'},
