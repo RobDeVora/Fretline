@@ -178,6 +178,7 @@ details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14p
   </div>
   <div class="stage">
     <canvas id="cv"></canvas>
+    <button id="peekBtn" title="Show the chord shapes for a few seconds" style="display:none;position:absolute;right:12px;bottom:14px;z-index:5;width:44px;height:44px;border-radius:50%;font-size:22px;font-weight:700;background:#6c5ce7;color:#fff;border:0">?</button>
     <div id="slowOffer" style="display:none;position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:5;background:#2a2340;border:1px solid #6c5ce7;border-radius:12px;padding:8px 12px;font-size:14px;text-align:center;max-width:92%"></div>
     <div class="hud">
       <div>Score <b id="hScore">0/0</b></div>
@@ -589,6 +590,7 @@ A7:[-1,0,2,0,2,0],B7:[-1,2,1,2,0,2],C7:[-1,3,2,3,1,0],D7:[-1,-1,0,2,1,2],E7:[0,2
 Am7:[-1,0,2,0,1,0],Dm7:[-1,-1,0,2,1,1],Em7:[0,2,0,0,0,0],Bm7:[-1,2,0,2,0,2],'F#m7':[2,4,2,2,2,2],
 Cmaj7:[-1,3,2,0,0,0],Fmaj7:[-1,-1,3,2,1,0],Gmaj7:[3,2,0,0,0,2],Amaj7:[-1,0,2,1,2,0],Dmaj7:[-1,-1,0,2,2,2],Emaj7:[0,2,1,1,0,0],
 Asus2:[-1,0,2,2,0,0],Gsus4:[3,-1,0,0,1,3],Csus4:[-1,3,3,0,1,1],Csus2:[-1,3,0,0,1,3],Esus2:[0,2,4,4,0,0],Asus4:[-1,0,2,2,3,0],Dsus2:[-1,-1,0,2,3,0],Dsus4:[-1,-1,0,2,3,3],Esus4:[0,2,2,2,0,0],Cadd9:[-1,3,2,0,3,0],
+'G/B':[-1,2,0,0,0,3],'D/F#':[2,0,0,2,3,2],'C/G':[3,3,2,0,1,0],'C/E':[0,3,2,0,1,0],'Am/G':[3,0,2,2,1,0],'A/C#':[-1,4,2,2,2,0],'E/G#':[4,2,2,1,0,0],'F/C':[-1,3,3,2,1,1],
 E5:[0,2,2,-1,-1,-1],A5:[-1,0,2,2,-1,-1],D5:[-1,-1,0,2,3,-1],G5:[3,5,5,-1,-1,-1],C5:[-1,3,5,5,-1,-1],F5:[1,3,3,-1,-1,-1],B5:[-1,2,4,4,-1,-1]
 };
 function splitChord(name){
@@ -614,6 +616,7 @@ function splitChord(name){
 const QI={'':[0,4,7],m:[0,3,7],'7':[0,4,7,10],m7:[0,3,7,10],maj7:[0,4,7,11],m7b5:[0,3,6,10],dim:[0,3,6],aug:[0,4,8],sus2:[0,2,7],sus4:[0,5,7],'5':[0,7],'6':[0,4,7,9],add9:[0,4,7,2]};
 function chordPCs(name){const c=splitChord(name);if(!c)return null;return QI[c.q].map(i=>(c.rootPc+i)%12);}
 function chordShape(name){
+  if(SHAPES[String(name).trim()])return SHAPES[String(name).trim()]; /* v1.131: slash chords (G/B) have their own shapes */
   const c=splitChord(name);if(!c)return null;
   const tries=[c.root+(c.q==='maj7'?'maj7':c.q==='add9'?'add9':c.q),c.root+c.q];
   if(c.q==='sus4')tries.push(c.root+'sus4');
@@ -2443,9 +2446,9 @@ function pickPart(def,then){
 function syncPartBtn(){const b=$('#partBtn');if(!b)return;const n=G.def&&G.def.parts?partChoices(G.def).length:0;b.style.display=n>1?'':'none';if(n>1){b.innerHTML='🎸<span class="lbl"> '+esc(partLabel(G.def))+'</span>';b.title='Part: '+partLabel(G.def)+' (tap to change)';}}
 function openSong(def){if(def&&def.cat==='mine'&&def.id)markPlayed(def.id);
   if(def.libFile&&!def.events){showHint('Loading '+def.title+'…',4000);loadLibEvents(def).then(()=>openSong(def)).catch(()=>showMsg('Could not load the song','<p>Fretline couldn’t load this song. Connect to the internet and try again (after the first time, it works offline).</p>'));return;}
-  G.loop=null;loopLabel();G.def=def;G.base=buildSong(def);G.song=G.base;syncSingBtn();syncPartBtn();
+  G.loop=null;loopLabel();G.peeks=0;G.peekUntil=0;G.def=def;G.base=buildSong(def);G.song=G.base;syncSingBtn();syncPartBtn();
   {const cs=store.get('capo',{});G.origCapo=G.capo=cs[def.id]!=null?cs[def.id]:(def.capo||0);}
-  setupStrum();syncCapo();syncTempoBtn();G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);
+  setupStrum();syncCapo();syncTempoBtn();G.segs=chordSegments(G.song);G.state=new Uint8Array(G.song.events.length);peekUI();
   $('#pTitle').textContent=G.song.title;
   const canNew=def.cat==='gen'||!!def.regen;
   $('#btnRegen').style.display=canNew?'':'none';
@@ -2462,7 +2465,7 @@ function openSong(def){if(def&&def.cat==='mine'&&def.id)markPlayed(def.id);
 $('#iStart').onclick=()=>{$('#intro').classList.remove('show');$('#btnPlay').onclick();};
 $('#iListen').onclick=()=>{$('#intro').classList.remove('show');$('#btnListen').onclick();};
 function resetRun(){
-  stopVoices();
+  stopVoices();G.peeks=0;
   if(!G.song)return;
   G.state=new Uint8Array(G.song.events.length);
   G.clock=-G.song.bpb;G.hits=0;G.misses=0;G.streak=0;G.best=0;G.scan=0;G.playedIdx=0;G.fxIdx=0;G.fxOn=true;G.fxSched={};G.lastClickBeat=Math.floor(G.clock)-1;
@@ -2946,6 +2949,10 @@ function wrongSettle(now){const w=G.wp;if(!w)return;
   G.wp=null;if(G.state[w.i]===2)return; // already a miss, which has its own feedback
   G.wrongAt=now;diagNote(w.i,w.txt);fxMiss(w.e,now);addPop(w.pop,'#ff5d73');}
 /* v1.129: Loop button, slow-down offer, most-missed bars, share-as-file */
+/* v1.131: 'Remember the chord' lessons show only the chord name; the ? button shows the shapes for 4 seconds */
+function recallHide(){return !!(G.def&&G.def.recall&&performance.now()>(G.peekUntil||0));}
+function peekUI(){const b=$('#peekBtn');if(!b)return;b.style.display=G.def&&G.def.recall?'block':'none';}
+$('#peekBtn').onclick=()=>{G.peekUntil=performance.now()+4000;G.peeks=(G.peeks||0)+1;};
 function loopLabel(){const b=$('#loopBtn');if(!b)return;const S=G.song,bpb=S?S.bpb||4:4;b.classList.toggle('on',!!G.loop);
   if(!G.loop){b.textContent='🔁 Loop';return;}const a=Math.round(G.loop.a/bpb)+1,z=Math.round(G.loop.b/bpb);b.textContent='🔁 bar'+(z>a?'s '+a+'–'+z:' '+a);}
 function setLoop(a,b){const S=G.song;if(!S)return;const bpb=S.bpb||4,len=S.length||bpb;G.loop={a:Math.max(0,a),b:Math.min(Math.max(a+bpb,b),Math.ceil(len/bpb-1e-6)*bpb)};loopLabel();}
@@ -2980,7 +2987,7 @@ function finish(){
   if(G.mode==='wait'){$('#rTitle').textContent='Practice complete';$('#rDetail').textContent='Wait mode: you played all '+total+' notes. Try Play mode for a score.';$('#rStars').textContent='';$('#rPct').textContent='✓';}
   else{
     $('#rTitle').textContent=pct>=95?'Outstanding!':pct>=80?'Great job!':pct>=60?'Nice work!':'Keep practicing!';
-    $('#rDetail').textContent=G.hits+' of '+total+' hit · best streak '+G.best+' · speed '+Math.round(G.speed*100)+'%';
+    $('#rDetail').textContent=G.hits+' of '+total+' hit · best streak '+G.best+' · speed '+Math.round(G.speed*100)+'%'+(G.def&&G.def.recall?' · peeked '+(G.peeks||0)+' time'+(G.peeks===1?'':'s'):'');
     if(G.def&&G.def.id&&G.def.cat!=='gen'&&G.speed>=1){if(bests[G.def.id]==null||pct>bests[G.def.id]){bests[G.def.id]=pct;store.set('best',bests);}}
     if(G.def&&G.def.cat==='course'){const nx=nextLessonAfter(G.def.lesson.id,G.def.lesson.course);const ok=pct>=80&&G.speed>=1;
       $('#rNext').style.display=ok&&nx?'':'none';$('#rNext').onclick=()=>openLesson(nx);
@@ -3302,7 +3309,8 @@ function draw(now){
       rr(x0,laneTop+2,ww,laneH*6-4,10);
       cx.fillStyle=st===1?'rgba(92,225,166,.28)':st===2?'rgba(120,120,130,.18)':'rgba(179,136,255,.18)';cx.fill();
       cx.lineWidth=2;cx.strokeStyle=st===1?'#5ce1a6':st===2?'#666':'#b388ff';cx.stroke();
-      if(e.shape){cx.font='bold '+F(12)+' -apple-system,sans-serif';for(let s=0;s<6;s++){const f=e.shape[s];cx.fillStyle=f<0?'#666':noteCol(s,e.fgs&&e.fgs[s]);cx.fillText(f<0?'×':String(settings.names&&f>=0?pcName(OPEN[s]+f):f),x0+12*k,Y(s));}}
+      if(e.shape&&recallHide()&&st===0){cx.font='bold '+F(26)+' -apple-system,sans-serif';cx.fillStyle='#e8e0ff';cx.fillText(e.chord,x0+Math.min(ww/2,70*k),laneTop+laneH*3);cx.font='bold '+F(14)+' -apple-system,sans-serif';cx.fillStyle='#b388ff';cx.fillText('?',x0+Math.min(ww/2,70*k),laneTop+laneH*3+30*k);}
+      else if(e.shape){cx.font='bold '+F(12)+' -apple-system,sans-serif';for(let s=0;s<6;s++){const f=e.shape[s];cx.fillStyle=f<0?'#666':noteCol(s,e.fgs&&e.fgs[s]);cx.fillText(f<0?'×':String(settings.names&&f>=0?pcName(OPEN[s]+f):f),x0+12*k,Y(s));}}
       continue;
     }
     const nxE=ev[i+1];const rr0=r;{const g=nxE?nxE.t-e.t:9;if(g>0.01)r=Math.max(6,Math.min(r,g*ppb*0.47));}
@@ -3366,10 +3374,10 @@ function draw(now){
   if(G.playing&&G.clock<0){cx.fillStyle='rgba(255,255,255,.9)';cx.font='bold 56px -apple-system,sans-serif';cx.fillText(String(Math.ceil(-G.clock)),W/2,laneTop+laneH*3);}
   if(!G.playing&&!G.finished&&G.clock<0){cx.fillStyle='rgba(255,255,255,.55)';cx.font='15px -apple-system,sans-serif';cx.fillText(G.mode==='wait'?'Wait mode: the track pauses until you play each note':'Press Play, then play the notes as they reach the glowing line',W/2,laneTop+laneH*3);}
   if(lyrH)drawLyrics(LY,gbZ?H-gbZ-(lyrH-6)-2:laneBot+4,W,lyrH-6,k);else if(lyrOver)drawLyrics(LY,laneBot-lyrOver+2,W,lyrOver,k,0.62);
-  if(gbZ)drawGuideBottom(W,H,gbZ,G._ctrlH||0,k);
+  if(gbZ&&!recallHide())drawGuideBottom(W,H,gbZ,G._ctrlH||0,k);
   // the strip sits at the bottom (above the fretboard if that's on), clear of the hit line's arrows
-  if(fgH){const gapG=Math.round(16*k);drawFingerGuide(laneBot+lyrH+gapG,W,fgH-gapG-(settings.fretboard?Math.round(10*k):0),k);}else if(fgOver)drawFingerGuide(laneBot-fgOver-(lyrOver||0),W,fgOver,k,0.7);
-  if(settings.fretboard)drawFretboard(laneBot+14+lyrH+fgH,fbH,W);
+  if(fgH&&!recallHide()){const gapG=Math.round(16*k);drawFingerGuide(laneBot+lyrH+gapG,W,fgH-gapG-(settings.fretboard?Math.round(10*k):0),k);}else if(fgOver)drawFingerGuide(laneBot-fgOver-(lyrOver||0),W,fgOver,k,0.7);
+  if(settings.fretboard&&!recallHide())drawFretboard(laneBot+14+lyrH+fgH,fbH,W);
 }
 // technique marks: h / p arcs and slide lines from the previous note on the string, bend arrows, vibrato waves
 function drawTech(n,x,y,r,w,st,k,F){
@@ -4012,7 +4020,18 @@ const COURSE=[
   {id:'c10b-3',title:'The sad progression',sub:'Am, G, F, E',tip:'A descending line that sounds Spanish and dramatic. The last E is a bright, tense ending: let it ring.',make:progL(['Am','G','F','E'],4,72)},
   {id:'c10b-4',title:'Singer-songwriter in G',sub:'G, Em, C, D',tip:'The pop progression in G again, now at one chord per bar with a steady strum. Aim for an even rhythm before speed.',make:strumL('p3',['G','Em','C','D'],84)},
   {id:'c10b-5',title:'Barre shapes: Bm and F#m',sub:'Moving the Am and Em shapes',tip:'Barre chords are an open shape moved up with your index as the new nut. Bm is Am up two frets; F#m is Em up two frets.',make:progL(['Bm','F#m','Bm','F#m','D','A'],4,65)},
-  {id:'c10b-6',title:'Flat keys: Bb and Eb',sub:'Barre shapes anywhere',tip:'Bb uses the A shape at fret 1, Eb the same shape at fret 6. Keep your barre finger firm but relaxed.',make:progL(['A#','D#','F','Gm'],4,65)}]},
+  {id:'c10b-6',title:'Flat keys: Bb and Eb',sub:'Barre shapes anywhere',tip:'Bb uses the A shape at fret 1, Eb the same shape at fret 6. Keep your barre finger firm but relaxed.',make:progL(['A#','D#','F','Gm'],4,65)},
+  {id:'c10b-7',title:'Slash chords: walking bass',sub:'G, D/F#, Em, C',tip:'A slash chord names the bass note after the slash: D/F# is a D chord with F# in the bass (use your thumb or 2nd finger on the low E at fret 2). It makes the bass line walk down smoothly.',make:progL(['G','D/F#','Em','C'],4,70)},
+  {id:'c10b-8',title:'Slash chords: C, G/B, Am',sub:'C, G/B, Am, Am/G, F, C/E',tip:'G/B is G with the B on the A string as the bass; Am/G keeps the G in the bass under Am. Bass notes stepping down one at a time make the whole progression feel connected.',make:progL(['C','G/B','Am','Am/G','F','C/E','F','G'],4,66)},
+  {id:'c10b-9',title:'Strumming the 50s progression',sub:'C Am F G with the folk pattern',tip:'Keep the pattern going through the changes, even if a chord is late. The rhythm matters more than every string.',make:strumL('p5',['C','Am','F','G'],76)},
+  {id:'c10b-10',title:'Strumming the sad progression',sub:'Am G F E with steady eighths',tip:'Steady down-up eighths. Let the pattern carry you over the change to F, the hardest one.',make:strumL('p4',['Am','G','F','E'],80)},
+  {id:'c10b-11',title:'Strumming a blues in A',sub:'A7 D7 E7 with a backbeat',tip:'A muted backbeat: accent the 2 and 4 and let the 7th chords do the talking.',make:strumL('p7',['A7','A7','D7','A7','E7','D7','A7','E7'],84)}]},
+ {title:'Chord memory',lessons:[
+  {id:'c10c-1',title:'Remember the chord: open chords',sub:'G, C, D, Em, Am',recall:true,tip:'Only the chord name shows. Remember the shape and play it. Tap the ? for a quick peek if you blank: the shape shows for a few seconds. A chord you play right turns green and shows its shape.',make:chordsL(['G','C','D','Em','Am'],4,50,12)},
+  {id:'c10c-2',title:'Remember the chord: A, E, Dm',sub:'A, E, Dm, Am, Em',recall:true,tip:'Name only, then play it from memory. Use the ? when you need it, then try to do the next one without.',make:chordsL(['A','E','Dm','Am','Em','D'],4,50,12)},
+  {id:'c10c-3',title:'Remember the chord: 7ths',sub:'A7, D7, E7, G7, C7',recall:true,tip:'The 7ths are small changes to chords you know: think about which finger moved.',make:chordsL(['A7','D7','E7','G7','C7'],4,50,12)},
+  {id:'c10c-4',title:'Remember the chord: sus and maj7',sub:'Asus2, Dsus4, Cmaj7, Fmaj7, Em7',recall:true,tip:'Sus and 7th chords sound different from the plain version. Listen for it as you play.',make:chordsL(['Asus2','Dsus4','Cmaj7','Fmaj7','Em7','Gmaj7'],4,50,12)},
+  {id:'c10c-5',title:'Remember the chord: F and barres',sub:'F, Bm, F#m, Gm, Bb',recall:true,tip:'F is the easy 4-string shape. For the barres, remember which open shape they are moved from.',make:chordsL(['F','Bm','F#m','Gm','A#'],4,50,12)}]},
  {title:'Arpeggios and fingerpicking',lessons:[
   {id:'c11-1',title:'Broken chords in G',sub:'One note at a time',tip:'Hold the whole chord shape and pick one string at a time, letting the notes ring together.',make:gen('arp',7,'major',1,70)},
   {id:'c11-2',title:'Arpeggios in A minor',sub:'Eighth-note patterns',tip:'Faster picking patterns. Try fingerpicking: thumb on the bass strings, fingers on the top three.',make:gen('arp',9,'minor',2,75)},
@@ -4294,7 +4313,7 @@ for(const [k,t] of Object.entries(TIER_DEFS)){const flat=[];t.units.forEach((u,u
 COURSE_FLAT.forEach(l=>l.course='core');
 function lessonDef(l,seed){
   seed=seed||newSeed();const g=l.make(seed);const C=COURSES[l.course||'core'];const u=C.units[l.unit];
-  return {id:l.id,cat:'course',title:l.title,unit:(l.course&&l.course!=='core'?C.title+' · ':'')+'Unit '+(l.unit+1)+' · '+u.title,bpm:g.bpm||70,bpb:g.bpb||4,events:g.events,noChords:!!g.noChords,tip:l.tip,lesson:l,regen:()=>lessonDef(l)};
+  return {id:l.id,cat:'course',title:l.title,unit:(l.course&&l.course!=='core'?C.title+' · ':'')+'Unit '+(l.unit+1)+' · '+u.title,bpm:g.bpm||70,bpb:g.bpb||4,events:g.events,noChords:!!g.noChords,tip:l.tip,lesson:l,recall:!!l.recall,regen:()=>lessonDef(l)};
 }
 function openLesson(l){if(l)openSong(lessonDef(l));}
 function firstOpenLesson(c){const F=COURSES[c||'core'].flat;return F.find(l=>(bests[l.id]||0)<80)||null;}
@@ -4412,7 +4431,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.130';
+const APP_VERSION='1.131';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
