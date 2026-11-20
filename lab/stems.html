@@ -683,6 +683,15 @@ function fixSqueezed(sec){if(!VOC)return 0;let fixed=0;let segsV=null;
     const ts=sy.map(s=>{const t=at(c/S*tot);c+=s;return t;});
     L.segs.forEach((w,k)=>{w.t=ts[k];w.d=Math.max(0.1,(k+1<n?ts[k+1]:at(tot))-ts[k]);});L.t0=ts[0];fixed++;}
   return fixed;}
+
+/* v1.123: a line the model hardly heard (low confidence) AND where the loudness method finds no singing is not sung there (a chorus
+   the lyric sheet repeats but the song skips, a solo): it is left out so it does not sit on the highway for the whole gap */
+function dropUnheard(sec,log){if(!VOC)return sec;const ph=vocalPhrases(VOC).segs;const sung=(a,b)=>{let s=0;for(const [x,y] of ph){const o=Math.min(y,b)-Math.max(x,a);if(o>0)s+=o;}return b>a?s/(b-a):0;};
+  const out=[];const gone=[];sec.forEach((L,i)=>{const n=L.segs.length,last=L.segs[n-1];const a=L.t0,b=Math.min(i+1<sec.length?sec[i+1].t0:last.t+last.d,a+0.35*n+1);
+    const v=sung(a,Math.max(b,a+0.5));const mm=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0')+'.'+Math.floor((t%1)*10);
+    log('  '+mm(L.t0)+'  heard '+(L.conf==null?'?':L.conf.toFixed(1))+' · singing '+Math.round(v*100)+'%  '+L.segs.map(w=>w.text).join('').slice(0,28));
+    if(L.conf!=null&&L.conf<-5.5&&v<0.25&&n>=3)gone.push(L);else out.push(L);});
+  if(gone.length)log('lyrics: '+gone.length+' line(s) left out because nobody sings them there: '+gone.map(L=>'"'+L.segs.map(w=>w.text).join('').trim().slice(0,24)+'"').join(', '));return out;}
 async function ctcLyrics(text,mixL,mixR,bpm,b0){
   const lines=lyrLines(text);if(!lines.length)return null;
   status('Preparing the lyrics…');const x=await toRate([mixL,mixR],16000);
@@ -706,12 +715,13 @@ async function ctcLyrics(text,mixL,mixR,bpm,b0){
   for(let i=0;i<flat.length;i++){if(flat[i].w)continue;let a=i-1;while(a>=0&&!flat[a].w)a--;let z=i+1;while(z<flat.length&&!flat[z].w)z++;
     const ta=a>=0?flat[a].w.t:0,tz=z<flat.length?flat[z].w.t:ta+1;flat[i].w={t:ta+(tz-ta)*(i-a)/(z-a),e:ta+(tz-ta)*(i-a)/(z-a)+0.2};}
   const spb=60/bpm,sec=[],beats=[];let last=-1;
-  lines.forEach((l,li)=>{const row=ws[li].map((w,wi)=>{let t=w.t;if(t<=last)t=last+0.03;last=t;return {t,e:Math.max(w.e,t+0.1),text:l.words[wi]+(wi<l.words.length-1?' ':'')};});
+  lines.forEach((l,li)=>{const row=ws[li].map((w,wi)=>{let t=w.t;if(t<=last)t=last+0.03;last=t;return {t,e:Math.max(w.e,t+0.1),c:w.c==null?-5:w.c,text:l.words[wi]+(wi<l.words.length-1?' ':'')};});
     row.forEach((w,k)=>{const nt=k+1<row.length?row[k+1].t:w.e;w.d=Math.max(0.1,Math.min(Math.max(nt,w.t+0.1)-w.t,4));});
-    sec.push({t0:row[0].t,segs:row.map(w=>({t:w.t,d:w.d,text:w.text}))});});
+    sec.push({t0:row[0].t,conf:row.reduce((s,w)=>s+w.c,0)/row.length,segs:row.map(w=>({t:w.t,d:w.d,text:w.text}))});});
   let nf=0;try{nf=fixSqueezed(sec);}catch(e){}if(nf)log('lyrics: '+nf+' line(s) the model could not hear were placed by the loudness of the singing');
+  const keep=dropUnheard(sec,log);sec.length=0;keep.forEach(L=>sec.push(L));
   sec.forEach(L=>beats.push({t0:(L.t0-b0)/spb,segs:L.segs.map(w=>({t:(w.t-b0)/spb,d:w.d/spb,text:w.text}))}));
-  return {sec,beats,n:lines.length,speech:true};}
+  return {sec,beats,n:sec.length,speech:true};}
 async function saveRecSong(extra,gL,gR,rL,rR,notes){
   const id='m-rec-'+Date.now(),key=location.origin+'/__fretline/rec/'+id+'.wav';
   status('Saving the backing track…');const c=await caches.open('fretline-audio');await c.put(key,new Response(wav(rL,rR),{headers:{'content-type':'audio/wav'}}));
@@ -721,7 +731,7 @@ async function saveRecSong(extra,gL,gR,rL,rR,notes){
   {const lt=$('lyr').value.trim();if(lt){let done=false;
     try{const mL=new Float32Array(gL.length),mR=new Float32Array(gL.length);for(let i=0;i<mL.length;i++){mL[i]=(gL[i]||0)+(rL[i]||0);mR[i]=(gR[i]||0)+(rR[i]||0);}
       const r=await ctcLyrics(lt,mL,mR,def.bpm,def.recOffset);if(r){def.recLyr=r.sec;def.lyrics=r.beats;done=true;log('lyrics: '+r.n+' lines timed word by word with the speech model');
-        try{const mm=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0');log('lyrics timing. Each line: start · words:');r.sec.forEach(L=>log('  '+mm(L.t0)+'.'+String(Math.floor((L.t0%1)*10))+'  '+L.segs.map(w=>w.text).join('').slice(0,40)));}catch(e){}}}
+      }}
     catch(e){log('lyrics: the speech model could not be used ('+String(e&&e.message||e).slice(0,120)+'), using the loudness method');}
     if(!done){if(!VOC)log('lyrics: not timed, because this run had no singing track (the app on the phone needs the latest update, or the song was too quiet)');
     else{const r=alignLyrics(lt,VOC,def.bpm,def.recOffset);if(!r)log('lyrics: not timed, no singing was found in the recording');else{def.recLyr=r.sec;def.lyrics=r.beats;log('lyrics: '+r.n+' lines timed to '+r.phrases+' sung phrases (check them with 🎤 Sing in the song)');try{const mm=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0');log('lyrics timing, '+(r.onsets||0)+' note starts found for '+lyrLines(lt).reduce((s,l)=>s+l.syl.reduce((x,y)=>x+y,0),0)+' syllables. Each line: start · words:');r.sec.forEach((L,i)=>log('  '+mm(L.t0)+'.'+String(Math.floor((L.t0%1)*10))+'  '+L.segs.map(w=>w.text).join('').slice(0,40)));}catch(e){}}}}}}
@@ -753,7 +763,7 @@ async function runLab(){
   $('go').disabled=true;R.length=0;prog(0);$('out').style.display='none';
   const t0=performance.now();
   try{
-    log('Fretline Lab · split a song · '+new Date().toISOString().slice(0,16).replace('T',' '));
+    log('Fretline Lab (page v1.123) · split a song · '+new Date().toISOString().slice(0,16).replace('T',' '));
     log('device: '+navigator.userAgent.replace(/\s+/g,' ').slice(0,160));
     log('cores '+(navigator.hardwareConcurrency||'?')+' · memory '+(navigator.deviceMemory?navigator.deviceMemory+' GB':'?')+' · WebGPU '+(('gpu' in navigator)?'present':'absent')+' · threads '+(self.crossOriginIsolated?'yes (cross-origin isolated)':'no (single thread)'));
     log('service worker: '+(navigator.serviceWorker&&navigator.serviceWorker.controller?'in charge':'not in charge')+' · reload done '+(sessionStorage.getItem('labReload')?'yes':'no'));

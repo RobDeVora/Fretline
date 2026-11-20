@@ -16,9 +16,11 @@ CTC.force=function(lp,T,V,ids){const L=ids.length;if(!L||T<L)return null;const S
     const tmp=prev;prev=cur;cur=tmp;}
   let s=S-1;if(S>1&&prev[S-2]>prev[S-1])s=S-2;const first=new Int32Array(L).fill(-1),last=new Int32Array(L).fill(-1);
   for(let t=T-1;t>=0;t--){if(s&1){const i=(s-1)>>1;if(last[i]<0)last[i]=t;first[i]=t;}s-=bp[t*S+s];if(s<0)s=0;}
-  return {first,last};};
+  /* how well the model heard each token: best log-probability of that very piece anywhere in its frames */
+  const conf=new Float32Array(L);for(let i=0;i<L;i++){let m=-1e9;for(let t=first[i];t>=0&&t<=last[i];t++){const v=lp[t*V+ids[i]];if(v>m)m=v;}conf[i]=m;}
+  return {first,last,conf};};
 /* lines = [{words:[..]}] (from lyrLines). Returns [[{t,d}...]] seconds per word, frame length 0.04 s. */
 CTC.alignLines=function(lines,lp,T,V){const ids=[],own=[];lines.forEach((l,li)=>l.words.forEach((w,wi)=>{const p=CTC.pieces(w);own.push({li,wi,a:ids.length,n:p.length});for(const x of p)ids.push(x);}));
   const r=CTC.force(lp,T,V,ids);if(!r)return null;const FR=0.04;const out=lines.map(l=>l.words.map(()=>null));
-  own.forEach(o=>{if(!o.n)return;out[o.li][o.wi]={t:r.first[o.a]*FR,e:(r.last[o.a+o.n-1]+1)*FR};});return out;};
+  own.forEach(o=>{if(!o.n)return;let c=0;for(let k=0;k<o.n;k++)c+=r.conf[o.a+k];out[o.li][o.wi]={t:r.first[o.a]*FR,e:(r.last[o.a+o.n-1]+1)*FR,c:c/o.n};});return out;};
 if(typeof module!=='undefined')module.exports=CTC;
