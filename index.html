@@ -3948,6 +3948,8 @@ const P={
 };
 const SP=id=>STRUM_PATTERNS.find(x=>x.id===id);
 const drill=(pos,bars,diff,bpm)=>seed=>({events:genDrill({positions:pos,bars,diff,seed}),bpm,noChords:true});
+/* v1.130: progL plays the chords in the written order (chordsL shuffles them for drills) */
+const progL=(chords,per,bpm,bars)=>seed=>({events:Array.from({length:Math.round((bars||8)*4/per)},(_,i)=>chordEvent(chords[i%chords.length],i*per,per)),bpm});
 const chordsL=(chords,per,bpm,bars)=>seed=>({events:genChordDrill({chords,bars:bars||8,beatsPer:per,seed}),bpm});
 const gen=(style,key,scale,diff,bpm,bars)=>seed=>({events:genTrack({style,key,scale,diff,bars:bars||8,seed}).events,bpm});
 const strumL=(pid,chords,bpm)=>seed=>{const d=strumDef(SP(pid),seed,chords);return {events:d.events,bpm,bpb:d.bpb};};
@@ -3980,6 +3982,14 @@ const COURSE=[
   {id:'c6-1',title:'Two chords per bar',sub:'Faster changes',tip:'Chords now change every two beats. Keep fingers that stay on the same string anchored when you can.',make:chordsL(['G','C','D','Em'],2,65)},
   {id:'c6-2',title:'Minor key changes',sub:'Am, Dm and E',tip:'Am and E share the same shape on different strings, which makes that change quicker than it looks.',make:chordsL(['Am','Dm','E'],4,70)},
   {id:'c6-3',title:'Strumming the pop progression',sub:'G D Em C with a pattern',tip:'The famous four-chord progression with a strum pattern. Get the pattern going on G before worrying about the changes.',make:strumL('p3',['G','D','Em','C'],80)}]},
+ {title:'More open chords',lessons:[
+  {id:'c6b-1',title:'Dominant 7th chords',sub:'A7, D7 and E7',tip:'Each is a familiar chord with one finger lifted or moved: A7 is A with the G string open, E7 is E with the D string open. They give blues and folk their sound.',make:chordsL(['A7','D7','E7'],4,65)},
+  {id:'c6b-2',title:'G7 and C7',sub:'More 7ths',tip:'G7 moves your 3rd finger from the high E to fret 1. C7 adds your 4th finger on the B string at fret 3 (or lifts C\'s open G string).',make:chordsL(['G7','C','C7','G'],4,65)},
+  {id:'c6b-3',title:'Suspended chords',sub:'Asus2, Dsus2, Asus4',tip:'Suspended chords swap the 3rd for a neighbouring note, so they sound open and unresolved. Notice how little each one moves from its normal chord.',make:chordsL(['Asus2','A','Dsus2','D','Asus4','A'],4,65)},
+  {id:'c6b-4',title:'Sus chords and back',sub:'Dsus4, Esus4, Gsus4',tip:'Play the sus chord first, then let it fall to the normal chord, the classic rock move.',make:chordsL(['Dsus4','D','Esus4','E','Gsus4','G'],4,65)},
+  {id:'c6b-5',title:'Major 7th chords',sub:'Cmaj7, Gmaj7, Fmaj7',tip:'Major 7ths sound dreamy and jazzy. Cmaj7 is C with your 1st finger lifted; Fmaj7 is only four strings.',make:chordsL(['Cmaj7','Fmaj7','Gmaj7','Cmaj7'],4,65)},
+  {id:'c6b-6',title:'Minor 7th chords',sub:'Am7, Em7, Dm7',tip:'Am7 is Am with your 3rd finger lifted; Em7 is Em with only one finger on. Easy, and they soften any progression.',make:chordsL(['Am7','Em7','Dm7','Am7'],4,65)},
+  {id:'c6b-7',title:'Add9 and friends',sub:'Cadd9, Dsus2, Em7',tip:'Cadd9 is the shape that makes G, Em and Cadd9 so easy to switch between: keep your 3rd and 4th fingers near the top strings.',make:chordsL(['G','Cadd9','Em7','Dsus2'],4,70)}]},
  {title:'Playing melodies',lessons:[
   {id:'c7-1',title:'Melody in C major',sub:'Single notes, open position',tip:'A generated tune over a chord progression. The chord name above shows the harmony behind the melody.',make:gen('melody',0,'major',1,75)},
   {id:'c7-2',title:'Melody in G major',sub:'Single notes, open position',tip:'Notice how the tune keeps returning to G, the “home” note of the key.',make:gen('melody',7,'major',1,80)},
@@ -3993,9 +4003,16 @@ const COURSE=[
   {id:'c9-2',title:'Power chords on E and A',sub:'Moving between strings',tip:'Same shape, now also rooted on the A string. Slide your hand, keep the shape.',make:power([[0,0],[0,3],[0,5],[1,0],[1,2],[1,3],[1,5]],1,85)},
   {id:'c9-3',title:'Eighth-note power chords',sub:'Driving rock rhythm',tip:'Faster rhythms now. Use downstrokes and keep your picking hand tight to the strings.',make:power([[0,0],[0,3],[0,5],[0,7],[1,0],[1,3]],2,90)}]},
  {title:'Barre chords',lessons:[
-  {id:'c10-1',title:'C and F',sub:'Your first barre chord',tip:'For F, lay your 1st finger across all strings at fret 1. Roll it slightly onto its side for a cleaner sound.',make:chordsL(['C','F'],4,60)},
+  {id:'c10-1',title:'C and F',sub:'Your first mini-barre',tip:'This is the easy F: your 1st finger lies flat across the top two strings at fret 1 (B and high E), 2nd finger on the G string at fret 2, 3rd finger on the D string at fret 3. Only the top four strings ring. Roll your index slightly onto its side for a clean sound.',make:chordsL(['C','F'],4,60)},
   {id:'c10-2',title:'Bm in a progression',sub:'D, Bm, G, A',tip:'Bm is a barre at fret 2 using the Am shape. Take your time on the change into it.',make:chordsL(['D','Bm','G','A'],4,65)},
   {id:'c10-3',title:'Strumming with barre chords',sub:'Am, F, C, G',tip:'The folk pattern again, now with F in the mix.',make:strumL('p5',['Am','F','C','G'],75)}]},
+ {title:'Chord progressions',lessons:[
+  {id:'c10b-1',title:'Twelve-bar blues in A',sub:'A7, D7, E7',tip:'The most used progression in blues and rock: four bars of A7, two of D7, two of A7, then E7, D7, A7, E7. Count the bars out loud.',make:progL(['A7','A7','A7','A7','D7','D7','A7','A7','E7','D7','A7','E7'],4,80,12)},
+  {id:'c10b-2',title:'The 50s progression',sub:'C, Am, F, G',tip:'Doo-wop and countless pop songs. Notice the Am to F change: two fingers just shift down a string.',make:progL(['C','Am','F','G'],4,72)},
+  {id:'c10b-3',title:'The sad progression',sub:'Am, G, F, E',tip:'A descending line that sounds Spanish and dramatic. The last E is a bright, tense ending: let it ring.',make:progL(['Am','G','F','E'],4,72)},
+  {id:'c10b-4',title:'Singer-songwriter in G',sub:'G, Em, C, D',tip:'The pop progression in G again, now at one chord per bar with a steady strum. Aim for an even rhythm before speed.',make:strumL('p3',['G','Em','C','D'],84)},
+  {id:'c10b-5',title:'Barre shapes: Bm and F#m',sub:'Moving the Am and Em shapes',tip:'Barre chords are an open shape moved up with your index as the new nut. Bm is Am up two frets; F#m is Em up two frets.',make:progL(['Bm','F#m','Bm','F#m','D','A'],4,65)},
+  {id:'c10b-6',title:'Flat keys: Bb and Eb',sub:'Barre shapes anywhere',tip:'Bb uses the A shape at fret 1, Eb the same shape at fret 6. Keep your barre finger firm but relaxed.',make:progL(['A#','D#','F','Gm'],4,65)}]},
  {title:'Arpeggios and fingerpicking',lessons:[
   {id:'c11-1',title:'Broken chords in G',sub:'One note at a time',tip:'Hold the whole chord shape and pick one string at a time, letting the notes ring together.',make:gen('arp',7,'major',1,70)},
   {id:'c11-2',title:'Arpeggios in A minor',sub:'Eighth-note patterns',tip:'Faster picking patterns. Try fingerpicking: thumb on the bass strings, fingers on the top three.',make:gen('arp',9,'minor',2,75)},
@@ -4395,7 +4412,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.129';
+const APP_VERSION='1.130';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
