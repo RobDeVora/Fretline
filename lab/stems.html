@@ -592,7 +592,7 @@ async function saveSources(dir){
    The vocal stem gives the loudness of the singing every 10 ms. Where it is loud is "singing time". Each lyric line gets a share of
    that singing time in proportion to its syllables, then the line start snaps to the nearest real phrase start (after a pause) within 1.5 s.
    Words inside a line share the line's singing time by syllables. Line level, not exact word level. */
-let VOC=null;
+let VOC=null,VOC16=null; /* VOC16: the singing alone, 16 kHz mono, for the speech model */
 function sylCount(w){const x=w.toLowerCase().replace(/[^a-z]/g,'');if(!x)return 1;let n=(x.match(/[aeiouy]+/g)||[]).length;if(/[^aeiou]e$/.test(x)&&n>1)n--;return Math.max(1,n);}
 function lyrLines(text){const out=[];for(const raw of String(text).split(/\r?\n/)){let s=raw.replace(/\[\d+:\d+(?:\.\d+)?\]/g,'').replace(/\{[^}]*\}/g,'').replace(/\[[^\]]*\]/g,'').trim();if(!s)continue;
   if(/^(verse|chorus|bridge|intro|outro|pre-?chorus|refrain|solo|interlude|instrumental|hook|tag|coda)\b[^a-z]*\d*\s*:?\s*$/i.test(s))continue;
@@ -692,22 +692,28 @@ function dropUnheard(sec,log){if(!VOC)return sec;const ph=vocalPhrases(VOC).segs
     log('  '+mm(L.t0)+'  heard '+(L.conf==null?'?':L.conf.toFixed(1))+' · singing '+Math.round(v*100)+'%  '+L.segs.map(w=>w.text).join('').slice(0,28));
     if(L.conf!=null&&L.conf<-5.5&&v<0.25&&n>=3)gone.push(L);else out.push(L);});
   if(gone.length)log('lyrics: '+gone.length+' line(s) left out because nobody sings them there: '+gone.map(L=>'"'+L.segs.map(w=>w.text).join('').trim().slice(0,24)+'"').join(', '));return out;}
-async function ctcLyrics(text,mixL,mixR,bpm,b0){
+async function ctcLyrics(text,mixL,mixR,bpm,b0,vox){
   const lines=lyrLines(text);if(!lines.length)return null;
   status('Preparing the lyrics…');const x=await toRate([mixL,mixR],16000);
   if(!window.ort)await loadScript(ORT_BASE+'ort.webgpu.min.js');
   ort.env.wasm.wasmPaths=ORT_BASE;ort.env.wasm.numThreads=self.crossOriginIsolated?Math.min(4,navigator.hardwareConcurrency||2):1;
   const model=await ctcModel();const sess=await ort.InferenceSession.create(model,{executionProviders:['wasm']});
   CTC.loadTokens(await (await fetch(new URL('ctc_tokens.txt',location.href).href)).text());
-  const fb=makeFbank(),CH=16000*30,V=1025,parts=[];let T=0;const ts=performance.now();
-  for(let s=0;s<x.length;s+=CH){status('Listening for the words… '+Math.round(s/x.length*100)+'%');const seg=x.subarray(s,Math.min(x.length,s+CH));if(seg.length<1600)break;
-    const f=fb(seg),nb=f.bins,nf=f.frames;const m=new Float32Array(nb),sd=new Float32Array(nb);
-    for(let b=0;b<nb;b++){let a=0;for(let i=0;i<nf;i++)a+=f.data[i*nb+b];m[b]=a/nf;}
-    for(let b=0;b<nb;b++){let a=0;for(let i=0;i<nf;i++){const d=f.data[i*nb+b]-m[b];a+=d*d;}sd[b]=Math.sqrt(a/nf);}
-    const inp=new Float32Array(nb*nf);for(let i=0;i<nf;i++)for(let b=0;b<nb;b++)inp[b*nf+i]=(f.data[i*nb+b]-m[b])/(sd[b]+1e-5);
-    const o=await sess.run({audio_signal:new ort.Tensor('float32',inp,[1,nb,nf]),length:new ort.Tensor('int64',BigInt64Array.from([BigInt(nf)]),[1])});
-    const lp=o[sess.outputNames[0]];parts.push(lp.data);T+=lp.dims[1];await new Promise(r=>setTimeout(r,0));}
-  const all=new Float32Array(T*V);let off=0;for(const p of parts){all.set(p,off);off+=p.length;}try{sess.release&&sess.release();}catch(e){}
+  const fb=makeFbank(),CH=16000*30,V=1025;const ts=performance.now();
+  const listen=async(sig,tag)=>{const parts=[];let T=0;
+    for(let s=0;s<sig.length;s+=CH){status('Listening for the words ('+tag+')… '+Math.round(s/sig.length*100)+'%');const seg=sig.subarray(s,Math.min(sig.length,s+CH));if(seg.length<1600)break;
+      const f=fb(seg),nb=f.bins,nf=f.frames;const m=new Float32Array(nb),sd=new Float32Array(nb);
+      for(let b=0;b<nb;b++){let a=0;for(let i=0;i<nf;i++)a+=f.data[i*nb+b];m[b]=a/nf;}
+      for(let b=0;b<nb;b++){let a=0;for(let i=0;i<nf;i++){const d=f.data[i*nb+b]-m[b];a+=d*d;}sd[b]=Math.sqrt(a/nf);}
+      const inp=new Float32Array(nb*nf);for(let i=0;i<nf;i++)for(let b=0;b<nb;b++)inp[b*nf+i]=(f.data[i*nb+b]-m[b])/(sd[b]+1e-5);
+      const o=await sess.run({audio_signal:new ort.Tensor('float32',inp,[1,nb,nf]),length:new ort.Tensor('int64',BigInt64Array.from([BigInt(nf)]),[1])});
+      const lp=o[sess.outputNames[0]];parts.push(lp.data);T+=lp.dims[1];await new Promise(r=>setTimeout(r,0));}
+    const all=new Float32Array(T*V);let off=0;for(const p of parts){all.set(p,off);off+=p.length;}return {all,T};};
+  let {all,T}=await listen(x,'mix');
+  /* the singing alone (when the split gave it) is heard by the model too; the two opinions are averaged, which helps most where guitars cover the words */
+  if(vox&&vox.length>16000*5){try{let pk=0;for(let i=0;i<vox.length;i+=7)pk=Math.max(pk,Math.abs(vox[i]));const g=pk>1e-6?0.5/pk:1;const vs=new Float32Array(vox.length);for(let i=0;i<vox.length;i++)vs[i]=vox[i]*g;
+    const b2=await listen(vs,'voice');if(b2.T===T){for(let i=0;i<all.length;i++)all[i]=(all[i]+b2.all[i])/2;log('lyrics: the model also listened to the singing alone');}else log('lyrics: the singing-alone listen did not line up ('+b2.T+' vs '+T+' frames), mix only');}catch(e){log('lyrics: listening to the singing alone failed ('+String(e&&e.message||e).slice(0,80)+')');}}
+  try{sess.release&&sess.release();}catch(e){}
   log('lyrics: the speech model listened in '+((performance.now()-ts)/1000).toFixed(1)+' s');
   const ws=CTC.alignLines(lines,all,T,V);if(!ws)return null;
   /* a word the model has no pieces for (digits…) gets a time between its neighbours */
@@ -730,7 +736,7 @@ async function saveRecSong(extra,gL,gR,rL,rR,notes){
   const def={id,cat:'mine',kind:'rec',title,bpb:4,recAudio:key,recGuitar:gkey,credit:'Made from a recording in Fretline Lab',...extra};
   {const lt=$('lyr').value.trim();if(lt){let done=false;
     try{const mL=new Float32Array(gL.length),mR=new Float32Array(gL.length);for(let i=0;i<mL.length;i++){mL[i]=(gL[i]||0)+(rL[i]||0);mR[i]=(gR[i]||0)+(rR[i]||0);}
-      const r=await ctcLyrics(lt,mL,mR,def.bpm,def.recOffset);if(r){def.recLyr=r.sec;def.lyrics=r.beats;done=true;log('lyrics: '+r.n+' lines timed word by word with the speech model');
+      const r=await ctcLyrics(lt,mL,mR,def.bpm,def.recOffset,VOC16);if(r){def.recLyr=r.sec;def.lyrics=r.beats;done=true;log('lyrics: '+r.n+' lines timed word by word with the speech model');
       }}
     catch(e){log('lyrics: the speech model could not be used ('+String(e&&e.message||e).slice(0,120)+'), using the loudness method');}
     if(!done){if(!VOC)log('lyrics: not timed, because this run had no singing track (the app on the phone needs the latest update, or the song was too quiet)');
@@ -763,7 +769,7 @@ async function runLab(){
   $('go').disabled=true;R.length=0;prog(0);$('out').style.display='none';
   const t0=performance.now();
   try{
-    log('Fretline Lab (page v1.123) · split a song · '+new Date().toISOString().slice(0,16).replace('T',' '));
+    log('Fretline Lab (page v1.124) · split a song · '+new Date().toISOString().slice(0,16).replace('T',' '));
     log('device: '+navigator.userAgent.replace(/\s+/g,' ').slice(0,160));
     log('cores '+(navigator.hardwareConcurrency||'?')+' · memory '+(navigator.deviceMemory?navigator.deviceMemory+' GB':'?')+' · WebGPU '+(('gpu' in navigator)?'present':'absent')+' · threads '+(self.crossOriginIsolated?'yes (cross-origin isolated)':'no (single thread)'));
     log('service worker: '+(navigator.serviceWorker&&navigator.serviceWorker.controller?'in charge':'not in charge')+' · reload done '+(sessionStorage.getItem('labReload')?'yes':'no'));
@@ -809,12 +815,12 @@ async function runLab(){
     const stride=Math.round(SEG*(1-OVERLAP));const nCh=Math.max(1,Math.ceil(Math.max(0,N-SEG)/stride)+1);
     const W=new Float32Array(SEG);for(let i=0;i<SEG;i++)W[i]=Math.min(i+1,SEG-i)/(SEG/2);
     const gL=new Float32Array(N),gR=new Float32Array(N),rL=new Float32Array(N),rR=new Float32Array(N),ws=new Float32Array(N);
-    const inp=new Float32Array(2*SEG);const times=[];const NB=Math.ceil(N/441),vE=new Float32Array(NB),vW=new Float32Array(NB);let vGot=false;VOC=null;
+    const inp=new Float32Array(2*SEG);const times=[];const NB=Math.ceil(N/441),vE=new Float32Array(NB),vW=new Float32Array(NB);let vGot=false;VOC=null;VOC16=null;const N16=Math.ceil(N*16000/44100)+4,v16E=new Float32Array(N16),v16W=new Float32Array(N16);let v16Got=false;
     for(let c=0;c<nCh;c++){
       const st=c*stride;inp.fill(0);for(let i=0;i<SEG&&st+i<N;i++){inp[i]=(L[st+i]-mean)/sd;inp[SEG+i]=(Rc[st+i]-mean)/sd;}
       const tc=performance.now();let res=null,ot=null,G=null,B=null;
       if(native){let r=null;for(let k=0;;k++){try{r=await NS.run({mix:f32ToB64(inp),n:SEG});break;}catch(e){if(k>=1)throw e;log('part '+(c+1)+': native run failed ('+String(e&&e.message||e).slice(0,120)+'), trying again');}}
-        G=b64ToF32(r.guitar);B=b64ToF32(r.band);if(r.vocal){const vv=b64ToF32(r.vocal),bo=Math.round(st/441);for(let b=0;b<vv.length;b++){const ix=bo+b;if(ix<NB){const w=W[Math.min(SEG-1,b*441+220)];vE[ix]+=w*vv[b]*vv[b];vW[ix]+=w;}}vGot=true;}if(c===0)log('model: native part took '+(r.ms/1000).toFixed(1)+' s inside the app');}
+        G=b64ToF32(r.guitar);B=b64ToF32(r.band);if(r.vocal){const vv=b64ToF32(r.vocal),bo=Math.round(st/441);for(let b=0;b<vv.length;b++){const ix=bo+b;if(ix<NB){const w=W[Math.min(SEG-1,b*441+220)];vE[ix]+=w*vv[b]*vv[b];vW[ix]+=w;}}vGot=true;}if(r.vocal16){const v6=b64ToF32(r.vocal16),o6=Math.round(st*16000/44100);for(let j=0;j<v6.length;j++){const ix=o6+j;if(ix<N16){const w=W[Math.min(SEG-1,Math.round(j*44100/16000))];v16E[ix]+=w*v6[j];v16W[ix]+=w;}}v16Got=true;}if(c===0)log('model: native part took '+(r.ms/1000).toFixed(1)+' s inside the app');}
       else{
       const rebuild=async ep=>{try{session.release&&await session.release();}catch(_){}const m2=await getModel(MODELS[$('mdl').value]);session=await tryEp(ep,m2);used=ep;};
       if(used==='webgpu'&&gpuFresh)await rebuild('webgpu');
@@ -829,7 +835,8 @@ async function runLab(){
           await new Promise(z=>setTimeout(z,300));}}
       if(c===0)log('model: in '+session.inputNames.join(',')+' → out '+session.outputNames.join(',')+' '+JSON.stringify(ot.dims));const S=ot.data;/* [1,6,2,SEG] */
       G=new Float32Array(2*SEG);B=new Float32Array(2*SEG);
-      {const nb=Math.floor(SEG/441),bo=Math.round(st/441),o0=(3*2)*SEG,o1=(3*2+1)*SEG;for(let b=0;b<nb;b++){const ix=bo+b;if(ix>=NB)break;let s=0;for(let i=b*441;i<b*441+441;i++){s+=S[o0+i]*S[o0+i]+S[o1+i]*S[o1+i];}const w=W[b*441+220];vE[ix]+=w*s/882;vW[ix]+=w;}vGot=true;}
+      {const nb=Math.floor(SEG/441),bo=Math.round(st/441),o0=(3*2)*SEG,o1=(3*2+1)*SEG;for(let b=0;b<nb;b++){const ix=bo+b;if(ix>=NB)break;let s=0;for(let i=b*441;i<b*441+441;i++){s+=S[o0+i]*S[o0+i]+S[o1+i]*S[o1+i];}const w=W[b*441+220];vE[ix]+=w*s/882;vW[ix]+=w;}vGot=true;
+         const n6=Math.floor(SEG*16000/44100)-1,o6=Math.round(st*16000/44100);for(let j=0;j<n6;j++){const ix=o6+j;if(ix>=N16)break;const i=Math.round(j*44100/16000);const a=Math.max(0,i-1),z=Math.min(SEG-1,i+1);let s=0;for(let q=a;q<=z;q++)s+=S[o0+q]+S[o1+q];const w=W[Math.min(SEG-1,i)];v16E[ix]+=w*s/(2*(z-a+1));v16W[ix]+=w;}v16Got=true;}
       for(let ch=0;ch<2;ch++)for(let k=0;k<6;k++){const o=(k*2+ch)*SEG,q=ch*SEG;if(k===GTR)for(let i=0;i<SEG;i++)G[q+i]=S[o+i];else for(let i=0;i<SEG;i++)B[q+i]+=S[o+i];}
       if(ot.dispose)ot.dispose();}
       const dt=performance.now()-tc;times.push(dt);
@@ -837,6 +844,7 @@ async function runLab(){
       prog(0.3+0.4*(c+1)/nCh);status('Splitting… part '+(c+1)+' of '+nCh+' ('+(dt/1000).toFixed(1)+' s for 7.8 s of audio)');
       log('part '+(c+1)+'/'+nCh+': '+(dt/1000).toFixed(1)+' s'+(used==='webgpu'?' (graphics chip)':used==='native'?' (all cores)':' (processor)'));}
     for(let i=0;i<N;i++){const w=ws[i]||1;gL[i]=gL[i]/w*sd+mean;gR[i]=gR[i]/w*sd+mean;rL[i]=rL[i]/w*sd+5*mean;rR[i]=rR[i]/w*sd+5*mean;}
+    if(v16Got){VOC16=new Float32Array(N16);for(let i=0;i<N16;i++)VOC16[i]=v16W[i]?v16E[i]/v16W[i]:0;}
     if(vGot){VOC=new Float32Array(NB);for(let i=0;i<NB;i++)VOC[i]=vW[i]?Math.sqrt(vE[i]/vW[i]):0;}
     const tot=times.reduce((a,b)=>a+b,0)/1000;
     log('done on '+used+(gpuLost?' (graphics chip reset '+gpuLost+'×)':'')+': '+tot.toFixed(1)+' s of model time for '+(N/SR).toFixed(1)+' s of audio ('+(tot/(N/SR)).toFixed(2)+'× the song length); whole run '+((performance.now()-t0)/1000).toFixed(1)+' s');

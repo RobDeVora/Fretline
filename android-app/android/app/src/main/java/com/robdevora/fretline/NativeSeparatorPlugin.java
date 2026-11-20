@@ -206,6 +206,7 @@ public class NativeSeparatorPlugin extends Plugin {
                 in.get(mix, 0, Math.min(mix.length, in.remaining()));
                 input = OnnxTensor.createTensor(env, FloatBuffer.wrap(mix), new long[]{1, 2, n});
                 float[] guitar = new float[2 * n], band = new float[2 * n];
+                float[] vocal16 = null; // the singing alone, mono, 16 kHz (for the speech model that times lyrics)
                 float[] vocal = null; // loudness of the singing every 10 ms (441 samples), so the Lab can time lyrics
                 try (OrtSession.Result res = session.run(Collections.singletonMap(inName, input))) {
                     OnnxValue v = res.get(0);
@@ -216,6 +217,18 @@ public class NativeSeparatorPlugin extends Plugin {
                     for (int k = 0; k < stems; k++) {
                         int base = k * 2 * n;
                         if (k == VOCALS) {
+                            int n16 = (int) ((long) n * 16000L / 44100L);
+                            vocal16 = new float[n16];
+                            for (int j = 0; j < n16; j++) {
+                                int a0 = (int) ((long) j * 44100L / 16000L);
+                                int b0 = (int) ((long) (j + 1) * 44100L / 16000L);
+                                if (b0 > n) b0 = n;
+                                if (b0 <= a0) b0 = a0 + 1;
+                                if (a0 >= n) { a0 = n - 1; b0 = n; }
+                                float sum = 0;
+                                for (int i = a0; i < b0; i++) sum += all[base + i] + all[base + n + i];
+                                vocal16[j] = sum / (2f * (b0 - a0));
+                            }
                             int nb = n / 441;
                             vocal = new float[nb];
                             for (int b = 0; b < nb; b++) {
@@ -235,6 +248,7 @@ public class NativeSeparatorPlugin extends Plugin {
                 r.put("guitar", encode(guitar));
                 r.put("band", encode(band));
                 if (vocal != null) r.put("vocal", encode(vocal));
+                if (vocal16 != null) r.put("vocal16", encode(vocal16));
                 r.put("ms", System.currentTimeMillis() - t0);
                 call.resolve(r);
             } catch (Throwable e) {
