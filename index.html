@@ -380,6 +380,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field"><label>Timing window</label><select id="sTiming"><option value="1">Normal</option><option value="1.5">Relaxed</option><option value="2">Very relaxed</option></select><span class="small">How early or late a note can be and still count.</span></div>
     <div class="field"><label>Chord matching</label><select id="sChordM"><option value="strict">Strict</option><option value="standard">Standard</option><option value="beginner">Beginner</option></select><span class="small">How complete a strummed chord must sound to count. Strict: every string. Standard: most strings, but a wrong extra note counts against you. Beginner: most strings, and a brushed extra string is fine. A different chord never counts, and single notes aren't affected.</span></div>
     <div class="field inline"><label>Show what I'm playing in the strike zone</label><input type="checkbox" id="sPlayed"></div>
+    <div class="field inline"><label>Basic Pitch second opinion (test: adds a column to reports)</label><input type="checkbox" id="sBp"></div>
     <div class="field inline"><label>Left-handed (mirror the fretboard and hand)</label><input type="checkbox" id="sLefty"></div>
     <div class="field inline"><label>Standard chord shapes in songs (F at fret 1, not 5-6-5)</label><input type="checkbox" id="sStd"></div>
     <div class="field inline"><label>Show the timing window as a shaded band</label><input type="checkbox" id="sBand"></div>
@@ -2484,7 +2485,7 @@ $('#iTip').onclick=()=>$('#iTip').classList.toggle('open');
 $('#iStart').onclick=()=>{$('#intro').classList.remove('show');$('#btnPlay').onclick();};
 $('#iListen').onclick=()=>{$('#intro').classList.remove('show');$('#btnListen').onclick();};
 function resetRun(){
-  stopVoices();G.peeks=0;
+  stopVoices();G.peeks=0;bpRecReset();
   if(!G.song)return;
   G.state=new Uint8Array(G.song.events.length);
   G.clock=-G.song.bpb;G.hits=0;G.misses=0;G.streak=0;G.best=0;G.scan=0;G.playedIdx=0;G.fxIdx=0;G.fxOn=true;G.fxSched={};G.lastClickBeat=Math.floor(G.clock)-1;
@@ -2876,12 +2877,13 @@ function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]
   if(det.onsetAt!==d.lastOn){d.picks++;d.lastOn=det.onsetAt;}if(det.pitchOnsetAt!==d.lastPo){d.pp=(d.pp||0)+1;d.lastPo=det.pitchOnsetAt;}
   if(analyser&&!e.strum&&!e.chord&&e.notes.length){const x=targetScore(e.notes[0],G.capo||0);if(x>d.ts)d.ts=x;}}
 function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.notes.push(txt);}
-function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);}}
+function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);if(G.song&&G.song.events[i])d.tw=now-((G.clock-G.song.events[i].t)/bps())*1000;}}
 function diagReport(){
   const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+(TUNING_ID!=='std'?' · tuning '+TUNING_ID:'')+(settings.chordMatch&&settings.chordMatch!=='strict'?' · chords '+settings.chordMatch:'')+(G.def&&G.def.recAudio?' · recording: backing '+(RECB.buf?(RECB.buf.duration).toFixed(0)+' s':'not loaded')+', real guitar '+(RECB.gbuf?'yes':G.def.recGuitar?'FAILED '+(RECB.gErr||''):'none (older song)')+', '+(G.def.recEvT?'from a sheet':'AI notes')+', offset '+(G.def.recOffset||0).toFixed(3)+' s':'')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+')'+(tuneOff?' · tuning '+(tuneOff>0?'+':'')+tuneOff+' cents':'')+' · '+G.hits+'/'+S.events.length];
+  if(settings.bpShadow)L.push('Basic Pitch second opinion (shadow, does not change hits): '+(G.bpState==='done'?G.bpInfo:G.bpState==='failed'?'failed: '+G.bpErr:G.bpState==='running'?'still listening, copy again in a moment':G.bpErr||G.bpState||'no run recorded yet')+(G.bpState==='done'?' · bp = its onset score for each target note (0-1; 0.5+ means it heard a new note start); bp also = a loud note it heard that was not a target':''));
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
-    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.notes.length?' · '+d.notes.join(','):''));});
+    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:''):(G.bpState==='running'?' · bp pending':''))+(d.notes.length?' · '+d.notes.join(','):''));});
   return L.join('\n');}
 function techWords(n){return n.pm?' – palm mute: rest the edge of your picking hand on the strings by the bridge':n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
 // "any octave" means one octave either way: two octaves off is almost always the pitch tracker locking onto a
@@ -2891,6 +2893,7 @@ function noteOk(n,m,cp){const a=n.midi+cp;const oct=x=>settings.anyOctave&&Math.
 function addPop(text,color){G.pops.push({text,color,t:performance.now()});if(G.pops.length>6)G.pops.shift();}
 function update(dt,now){
   if(!G.playing)return;
+  if(settings.bpShadow&&G.mode==='play'&&!G.listen&&!bpRec.on&&!bpRec.done)bpRecStart();
   const S=G.song,ev=S.events,st=G.state,b=bps();
   let target=G.clock+dt*b;G.waiting=false;
   if(G.mode==='wait'&&!G.listen){const i=firstPending();if(i>=0&&target>ev[i].t){target=Math.max(G.clock,ev[i].t);G.waiting=true;}}
@@ -2999,7 +3002,45 @@ function showMissed(){const box=$('#rMissed');if(!box)return;box.innerHTML='';co
 function shareReportFile(txt){const name='fretline-report-'+(G.def&&G.def.id||'song').replace(/[^\w-]+/g,'_')+'.txt';
   try{const f=new File([txt],name,{type:'text/plain'});if(navigator.canShare&&navigator.canShare({files:[f]})){return navigator.share({files:[f],title:'Fretline detection report'}).then(()=>true).catch(()=>false);}}catch(e){}
   try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);return Promise.resolve(true);}catch(e){return Promise.resolve(false);}}
+/* v1.133: Basic Pitch second opinion, SHADOW MODE (Settings > Basic Pitch second opinion). While you play, the mic is also
+   recorded (22.05 kHz mono, in memory only); when the run ends Spotify's Basic Pitch model (the same one the Lab uses)
+   listens to the recording and, for every step, the detection report gets 'bp 0.81/0.77' (its onset score for each
+   target note near that step) and 'bp also C4 0.62' (a loud note it heard that was NOT a target). It never changes
+   a hit or miss: it is there to compare with HIT/MISS across real lessons before it is allowed to help. */
+const bpRec={on:false,done:false,chunks:[],n:0,t0:0,phase:0,acc:0,cnt:0,sp:null,g:null,ratio:2};
+function bpRecStart(){
+  if(bpRec.on||bpRec.done||!settings.bpShadow||!micSrc||!actx)return;
+  try{const sp=actx.createScriptProcessor(4096,1,1),g=actx.createGain();g.gain.value=0;
+    bpRec.chunks=[];bpRec.n=0;bpRec.t0=0;bpRec.phase=0;bpRec.acc=0;bpRec.cnt=0;bpRec.ratio=actx.sampleRate/22050;let cur=new Float32Array(4096),ci=0;
+    sp.onaudioprocess=ev=>{const x=ev.inputBuffer.getChannelData(0);if(!bpRec.t0)bpRec.t0=performance.now()-x.length/actx.sampleRate*1000;
+      for(let i=0;i<x.length;i++){bpRec.acc+=x[i];bpRec.cnt++;bpRec.phase+=1;if(bpRec.phase>=bpRec.ratio){bpRec.phase-=bpRec.ratio;cur[ci++]=bpRec.acc/bpRec.cnt;bpRec.acc=0;bpRec.cnt=0;
+        if(ci===cur.length){bpRec.chunks.push(cur);bpRec.n+=ci;cur=new Float32Array(4096);ci=0;}}}
+      bpRec.flush=()=>{if(ci){bpRec.chunks.push(cur.slice(0,ci));bpRec.n+=ci;ci=0;}};};
+    micSrc.connect(sp);sp.connect(g);g.connect(actx.destination);bpRec.sp=sp;bpRec.g=g;bpRec.on=true;G.bpState='recording';
+  }catch(e){G.bpErr='could not record: '+e.message;bpRec.done=true;}}
+function bpRecStop(){if(!bpRec.on)return;try{if(bpRec.flush)bpRec.flush();micSrc.disconnect(bpRec.sp);bpRec.sp.disconnect();bpRec.g.disconnect();bpRec.sp.onaudioprocess=null;}catch(e){}bpRec.on=false;}
+function bpRecReset(){bpRecStop();bpRec.done=false;bpRec.chunks=[];bpRec.n=0;bpRec.t0=0;G.bpState=null;G.bpErr=null;}
+function loadScriptOnce(url){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=url;s.onload=res;s.onerror=()=>rej(new Error('could not load '+url));document.head.appendChild(s);});}
+async function bpAnalyse(){
+  bpRecStop();bpRec.done=true;if(!bpRec.n||bpRec.n<22050){G.bpState=null;return;}
+  const D=G.diag;const pcm=new Float32Array(bpRec.n);let o=0;for(const c of bpRec.chunks){pcm.set(c,o);o+=c.length;}
+  G.bpState='running';const T0=performance.now();
+  try{
+    if(!window.BP)await loadScriptOnce('lab/basic-pitch/basic-pitch.bundle.js');
+    try{await BP.tf.setBackend('webgl');}catch(e){}await BP.tf.ready();const be=BP.tf.getBackend();
+    const bp=new BP.BasicPitch('lab/basic-pitch/model.json');const on=[];
+    await bp.evaluateModel(pcm,(f,oo,c)=>{for(const r of oo)on.push(r);},p=>{G.bpProg=p;});
+    const FR=22050/256,S=G.song,cp=G.capo||0;let n=0;
+    S.events.forEach((e,i)=>{const d=D&&D[i];if(!d||d.tw==null||!e.notes||!e.notes.length)return;const t=(d.tw-bpRec.t0)/1000;
+      const a=Math.max(0,Math.floor((t-0.2)*FR)),b=Math.min(on.length-1,Math.ceil((t+0.3)*FR));if(b<a)return;
+      const tg=e.notes.map(x=>x.midi+cp),best=new Array(88).fill(0);for(let f=a;f<=b;f++){const r=on[f];for(let k=0;k<88;k++)if(r[k]>best[k])best[k]=r[k];}
+      d.bp=tg.map(m=>m>=21&&m<=108?best[m-21]:0);let ex=-1,ev=0;for(let k=0;k<88;k++){if(tg.some(m=>Math.abs(m-(k+21))===0))continue;if(best[k]>ev){ev=best[k];ex=k+21;}}
+      d.bpx=ev>=0.5?midiToName(ex)+' '+ev.toFixed(2):null;n++;});
+    G.bpState='done';G.bpInfo='Basic Pitch ('+be+', '+((performance.now()-T0)/1000).toFixed(1)+' s for '+(bpRec.n/22050).toFixed(0)+' s of audio, '+n+' steps)';
+  }catch(e){G.bpState='failed';G.bpErr=String(e&&e.message||e);}
+}
 function finish(){
+  if(settings.bpShadow&&bpRec.on)bpAnalyse();
   $('#rNext').style.display='none';
   G.playing=false;G.finished=true;recStop();keepAwake(false);updateButtons();
   const total=G.song.events.length||1;const pct=Math.round(G.hits/total*100);
@@ -3530,7 +3571,7 @@ function tunerUpdate(){
 let settingsOpen=false;
 function syncSettingsUI(){{const P=IS_APP&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;
   $('#appBuild').innerHTML=!IS_APP?'':P&&P.outputRoute?'Android app: latest build (full screen, sound delay per output'+(outRoute?' · sound now on '+ROUTE_NAMES[outRoute]:'')+')':'Android app: an older build. <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">Install the latest Fretline.apk</a> for full screen and a sound delay for each output.';}$('#sFingerGuide').checked=settings.fingerGuide!==false;$('#cNoteBy').value=settings.noteBy==='string'?'string':'finger';$('#sLyn').value=settings.lyrNudge||0;$('#sLynV').textContent=((settings.lyrNudge||0)>0?'+':'')+(+settings.lyrNudge||0).toFixed(1)+' s';$('#sVoxLib').checked=settings.vocalLibrary!==false;$('#sVoxFile').checked=settings.vocalFiles!==false;$('#sVoxMade').checked=settings.vocalMadeUp!==false;
-  $('#sPlayed').checked=settings.played!==false;$('#sStd').checked=settings.stdShapes!==false;$('#sLefty').checked=settings.lefty===true;$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sChordM').value=settings.chordMatch||'strict';$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+  $('#sPlayed').checked=settings.played!==false;$('#sStd').checked=settings.stdShapes!==false;$('#sLefty').checked=settings.lefty===true;$('#sBp').checked=settings.bpShadow===true;$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sChordM').value=settings.chordMatch||'strict';$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();fillMicList();};
@@ -3565,6 +3606,7 @@ $('#sStrumView').onchange=e=>{settings.strumView=e.target.value;saveSettings();}
 $('#sTiming').onchange=e=>{settings.timing=+e.target.value;saveSettings();};
 $('#sChordM').onchange=e=>{settings.chordMatch=e.target.value;saveSettings();};
 $('#sPlayed').onchange=e=>{settings.played=e.target.checked;saveSettings();};
+$('#sBp').onchange=e=>{settings.bpShadow=e.target.checked;saveSettings();};
 $('#sLefty').onchange=e=>{settings.lefty=e.target.checked;saveSettings();};
 $('#sStd').onchange=e=>{settings.stdShapes=e.target.checked;saveSettings();G.def&&delete G.def._built;showHint('Applies the next time you open a song',3000);};
 $('#sBand').onchange=e=>{settings.band=e.target.checked;saveSettings();};
@@ -4456,7 +4498,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.132';
+const APP_VERSION='1.133';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
