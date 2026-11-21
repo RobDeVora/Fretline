@@ -3003,7 +3003,7 @@ function shareReportFile(txt){const name='fretline-report-'+(G.def&&G.def.id||'s
   /* v1.134: says what really happened: 'shared' (the share sheet took the file), 'downloaded' (browser only), or 'none'. The Android app's web view
      can't share files or download, so there the report is copied to the clipboard instead (see the button). */
   try{const f=new File([txt],name,{type:'text/plain'});if(navigator.canShare&&navigator.canShare({files:[f]})){return navigator.share({files:[f],title:'Fretline detection report'}).then(()=>'shared').catch(()=>'none');}}catch(e){}
-  if(IS_APP)return Promise.resolve('none');
+  if(IS_APP){const P=sfPlug();if(P&&P.shareText)return P.shareText({name,text:txt}).then(()=>'shared').catch(()=>'none');return Promise.resolve('none');} /* v1.135: native share sheet */
   try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);return Promise.resolve('downloaded');}catch(e){return Promise.resolve('none');}}
 /* v1.133: Basic Pitch second opinion, SHADOW MODE (Settings > Basic Pitch second opinion). While you play, the mic is also
    recorded (22.05 kHz mono, in memory only); when the run ends Spotify's Basic Pitch model (the same one the Lab uses)
@@ -4504,7 +4504,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.134';
+const APP_VERSION='1.135';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

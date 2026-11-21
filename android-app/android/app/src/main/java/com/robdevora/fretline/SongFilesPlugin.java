@@ -2,6 +2,8 @@ package com.robdevora.fretline;
 
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Intent;
+import androidx.core.content.FileProvider;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -46,6 +48,35 @@ public class SongFilesPlugin extends Plugin {
     private File legacyDir(String dir) {
         File base = getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
         return new File(new File(base, ROOT), seg(dir, "Song"));
+    }
+
+    /** shareText({name, text}) → {}. v1.135: writes the text to a file in the app's cache and opens Android's share sheet with it
+     *  as a .txt attachment (Messages, Gmail, Drive...). Used for the detection report. */
+    @PluginMethod
+    public void shareText(PluginCall call) {
+        final String name = seg(call.getString("name"), "fretline-report.txt");
+        final String text = call.getString("text");
+        if (text == null) { call.reject("no text"); return; }
+        worker.execute(() -> {
+            try {
+                File dir = new File(getContext().getCacheDir(), "shared");
+                if (!dir.exists()) dir.mkdirs();
+                File f = new File(dir, name);
+                try (OutputStream os = new FileOutputStream(f)) { os.write(text.getBytes("UTF-8")); }
+                Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", f);
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType("text/plain");
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.putExtra(Intent.EXTRA_SUBJECT, "Fretline detection report");
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                Intent chooser = Intent.createChooser(send, "Share report");
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(chooser);
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("share failed: " + e.getMessage());
+            }
+        });
     }
 
     /** write({dir, name, text | data (base64), mime}) → {path}. An existing file of that name is replaced. */
