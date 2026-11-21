@@ -95,6 +95,14 @@ details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14p
 #iTip{margin:4px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
 #iTip.open{-webkit-line-clamp:unset;display:block}
 #iTip:not(.open)::after{content:'';}
+/* v1.137: on a phone held sideways the results card is two columns, with the buttons pinned to its bottom so they can always be tapped */
+.resCard .row{position:sticky;bottom:-18px;background:var(--panel);padding:8px 0 4px;margin-top:6px;z-index:2}
+@media (max-height:560px) and (orientation:landscape){
+  .resCard{max-width:780px;display:grid;grid-template-columns:1fr 1fr;column-gap:16px;align-items:start;padding:10px 14px;max-height:96%}
+  .resCard .row{grid-column:1 / -1;bottom:-10px}
+  #rMissed{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}#rMissed div.small{flex-basis:100%}#rMissed button,#rReport button{width:auto}#rMissed button,#rReport button{margin:0!important;padding:6px 10px}#rReport{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+  .resCard h2{font-size:17px;margin:0}.resCard .stars{font-size:20px}.resCard .big{font-size:34px;margin:0}.resCard p{margin:4px 0}
+}
 .stabs{display:flex;gap:4px;overflow-x:auto;position:sticky;top:-18px;margin:0 -18px 10px;padding:8px 18px;background:var(--panel);z-index:2;border-bottom:1px solid var(--line);scrollbar-width:none}
 .stabs::-webkit-scrollbar{display:none}
 .stabs button{flex:0 0 auto;padding:7px 11px;font-size:13px;border-radius:999px}
@@ -223,7 +231,8 @@ details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14p
       </div>
     </div>
     <div class="overlay" id="results" style="position:fixed">
-      <div class="card" style="text-align:center">
+      <div class="card resCard" style="text-align:center">
+        <div class="resL">
         <h2 id="rTitle">Nice work!</h2>
         <div class="stars" id="rStars">★★★</div>
         <div class="big" id="rPct">0%</div>
@@ -231,8 +240,11 @@ details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14p
         <p class="small" id="rStrings" style="margin-top:-4px;color:var(--warn)"></p>
         <p class="small" id="rGrades" style="margin-top:-4px"></p>
         <p class="small" id="rTiming" style="margin-top:-4px"></p>
+        </div><div class="resR">
         <div id="rMissed" style="margin:4px 0"></div>
+        <p class="small" id="rBp" style="margin:4px 0;display:none"></p>
         <div id="rReport" style="margin:4px 0"></div>
+        </div>
         <div class="row" style="justify-content:center">
           <button id="rBack">Back</button>
           <button id="rNew" style="display:none">New track</button>
@@ -2996,8 +3008,8 @@ function missedBars(){const S=G.song,st=G.state;if(!S||!st||G.mode!=='play')retu
   S.events.forEach((e,i)=>{if(st[i]===2){const k=Math.max(0,Math.floor(e.t/bpb+1e-6));m.set(k,(m.get(k)||0)+1);}});
   return[...m.entries()].sort((x,y)=>y[1]-x[1]||x[0]-y[0]).slice(0,3);}
 function showMissed(){const box=$('#rMissed');if(!box)return;box.innerHTML='';const t=missedBars();if(!t.length)return;
-  const p=document.createElement('div');p.className='small';p.textContent='Most missed:';box.appendChild(p);
-  for(const [bar,n] of t){const b=document.createElement('button');b.className='small';b.style.margin='3px';b.textContent='Bar '+(bar+1)+' ×'+n+' · practise';
+  const p=document.createElement('div');p.className='small';p.textContent='Most missed bars (tap to practise):';box.appendChild(p);
+  for(const [bar,n] of t){const b=document.createElement('button');b.className='small';b.style.margin='3px';b.textContent='Bar '+(bar+1)+' ×'+n;
     b.onclick=()=>{const bpb=G.song.bpb||4;resetRun();setLoop(bar*bpb,(bar+2)*bpb);seekTo(bar*bpb);G.speed=Math.min(G.speed,0.8);updateButtons();$('#btnPlay').onclick();};box.appendChild(b);}}
 function shareReportFile(txt){const name='fretline-report-'+(G.def&&G.def.id||'song').replace(/[^\w-]+/g,'_')+'.txt';
   /* v1.134: says what really happened: 'shared' (the share sheet took the file), 'downloaded' (browser only), or 'none'. The Android app's web view
@@ -3022,12 +3034,15 @@ function bpRecStart(){
     micSrc.connect(sp);sp.connect(g);g.connect(actx.destination);bpRec.sp=sp;bpRec.g=g;bpRec.on=true;G.bpState='recording';
   }catch(e){G.bpErr='could not record: '+e.message;bpRec.done=true;}}
 function bpRecStop(){if(!bpRec.on)return;try{if(bpRec.flush)bpRec.flush();micSrc.disconnect(bpRec.sp);bpRec.sp.disconnect();bpRec.g.disconnect();bpRec.sp.onaudioprocess=null;}catch(e){}bpRec.on=false;}
+function bpStatusUI(){const el=$('#rBp');if(!el)return;if(!settings.bpShadow||!G.bpState||G.bpState==='recording'){el.style.display='none';return;}
+  el.style.display='block';el.style.color=G.bpState==='failed'?'var(--warn)':G.bpState==='done'?'var(--accent)':'var(--muted)';
+  el.textContent=G.bpState==='running'?'Basic Pitch is listening to your playing… '+Math.round(100*(G.bpProg||0))+'%. Wait for it to finish before copying the report.':G.bpState==='done'?'✓ Basic Pitch finished. The report now has its columns.':'Basic Pitch could not finish: '+(G.bpErr||'unknown');}
 function bpRecReset(){bpRecStop();bpRec.done=false;bpRec.chunks=[];bpRec.n=0;bpRec.t0=0;G.bpState=null;G.bpErr=null;}
 function loadScriptOnce(url){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=url;s.onload=res;s.onerror=()=>rej(new Error('could not load '+url));document.head.appendChild(s);});}
 async function bpAnalyse(){
   bpRecStop();bpRec.done=true;if(!bpRec.n||bpRec.n<22050){G.bpState=null;return;}
   const D=G.diag;const pcm=new Float32Array(bpRec.n);let o=0;for(const c of bpRec.chunks){pcm.set(c,o);o+=c.length;}
-  G.bpState='running';G.bpTried='';const T0=performance.now();
+  G.bpState='running';G.bpTried='';G.bpProg=0;const T0=performance.now();bpStatusUI();
   try{
     if(!window.BP)await loadScriptOnce('lab/basic-pitch/basic-pitch.bundle.js');
     /* v1.136: on the owner's phone the GPU (webgl) backend failed ('Failed to compile fragment shader'): fall back to the plain CPU one */
@@ -3035,7 +3050,7 @@ async function bpAnalyse(){
     for(const want of (window.__bpBackend?[window.__bpBackend]:['webgl','cpu'])){
       try{await BP.tf.setBackend(want);await BP.tf.ready();be=BP.tf.getBackend();on=[];
         const bp=new BP.BasicPitch('lab/basic-pitch/model.json');
-        await bp.evaluateModel(pcm,(f,oo,c)=>{for(const r of oo)on.push(r);},p=>{G.bpProg=p;});break;
+        await bp.evaluateModel(pcm,(f,oo,c)=>{for(const r of oo)on.push(r);},p=>{G.bpProg=p;bpStatusUI();});break;
       }catch(e){G.bpTried=(G.bpTried||'')+want+': '+String(e&&e.message||e).slice(0,60)+'; ';if(want==='cpu'||window.__bpBackend)throw e;}}
     const FR=22050/256,S=G.song,cp=G.capo||0;let n=0;
     S.events.forEach((e,i)=>{const d=D&&D[i];if(!d||d.tw==null||!e.notes||!e.notes.length)return;const t=(d.tw-bpRec.t0)/1000;
@@ -3043,8 +3058,8 @@ async function bpAnalyse(){
       const tg=e.notes.map(x=>x.midi+cp),best=new Array(88).fill(0);for(let f=a;f<=b;f++){const r=on[f];for(let k=0;k<88;k++)if(r[k]>best[k])best[k]=r[k];}
       d.bp=tg.map(m=>m>=21&&m<=108?best[m-21]:0);let ex=-1,ev=0;for(let k=0;k<88;k++){if(tg.some(m=>Math.abs(m-(k+21))===0))continue;if(best[k]>ev){ev=best[k];ex=k+21;}}
       d.bpx=ev>=0.5?midiToName(ex)+' '+ev.toFixed(2):null;n++;});
-    G.bpState='done';G.bpInfo='Basic Pitch ('+be+(G.bpTried?' after '+G.bpTried:'')+', '+((performance.now()-T0)/1000).toFixed(1)+' s for '+(bpRec.n/22050).toFixed(0)+' s of audio, '+n+' steps)';
-  }catch(e){G.bpState='failed';G.bpErr=String(e&&e.message||e);}
+    G.bpState='done';bpStatusUI();G.bpInfo='Basic Pitch ('+be+(G.bpTried?' after '+G.bpTried:'')+', '+((performance.now()-T0)/1000).toFixed(1)+' s for '+(bpRec.n/22050).toFixed(0)+' s of audio, '+n+' steps)';
+  }catch(e){G.bpState='failed';G.bpErr=String(e&&e.message||e);bpStatusUI();}
 }
 function finish(){
   if(settings.bpShadow&&bpRec.on)bpAnalyse();
@@ -3076,7 +3091,7 @@ function finish(){
       if(how==='shared'){b2.textContent='✓ Shared';return;}if(how==='downloaded'){b2.textContent='✓ Downloaded as a .txt file';return;}
       let ok=false;try{await navigator.clipboard.writeText(txt);ok=true;}catch(e){}
       if(ok)b2.textContent='✓ Copied to the clipboard (file sharing is not available here). Paste it in a message';else showMsg('Detection report','<textarea readonly style="min-height:220px">'+esc(txt)+'</textarea><p class="small">Select all and copy.</p>');};box.appendChild(b2);}}}
-  showMissed();
+  showMissed();bpStatusUI();
   {const ds=G.deadStats;const box=$('#rStrings');if(box){box.textContent='';if(ds&&G.mode==='play'){const fmt=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([s,n])=>SNAME[s]+' ×'+n).join(', ');
     const parts=[];if(Object.keys(ds.dead).length)parts.push('Dead strings: '+fmt(ds.dead));if(Object.keys(ds.ring).length)parts.push('Muted strings that rang: '+fmt(ds.ring));
     box.textContent=parts.length?parts.join(' · '):'';}}}
@@ -4508,7 +4523,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.136';
+const APP_VERSION='1.137';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
