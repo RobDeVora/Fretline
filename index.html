@@ -3028,9 +3028,13 @@ function bpRecStart(){
   if(bpRec.on||bpRec.done||!settings.bpShadow||!micSrc||!actx)return;
   try{const sp=actx.createScriptProcessor(4096,1,1),g=actx.createGain();g.gain.value=0;
     bpRec.chunks=[];bpRec.n=0;bpRec.t0=0;bpRec.phase=0;bpRec.acc=0;bpRec.cnt=0;bpRec.ratio=actx.sampleRate/22050;let cur=new Float32Array(4096),ci=0;
-    sp.onaudioprocess=ev=>{const x=ev.inputBuffer.getChannelData(0);if(!bpRec.t0)bpRec.t0=performance.now()-x.length/actx.sampleRate*1000;
-      for(let i=0;i<x.length;i++){bpRec.acc+=x[i];bpRec.cnt++;bpRec.phase+=1;if(bpRec.phase>=bpRec.ratio){bpRec.phase-=bpRec.ratio;cur[ci++]=bpRec.acc/bpRec.cnt;bpRec.acc=0;bpRec.cnt=0;
-        if(ci===cur.length){bpRec.chunks.push(cur);bpRec.n+=ci;cur=new Float32Array(4096);ci=0;}}}
+    bpRec.gap=0;bpRec.lastPT=null;
+    const feed=v=>{bpRec.acc+=v;bpRec.cnt++;bpRec.phase+=1;if(bpRec.phase>=bpRec.ratio){bpRec.phase-=bpRec.ratio;cur[ci++]=bpRec.acc/bpRec.cnt;bpRec.acc=0;bpRec.cnt=0;
+        if(ci===cur.length){bpRec.chunks.push(cur);bpRec.n+=ci;cur=new Float32Array(4096);ci=0;}}};
+    sp.onaudioprocess=ev=>{const x=ev.inputBuffer.getChannelData(0),sr=actx.sampleRate;if(!bpRec.t0)bpRec.t0=performance.now()-x.length/sr*1000;
+      /* v1.140: if the browser dropped audio buffers (busy phone) the recording got shorter than real time and every later step pointed at the wrong moment; fill dropped time with silence (audio-clock based) */
+      const pt=ev.playbackTime;if(isFinite(pt)&&pt>0){if(bpRec.lastPT!=null){const gap=pt-bpRec.lastPT-x.length/sr;if(gap>0.5*x.length/sr&&gap<30){const k=Math.round(gap*sr);for(let i=0;i<k;i++)feed(0);bpRec.gap+=gap;}}bpRec.lastPT=pt;}
+      for(let i=0;i<x.length;i++)feed(x[i]);
       bpRec.flush=()=>{if(ci){bpRec.chunks.push(cur.slice(0,ci));bpRec.n+=ci;ci=0;}};};
     micSrc.connect(sp);sp.connect(g);g.connect(actx.destination);bpRec.sp=sp;bpRec.g=g;bpRec.on=true;G.bpState='recording';
   }catch(e){G.bpErr='could not record: '+e.message;bpRec.done=true;}}
@@ -3054,14 +3058,22 @@ async function bpAnalyse(){
         await bp.evaluateModel(pcm,(f,oo,c)=>{for(const r of oo)on.push(r);},p=>{G.bpProg=p;bpStatusUI();});break;
       }catch(e){G.bpTried=(G.bpTried||'')+want+': '+String(e&&e.message||e).slice(0,60)+'; ';if(want==='cpu'||window.__bpBackend)throw e;}}
     const FR=22050/256,S=G.song,cp=G.capo||0;let n=0;
-    S.events.forEach((e,i)=>{const d=D&&D[i];if(!d||d.tw==null||!e.notes||!e.notes.length)return;const t=(d.tw-bpRec.t0)/1000;
+    /* v1.140: align steps to the recording by the data: for every step find where Basic Pitch heard ITS target pitch start (within +-0.6 s of the expected moment), then use the median of the nearby steps' offsets as that step's shift. Removes slow clock drift; a single late/wrong hit still stands out from its neighbours. */
+    const off=new Array(S.events.length).fill(null);
+    S.events.forEach((e,i)=>{const d=D&&D[i];if(!d||d.tw==null||!e.notes||e.notes.length!==1)return;const m=e.notes[0].midi+cp;if(m<21||m>108)return;
+      const t=(d.tw-bpRec.t0)/1000,a0=Math.max(0,Math.floor((t-0.6)*FR)),b0=Math.min(on.length-1,Math.ceil((t+0.6)*FR));let bs=0,bf=-1;
+      for(let f=a0;f<=b0;f++){const v=on[f][m-21];if(v>bs){bs=v;bf=f;}}if(bf>=0&&bs>=0.6)off[i]=bf/FR-t;});
+    const shift=new Array(S.events.length).fill(0);let sMin=0,sMax=0;
+    for(let i=0;i<S.events.length;i++){const w=[];for(let j=Math.max(0,i-8);j<=Math.min(S.events.length-1,i+8);j++)if(off[j]!=null)w.push(off[j]);
+      if(w.length>=3){w.sort((p,q)=>p-q);shift[i]=w[w.length>>1];sMin=Math.min(sMin,shift[i]);sMax=Math.max(sMax,shift[i]);}}
+    S.events.forEach((e,i)=>{const d=D&&D[i];if(!d||d.tw==null||!e.notes||!e.notes.length)return;const t=(d.tw-bpRec.t0)/1000+shift[i];
       const a=Math.max(0,Math.floor((t-0.2)*FR)),b=Math.min(on.length-1,Math.ceil((t+0.3)*FR));if(b<a)return;
       const tg=e.notes.map(x=>x.midi+cp),best=new Array(88).fill(0);for(let f=a;f<=b;f++){const r=on[f];for(let k=0;k<88;k++)if(r[k]>best[k])best[k]=r[k];}
       d.bp=tg.map(m=>m>=21&&m<=108?best[m-21]:0);let ex=-1,ev=0;for(let k=0;k<88;k++){if(tg.some(m=>Math.abs(m-(k+21))===0))continue;if(best[k]>ev){ev=best[k];ex=k+21;}}
       d.bpx=ev>=0.5?midiToName(ex)+' '+ev.toFixed(2):null;n++;});
     /* v1.138: a single-note step credited as a HIT where Basic Pitch heard no new note of that pitch (onset < 0.5) is flagged, not re-scored */
     G.bpDoubt=[];S.events.forEach((e,i)=>{const d=D&&D[i];if(d&&d.bp&&e.notes&&e.notes.length===1&&G.state[i]===1&&d.bp[0]<0.5){d.doubt=true;G.bpDoubt.push(i);}});
-    G.bpState='done';bpStatusUI();G.bpInfo='Basic Pitch ('+be+(G.bpTried?' after '+G.bpTried:'')+', '+((performance.now()-T0)/1000).toFixed(1)+' s for '+(bpRec.n/22050).toFixed(0)+' s of audio, '+n+' steps)';
+    G.bpState='done';bpStatusUI();G.bpInfo='Basic Pitch ('+be+(G.bpTried?' after '+G.bpTried:'')+', '+((performance.now()-T0)/1000).toFixed(1)+' s for '+(bpRec.n/22050).toFixed(0)+' s of audio, '+n+' steps'+(bpRec.gap>0.2?', filled '+bpRec.gap.toFixed(1)+' s of dropped audio':'')+', aligned '+Math.round(sMin*1000)+'..'+Math.round(sMax*1000)+' ms)';
   }catch(e){G.bpState='failed';G.bpErr=String(e&&e.message||e);bpStatusUI();}
 }
 function finish(){
@@ -4526,7 +4538,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.139';
+const APP_VERSION='1.140';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
