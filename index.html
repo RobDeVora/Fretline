@@ -2779,7 +2779,8 @@ function matchEvent(e,i,now){
   if(m!=null){const R=G.heardRecent||(G.heardRecent=[]);if(!R.length||R[R.length-1].m!==m||now-R[R.length-1].at>100)R.push({at:now,m});}
   const legato=e.notes.some(n=>n.tech==='h'||n.tech==='p'||n.tech==='s');
   const pick=Math.max(det.onsetAt,det.pitchOnsetAt||-1);
-  const fresh=legato||(pick>G.lastHitAt&&now-pick<700);
+  /* v1.139: the pick must also have been made inside this step's window (a pick from before it opened credited the step 'okay -540 ms, picks 0/0') */
+  const fresh=legato||(pick>G.lastHitAt&&now-pick<700&&(G._winAt==null||pick>=G._winAt-30));
   // 1) the pitch tracker heard exactly this note, freshly played (not one that was already ringing)
   //    A reading is confirmed by the targeted check (the tracker can report a note that isn't there when two
   //    notes ring together). An octave reading only counts if it's confirmed more strongly: the expected note itself is clearly there, or the octave
@@ -4525,7 +4526,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.138';
+const APP_VERSION='1.139';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
