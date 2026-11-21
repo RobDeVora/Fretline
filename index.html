@@ -2893,7 +2893,7 @@ function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.note
 function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);if(G.song&&G.song.events[i])d.tw=now-((G.clock-G.song.events[i].t)/bps())*1000;}}
 function diagReport(){
   const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+(TUNING_ID!=='std'?' · tuning '+TUNING_ID:'')+(settings.chordMatch&&settings.chordMatch!=='strict'?' · chords '+settings.chordMatch:'')+(G.def&&G.def.recAudio?' · recording: backing '+(RECB.buf?(RECB.buf.duration).toFixed(0)+' s':'not loaded')+', real guitar '+(RECB.gbuf?'yes':G.def.recGuitar?'FAILED '+(RECB.gErr||''):'none (older song)')+', '+(G.def.recEvT?'from a sheet':'AI notes')+', offset '+(G.def.recOffset||0).toFixed(3)+' s':'')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+')'+(tuneOff?' · tuning '+(tuneOff>0?'+':'')+tuneOff+' cents':'')+' · '+G.hits+'/'+S.events.length];
-  if(settings.bpShadow)L.push('Basic Pitch second opinion (shadow, does not change hits): '+(G.bpState==='done'?G.bpInfo:G.bpState==='failed'?'failed: '+G.bpErr:G.bpState==='running'?'still listening ('+Math.round(100*(G.bpProg||0))+'%), copy again in a moment':G.bpErr||G.bpState||'no run recorded yet')+(G.bpState==='done'?' · bp = its onset score for each target note (0-1; 0.5+ means it heard a new note start); bp also = a loud note it heard that was not a target':''));
+  if(settings.bpShadow)L.push('Basic Pitch second opinion (shadow, does not change hits): '+(G.bpState==='done'?G.bpInfo:G.bpState==='failed'?'failed: '+G.bpErr:G.bpState==='running'?'still listening ('+Math.round(100*(G.bpProg||0))+'%), copy again in a moment':G.bpErr||G.bpState||'no run recorded yet')+(G.bpState==='done'&&G.bpStrict?' · strict count '+(G.bpStrict.hits-(G.bpStrict.h1-G.bpStrict.c1))+'/'+G.bpStrict.total+' (normal '+G.bpStrict.hits+'), '+(G.bpStrict.ok?'alignment trusted':'alignment NOT trusted: ignore doubts'):'')+(G.bpState==='done'?' · bp = its onset score for each target note (0-1; 0.5+ means it heard a new note start); bp also = a loud note it heard that was not a target':''));
   if(settings.bpShadow&&bpRec.n>=22050)L.push('Audio of this run: '+(bpRec.n/22050).toFixed(0)+' s, 22.05 kHz mono (run '+(G.runId||'?')+'); @N s on each step = seconds into that audio where the step was expected');
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
@@ -3052,7 +3052,7 @@ function bpRecStart(){
 function bpRecStop(){if(!bpRec.on)return;try{if(bpRec.flush)bpRec.flush();micSrc.disconnect(bpRec.sp);bpRec.sp.disconnect();bpRec.g.disconnect();bpRec.sp.onaudioprocess=null;}catch(e){}bpRec.on=false;}
 function bpStatusUI(){const el=$('#rBp');if(!el)return;if(!settings.bpShadow||!G.bpState||G.bpState==='recording'){el.style.display='none';return;}
   el.style.display='block';el.style.color=G.bpState==='failed'?'var(--warn)':G.bpState==='done'?'var(--accent)':'var(--muted)';
-  el.textContent=G.bpState==='running'?'Basic Pitch is listening to your playing… '+Math.round(100*(G.bpProg||0))+'%. Wait for it to finish before copying the report.':G.bpState==='done'?'✓ Basic Pitch finished. The report now has its columns.'+(G.bpDoubt&&G.bpDoubt.length?' It doubts '+G.bpDoubt.length+' of your hits (it heard no new note of that pitch): steps '+G.bpDoubt.slice(0,10).map(i=>'#'+i).join(', ')+(G.bpDoubt.length>10?'…':'')+'. Your score is unchanged.':' It agreed with all your hits.'):'Basic Pitch could not finish: '+(G.bpErr||'unknown');}
+  el.textContent=G.bpState==='running'?'Basic Pitch is listening to your playing… '+Math.round(100*(G.bpProg||0))+'%. Wait for it to finish before copying the report.':G.bpState==='done'?'✓ Basic Pitch finished. The report now has its columns.'+(G.bpDoubt&&G.bpDoubt.length?(G.bpStrict&&G.bpStrict.ok?' Strict count (Basic Pitch must confirm each single-note hit): '+(G.bpStrict.hits-(G.bpStrict.h1-G.bpStrict.c1))+' / '+G.bpStrict.total+' vs normal '+G.bpStrict.hits+' / '+G.bpStrict.total+'.':G.bpStrict&&G.bpStrict.h1>=8?' (Its doubts look like a timing mismatch here, so ignore them this time.)':'')+' It doubts '+G.bpDoubt.length+' of your hits (it heard no new note of that pitch): steps '+G.bpDoubt.slice(0,10).map(i=>'#'+i).join(', ')+(G.bpDoubt.length>10?'…':'')+'. Your score is unchanged.':' It agreed with all your hits.'):'Basic Pitch could not finish: '+(G.bpErr||'unknown');}
 function bpRecReset(){bpRecStop();bpRec.done=false;bpRec.chunks=[];bpRec.n=0;bpRec.t0=0;G.bpState=null;G.bpErr=null;}
 function loadScriptOnce(url){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=url;s.onload=res;s.onerror=()=>rej(new Error('could not load '+url));document.head.appendChild(s);});}
 async function bpAnalyse(){
@@ -3075,10 +3075,15 @@ async function bpAnalyse(){
     S.events.forEach((e,i)=>{const d=D&&D[i];const ns=e.notes&&e.notes.length?e.notes:(e.strum&&e.strum!=='x'&&e.snotes&&e.snotes.length?e.snotes:null);if(!d||d.tw==null||!ns)return;
       const t=(d.tw-bpRec.t0)/1000,a0=Math.max(0,Math.floor((t-0.6)*FR)),b0=Math.min(on.length-1,Math.ceil((t+0.6)*FR));let bs=0,bf=-1;
       for(const x of ns){const m=x.midi+cp;if(m<21||m>108)continue;for(let f=a0;f<=b0;f++){const v=on[f][m-21];if(v>bs){bs=v;bf=f;}}}
-      if(bf>=0&&bs>=0.6){off[i]=bf/FR-t;d.bpo=Math.round(off[i]*1000);}});
-    const shift=new Array(S.events.length).fill(0);let sMin=0,sMax=0;
-    for(let i=0;i<S.events.length;i++){const w=[];for(let j=Math.max(0,i-8);j<=Math.min(S.events.length-1,i+8);j++)if(off[j]!=null)w.push(off[j]);
-      if(w.length>=3){w.sort((p,q)=>p-q);shift[i]=w[w.length>>1];sMin=Math.min(sMin,shift[i]);sMax=Math.max(sMax,shift[i]);}}
+      if(bf>=0&&bs>=0.6){off[i]=bf/FR-t;d.bpo=Math.round(off[i]*1000);d.bpsc=bs;}});
+    /* v1.144: robust alignment. 1) a straight line through the confident matches (Theil-Sen: median of pairwise slopes, so wrong-note steps can't drag it) removes slow clock drift; 2) what is left is smoothed by the median of the nearby steps and limited to +-120 ms so a run of wrong notes can't pull the window onto the neighbouring step. */
+    const NE=S.events.length,shift=new Array(NE).fill(0);let sMin=0,sMax=0;
+    const pts=[];for(let i=0;i<NE;i++)if(off[i]!=null&&Math.abs(off[i])<=0.45&&D[i]&&D[i].bpo!=null&&D[i].bpsc>=0.8)pts.push([(D[i].tw-bpRec.t0)/1000,off[i]]);
+    let sl=0,ic=0;if(pts.length>=6){const sls=[];for(let a=0;a<pts.length;a++)for(let b=a+1;b<pts.length;b++)if(pts[b][0]-pts[a][0]>5)sls.push((pts[b][1]-pts[a][1])/(pts[b][0]-pts[a][0]));
+      if(sls.length>=5){sls.sort((p,q)=>p-q);sl=sls[sls.length>>1];if(Math.abs(sl)>0.02)sl=Math.sign(sl)*0.02;const ics=pts.map(q=>q[1]-sl*q[0]).sort((p,q)=>p-q);ic=ics[ics.length>>1];}else{const ics=pts.map(q=>q[1]).sort((p,q)=>p-q);ic=ics[ics.length>>1];}}
+    G.bpFit={n:pts.length,slope:sl,icpt:ic};
+    for(let i=0;i<NE;i++){const d=D[i];if(!d||d.tw==null){continue;}const t0=(d.tw-bpRec.t0)/1000,base=ic+sl*t0;const w=[];for(let j=Math.max(0,i-8);j<=Math.min(NE-1,i+8);j++)if(off[j]!=null&&D[j]&&D[j].tw!=null){const tj=(D[j].tw-bpRec.t0)/1000;w.push(off[j]-(ic+sl*tj));}
+      let r=0;if(w.length>=3){w.sort((p,q)=>p-q);r=Math.max(-0.12,Math.min(0.12,w[w.length>>1]));}shift[i]=base+r;sMin=Math.min(sMin,shift[i]);sMax=Math.max(sMax,shift[i]);}
     S.events.forEach((e,i)=>{const d=D&&D[i];const ns=e.notes&&e.notes.length?e.notes:(e.strum&&e.strum!=='x'&&e.snotes&&e.snotes.length?e.snotes:null);if(!d||d.tw==null||!ns)return;const t=(d.tw-bpRec.t0)/1000+shift[i];
       const a=Math.max(0,Math.floor((t-0.2)*FR)),b=Math.min(on.length-1,Math.ceil((t+0.3)*FR));if(b<a)return;
       const tg=ns.map(x=>x.midi+cp),best=new Array(88).fill(0);for(let f=a;f<=b;f++){const r=on[f];for(let k=0;k<88;k++)if(r[k]>best[k])best[k]=r[k];}
@@ -3086,7 +3091,10 @@ async function bpAnalyse(){
       d.bpx=ev>=0.5?midiToName(ex)+' '+ev.toFixed(2):null;n++;});
     /* v1.138: a single-note step credited as a HIT where Basic Pitch heard no new note of that pitch (onset < 0.5) is flagged, not re-scored */
     G.bpDoubt=[];S.events.forEach((e,i)=>{const d=D&&D[i];if(d&&d.bp&&e.notes&&e.notes.length===1&&G.state[i]===1&&d.bp[0]<0.5){d.doubt=true;G.bpDoubt.push(i);}});
-    G.bpState='done';bpStatusUI();G.bpInfo='Basic Pitch ('+be+(G.bpTried?' after '+G.bpTried:'')+', '+((performance.now()-T0)/1000).toFixed(1)+' s for '+(bpRec.n/22050).toFixed(0)+' s of audio, '+n+' steps'+(bpRec.gap>0.2?', filled '+bpRec.gap.toFixed(1)+' s of dropped audio':'')+', aligned '+Math.round(sMin*1000)+'..'+Math.round(sMax*1000)+' ms)';
+    /* v1.144: side-by-side 'strict' count (NOT used for the score): hits stay, except single-note hits Basic Pitch does not confirm. Marked unreliable when it would drop more than 35% of the single-note hits (almost always a timing/alignment problem, not bad playing) or too few matches were found to line the audio up. */
+    {let hits=0,h1=0,c1=0;S.events.forEach((e,i)=>{if(G.state[i]!==1)return;hits++;const d=D&&D[i];if(d&&d.bp&&e.notes&&e.notes.length===1){h1++;if(d.bp[0]>=0.5)c1++;}});
+      G.bpStrict={hits,h1,c1,total:S.events.length,ok:h1>=8&&(h1-c1)/Math.max(1,h1)<=0.35&&G.bpFit&&G.bpFit.n>=6};}
+    G.bpState='done';bpStatusUI();G.bpInfo='Basic Pitch ('+be+(G.bpTried?' after '+G.bpTried:'')+', '+((performance.now()-T0)/1000).toFixed(1)+' s for '+(bpRec.n/22050).toFixed(0)+' s of audio, '+n+' steps'+(bpRec.gap>0.2?', filled '+bpRec.gap.toFixed(1)+' s of dropped audio':'')+', aligned '+Math.round(sMin*1000)+'..'+Math.round(sMax*1000)+' ms'+(G.bpFit&&G.bpFit.n>=6?', clock drift '+(G.bpFit.slope*60*1000).toFixed(0)+' ms/min from '+G.bpFit.n+' matches':'')+')';
   }catch(e){G.bpState='failed';G.bpErr=String(e&&e.message||e);bpStatusUI();}
 }
 function finish(){
@@ -4552,7 +4560,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.143';
+const APP_VERSION='1.144';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
