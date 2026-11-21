@@ -2895,7 +2895,7 @@ function diagReport(){
   if(settings.bpShadow)L.push('Basic Pitch second opinion (shadow, does not change hits): '+(G.bpState==='done'?G.bpInfo:G.bpState==='failed'?'failed: '+G.bpErr:G.bpState==='running'?'still listening ('+Math.round(100*(G.bpProg||0))+'%), copy again in a moment':G.bpErr||G.bpState||'no run recorded yet')+(G.bpState==='done'?' · bp = its onset score for each target note (0-1; 0.5+ means it heard a new note start); bp also = a loud note it heard that was not a target':''));
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
-    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:''):(G.bpState==='running'?' · bp pending':''))+(d.notes.length?' · '+d.notes.join(','):''));});
+    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:'')+(d.doubt?' · BP DOUBTS THIS HIT':''):(G.bpState==='running'?' · bp pending':''))+(d.notes.length?' · '+d.notes.join(','):''));});
   return L.join('\n');}
 function techWords(n){return n.pm?' – palm mute: rest the edge of your picking hand on the strings by the bridge':n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
 // "any octave" means one octave either way: two octaves off is almost always the pitch tracker locking onto a
@@ -3036,13 +3036,13 @@ function bpRecStart(){
 function bpRecStop(){if(!bpRec.on)return;try{if(bpRec.flush)bpRec.flush();micSrc.disconnect(bpRec.sp);bpRec.sp.disconnect();bpRec.g.disconnect();bpRec.sp.onaudioprocess=null;}catch(e){}bpRec.on=false;}
 function bpStatusUI(){const el=$('#rBp');if(!el)return;if(!settings.bpShadow||!G.bpState||G.bpState==='recording'){el.style.display='none';return;}
   el.style.display='block';el.style.color=G.bpState==='failed'?'var(--warn)':G.bpState==='done'?'var(--accent)':'var(--muted)';
-  el.textContent=G.bpState==='running'?'Basic Pitch is listening to your playing… '+Math.round(100*(G.bpProg||0))+'%. Wait for it to finish before copying the report.':G.bpState==='done'?'✓ Basic Pitch finished. The report now has its columns.':'Basic Pitch could not finish: '+(G.bpErr||'unknown');}
+  el.textContent=G.bpState==='running'?'Basic Pitch is listening to your playing… '+Math.round(100*(G.bpProg||0))+'%. Wait for it to finish before copying the report.':G.bpState==='done'?'✓ Basic Pitch finished. The report now has its columns.'+(G.bpDoubt&&G.bpDoubt.length?' It doubts '+G.bpDoubt.length+' of your hits (it heard no new note of that pitch): steps '+G.bpDoubt.slice(0,10).map(i=>'#'+i).join(', ')+(G.bpDoubt.length>10?'…':'')+'. Your score is unchanged.':' It agreed with all your hits.'):'Basic Pitch could not finish: '+(G.bpErr||'unknown');}
 function bpRecReset(){bpRecStop();bpRec.done=false;bpRec.chunks=[];bpRec.n=0;bpRec.t0=0;G.bpState=null;G.bpErr=null;}
 function loadScriptOnce(url){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=url;s.onload=res;s.onerror=()=>rej(new Error('could not load '+url));document.head.appendChild(s);});}
 async function bpAnalyse(){
   bpRecStop();bpRec.done=true;if(!bpRec.n||bpRec.n<22050){G.bpState=null;return;}
   const D=G.diag;const pcm=new Float32Array(bpRec.n);let o=0;for(const c of bpRec.chunks){pcm.set(c,o);o+=c.length;}
-  G.bpState='running';G.bpTried='';G.bpProg=0;const T0=performance.now();bpStatusUI();
+  G.bpState='running';G.bpTried='';G.bpDoubt=null;G.bpProg=0;const T0=performance.now();bpStatusUI();
   try{
     if(!window.BP)await loadScriptOnce('lab/basic-pitch/basic-pitch.bundle.js');
     /* v1.136: on the owner's phone the GPU (webgl) backend failed ('Failed to compile fragment shader'): fall back to the plain CPU one */
@@ -3058,6 +3058,8 @@ async function bpAnalyse(){
       const tg=e.notes.map(x=>x.midi+cp),best=new Array(88).fill(0);for(let f=a;f<=b;f++){const r=on[f];for(let k=0;k<88;k++)if(r[k]>best[k])best[k]=r[k];}
       d.bp=tg.map(m=>m>=21&&m<=108?best[m-21]:0);let ex=-1,ev=0;for(let k=0;k<88;k++){if(tg.some(m=>Math.abs(m-(k+21))===0))continue;if(best[k]>ev){ev=best[k];ex=k+21;}}
       d.bpx=ev>=0.5?midiToName(ex)+' '+ev.toFixed(2):null;n++;});
+    /* v1.138: a single-note step credited as a HIT where Basic Pitch heard no new note of that pitch (onset < 0.5) is flagged, not re-scored */
+    G.bpDoubt=[];S.events.forEach((e,i)=>{const d=D&&D[i];if(d&&d.bp&&e.notes&&e.notes.length===1&&G.state[i]===1&&d.bp[0]<0.5){d.doubt=true;G.bpDoubt.push(i);}});
     G.bpState='done';bpStatusUI();G.bpInfo='Basic Pitch ('+be+(G.bpTried?' after '+G.bpTried:'')+', '+((performance.now()-T0)/1000).toFixed(1)+' s for '+(bpRec.n/22050).toFixed(0)+' s of audio, '+n+' steps)';
   }catch(e){G.bpState='failed';G.bpErr=String(e&&e.message||e);bpStatusUI();}
 }
@@ -4523,7 +4525,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.137';
+const APP_VERSION='1.138';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
