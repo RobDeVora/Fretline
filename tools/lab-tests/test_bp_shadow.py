@@ -4,6 +4,8 @@ with sync_playwright() as p:
   b=p.chromium.launch(executable_path='/usr/bin/google-chrome',args=['--autoplay-policy=no-user-gesture-required','--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream','--use-file-for-fake-audio-capture=/tmp/fakemic.wav'])
   ctx=b.new_context(permissions=['microphone'],service_workers='block',viewport={'width':900,'height':460});pg=ctx.new_page();errs=[];pg.on('pageerror',lambda e:errs.append(str(e)))
   pg.goto('http://localhost:8769/index.html');pg.wait_for_timeout(1200)
+  import sys
+  if len(sys.argv)>1:pg.evaluate("window.__bpBackend='%s'"%sys.argv[1])
   pg.evaluate("settings.bpShadow=true;openLesson(COURSES.core.flat[8])");pg.wait_for_timeout(800)
   pg.evaluate("document.querySelector('#intro').classList.remove('show')")
   pg.evaluate("document.querySelector('#btnPlay').onclick()");pg.wait_for_timeout(9000)

@@ -2880,7 +2880,7 @@ function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.note
 function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);if(G.song&&G.song.events[i])d.tw=now-((G.clock-G.song.events[i].t)/bps())*1000;}}
 function diagReport(){
   const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+(TUNING_ID!=='std'?' · tuning '+TUNING_ID:'')+(settings.chordMatch&&settings.chordMatch!=='strict'?' · chords '+settings.chordMatch:'')+(G.def&&G.def.recAudio?' · recording: backing '+(RECB.buf?(RECB.buf.duration).toFixed(0)+' s':'not loaded')+', real guitar '+(RECB.gbuf?'yes':G.def.recGuitar?'FAILED '+(RECB.gErr||''):'none (older song)')+', '+(G.def.recEvT?'from a sheet':'AI notes')+', offset '+(G.def.recOffset||0).toFixed(3)+' s':'')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+')'+(tuneOff?' · tuning '+(tuneOff>0?'+':'')+tuneOff+' cents':'')+' · '+G.hits+'/'+S.events.length];
-  if(settings.bpShadow)L.push('Basic Pitch second opinion (shadow, does not change hits): '+(G.bpState==='done'?G.bpInfo:G.bpState==='failed'?'failed: '+G.bpErr:G.bpState==='running'?'still listening, copy again in a moment':G.bpErr||G.bpState||'no run recorded yet')+(G.bpState==='done'?' · bp = its onset score for each target note (0-1; 0.5+ means it heard a new note start); bp also = a loud note it heard that was not a target':''));
+  if(settings.bpShadow)L.push('Basic Pitch second opinion (shadow, does not change hits): '+(G.bpState==='done'?G.bpInfo:G.bpState==='failed'?'failed: '+G.bpErr:G.bpState==='running'?'still listening ('+Math.round(100*(G.bpProg||0))+'%), copy again in a moment':G.bpErr||G.bpState||'no run recorded yet')+(G.bpState==='done'?' · bp = its onset score for each target note (0-1; 0.5+ means it heard a new note start); bp also = a loud note it heard that was not a target':''));
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
     L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:''):(G.bpState==='running'?' · bp pending':''))+(d.notes.length?' · '+d.notes.join(','):''));});
@@ -3027,19 +3027,23 @@ function loadScriptOnce(url){return new Promise((res,rej)=>{const s=document.cre
 async function bpAnalyse(){
   bpRecStop();bpRec.done=true;if(!bpRec.n||bpRec.n<22050){G.bpState=null;return;}
   const D=G.diag;const pcm=new Float32Array(bpRec.n);let o=0;for(const c of bpRec.chunks){pcm.set(c,o);o+=c.length;}
-  G.bpState='running';const T0=performance.now();
+  G.bpState='running';G.bpTried='';const T0=performance.now();
   try{
     if(!window.BP)await loadScriptOnce('lab/basic-pitch/basic-pitch.bundle.js');
-    try{await BP.tf.setBackend('webgl');}catch(e){}await BP.tf.ready();const be=BP.tf.getBackend();
-    const bp=new BP.BasicPitch('lab/basic-pitch/model.json');const on=[];
-    await bp.evaluateModel(pcm,(f,oo,c)=>{for(const r of oo)on.push(r);},p=>{G.bpProg=p;});
+    /* v1.136: on the owner's phone the GPU (webgl) backend failed ('Failed to compile fragment shader'): fall back to the plain CPU one */
+    let on=[],be='';
+    for(const want of (window.__bpBackend?[window.__bpBackend]:['webgl','cpu'])){
+      try{await BP.tf.setBackend(want);await BP.tf.ready();be=BP.tf.getBackend();on=[];
+        const bp=new BP.BasicPitch('lab/basic-pitch/model.json');
+        await bp.evaluateModel(pcm,(f,oo,c)=>{for(const r of oo)on.push(r);},p=>{G.bpProg=p;});break;
+      }catch(e){G.bpTried=(G.bpTried||'')+want+': '+String(e&&e.message||e).slice(0,60)+'; ';if(want==='cpu'||window.__bpBackend)throw e;}}
     const FR=22050/256,S=G.song,cp=G.capo||0;let n=0;
     S.events.forEach((e,i)=>{const d=D&&D[i];if(!d||d.tw==null||!e.notes||!e.notes.length)return;const t=(d.tw-bpRec.t0)/1000;
       const a=Math.max(0,Math.floor((t-0.2)*FR)),b=Math.min(on.length-1,Math.ceil((t+0.3)*FR));if(b<a)return;
       const tg=e.notes.map(x=>x.midi+cp),best=new Array(88).fill(0);for(let f=a;f<=b;f++){const r=on[f];for(let k=0;k<88;k++)if(r[k]>best[k])best[k]=r[k];}
       d.bp=tg.map(m=>m>=21&&m<=108?best[m-21]:0);let ex=-1,ev=0;for(let k=0;k<88;k++){if(tg.some(m=>Math.abs(m-(k+21))===0))continue;if(best[k]>ev){ev=best[k];ex=k+21;}}
       d.bpx=ev>=0.5?midiToName(ex)+' '+ev.toFixed(2):null;n++;});
-    G.bpState='done';G.bpInfo='Basic Pitch ('+be+', '+((performance.now()-T0)/1000).toFixed(1)+' s for '+(bpRec.n/22050).toFixed(0)+' s of audio, '+n+' steps)';
+    G.bpState='done';G.bpInfo='Basic Pitch ('+be+(G.bpTried?' after '+G.bpTried:'')+', '+((performance.now()-T0)/1000).toFixed(1)+' s for '+(bpRec.n/22050).toFixed(0)+' s of audio, '+n+' steps)';
   }catch(e){G.bpState='failed';G.bpErr=String(e&&e.message||e);}
 }
 function finish(){
@@ -4504,7 +4508,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.135';
+const APP_VERSION='1.136';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
