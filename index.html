@@ -2896,7 +2896,7 @@ function diagReport(){
   if(settings.bpShadow)L.push('Basic Pitch second opinion (shadow, does not change hits): '+(G.bpState==='done'?G.bpInfo:G.bpState==='failed'?'failed: '+G.bpErr:G.bpState==='running'?'still listening ('+Math.round(100*(G.bpProg||0))+'%), copy again in a moment':G.bpErr||G.bpState||'no run recorded yet')+(G.bpState==='done'?' · bp = its onset score for each target note (0-1; 0.5+ means it heard a new note start); bp also = a loud note it heard that was not a target':''));
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
-    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:'')+(d.doubt?' · BP DOUBTS THIS HIT':''):(G.bpState==='running'?' · bp pending':''))+(d.notes.length?' · '+d.notes.join(','):''));});
+    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:'')+(d.bpo!=null?' · bp@'+(d.bpo>=0?'+':'')+d.bpo+'ms':'')+(d.doubt?' · BP DOUBTS THIS HIT':''):(G.bpState==='running'?' · bp pending':''))+(d.notes.length?' · '+d.notes.join(','):''));});
   return L.join('\n');}
 function techWords(n){return n.pm?' – palm mute: rest the edge of your picking hand on the strings by the bridge':n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
 // "any octave" means one octave either way: two octaves off is almost always the pitch tracker locking onto a
@@ -3060,9 +3060,11 @@ async function bpAnalyse(){
     const FR=22050/256,S=G.song,cp=G.capo||0;let n=0;
     /* v1.140: align steps to the recording by the data: for every step find where Basic Pitch heard ITS target pitch start (within +-0.6 s of the expected moment), then use the median of the nearby steps' offsets as that step's shift. Removes slow clock drift; a single late/wrong hit still stands out from its neighbours. */
     const off=new Array(S.events.length).fill(null);
-    S.events.forEach((e,i)=>{const d=D&&D[i];if(!d||d.tw==null||!e.notes||e.notes.length!==1)return;const m=e.notes[0].midi+cp;if(m<21||m>108)return;
+    /* v1.141b: every step with target notes (single notes, chords, strums) takes part; d.bpo = where (ms, relative to the expected moment, before any correction) Basic Pitch heard the strongest target note start; it is printed in the report so drift can be seen directly */
+    S.events.forEach((e,i)=>{const d=D&&D[i];const ns=e.notes&&e.notes.length?e.notes:(e.strum&&e.strum!=='x'&&e.snotes&&e.snotes.length?e.snotes:null);if(!d||d.tw==null||!ns)return;
       const t=(d.tw-bpRec.t0)/1000,a0=Math.max(0,Math.floor((t-0.6)*FR)),b0=Math.min(on.length-1,Math.ceil((t+0.6)*FR));let bs=0,bf=-1;
-      for(let f=a0;f<=b0;f++){const v=on[f][m-21];if(v>bs){bs=v;bf=f;}}if(bf>=0&&bs>=0.6)off[i]=bf/FR-t;});
+      for(const x of ns){const m=x.midi+cp;if(m<21||m>108)continue;for(let f=a0;f<=b0;f++){const v=on[f][m-21];if(v>bs){bs=v;bf=f;}}}
+      if(bf>=0&&bs>=0.6){off[i]=bf/FR-t;d.bpo=Math.round(off[i]*1000);}});
     const shift=new Array(S.events.length).fill(0);let sMin=0,sMax=0;
     for(let i=0;i<S.events.length;i++){const w=[];for(let j=Math.max(0,i-8);j<=Math.min(S.events.length-1,i+8);j++)if(off[j]!=null)w.push(off[j]);
       if(w.length>=3){w.sort((p,q)=>p-q);shift[i]=w[w.length>>1];sMin=Math.min(sMin,shift[i]);sMax=Math.max(sMax,shift[i]);}}
@@ -4538,7 +4540,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.141';
+const APP_VERSION='1.142';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
