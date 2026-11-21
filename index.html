@@ -57,6 +57,13 @@ details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14p
 /* player */
 #player .top{display:flex;align-items:center;gap:6px;padding:6px 10px;flex-wrap:wrap}
 #player.focus .top{display:none}
+/* v1.132: capo / tuning / simplify / strum live behind one Options button; bigger thumb targets */
+#optPanel{display:none;width:100%;flex-wrap:wrap;gap:6px}#optPanel.open{display:flex}
+#optBtn.set::after{content:' •';color:var(--accent)}
+#player .top button,#player .top select{min-height:40px}
+.speed button{min-width:44px;min-height:44px;font-size:20px;padding:6px 12px}
+.seg button{min-height:40px;padding:6px 14px}
+#btnBack{min-width:56px}
 @media (max-height:500px){#player .top .lbl{display:none}#player .top select{max-width:34vw}}
 #player .title{flex:1;min-width:90px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
@@ -81,6 +88,13 @@ details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14p
 #btnPlay{min-width:110px!important}
 .overlay{position:absolute;inset:0;background:rgba(10,12,16,.82);display:none;align-items:center;align-items:safe center;justify-content:center;z-index:5;padding:20px;overflow-y:auto}
 .overlay.show{display:flex}
+/* v1.132: the lesson start card sits at the bottom so the first chords stay visible; the tip shows two lines, tap it for the rest */
+#intro{background:transparent;align-items:flex-end;pointer-events:none;padding:10px}
+#intro .card{pointer-events:auto;width:100%;max-width:560px;margin:0 auto;box-shadow:0 6px 24px rgba(0,0,0,.55);padding:12px 14px}
+#intro h2{margin:2px 0 4px;font-size:18px}
+#iTip{margin:4px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+#iTip.open{-webkit-line-clamp:unset;display:block}
+#iTip:not(.open)::after{content:'';}
 .stabs{display:flex;gap:4px;overflow-x:auto;position:sticky;top:-18px;margin:0 -18px 10px;padding:8px 18px;background:var(--panel);z-index:2;border-bottom:1px solid var(--line);scrollbar-width:none}
 .stabs::-webkit-scrollbar{display:none}
 .stabs button{flex:0 0 auto;padding:7px 11px;font-size:13px;border-radius:999px}
@@ -165,10 +179,11 @@ details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14p
     <button id="btnBack" class="ghost">‹ Back</button>
     <div class="title" id="pTitle"></div>
     <div class="seg" id="modeSeg"><button data-mode="play" class="on">Play</button><button data-mode="wait">Wait</button></div>
-    <select id="capoSel" title="Digital capo" style="padding:6px 8px"></select>
+    <button id="optBtn" title="Capo, tuning, simplified chords and strumming pattern" style="padding:6px 10px">⚙ Options</button>
+    <div id="optPanel"><select id="capoSel" title="Digital capo" style="padding:6px 8px"></select>
     <select id="tuneSel" title="Guitar tuning" style="padding:6px 8px;max-width:30vw"></select>
     <select id="simpSel" title="Simplify chords" style="padding:6px 8px;display:none"></select>
-    <select id="strumSel" title="Strumming pattern" style="padding:6px 8px;display:none"></select>
+    <select id="strumSel" title="Strumming pattern" style="padding:6px 8px;display:none"></select></div>
     <button id="partBtn" title="Play another part of this song" style="padding:6px 10px;display:none;max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎸 Part</button>
     <button id="singBtn" title="Lyrics on screen while you play" style="padding:6px 10px;display:none">🎤 Sing</button>
     <button id="tempoBtn" title="Change this recording's tempo grid" style="padding:6px 10px;display:none">♩ Tempo</button>
@@ -202,7 +217,7 @@ details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14p
       <div class="card">
         <div class="small" id="iUnit"></div>
         <h2 id="iTitle"></h2>
-        <p id="iTip"></p>
+        <p id="iTip" title="Tap to read the whole tip"></p>
         <p class="small" id="iGoal"></p>
         <div class="row end"><button id="iListen">Listen first</button><button class="primary" id="iStart">Start</button></div>
       </div>
@@ -365,6 +380,7 @@ or chords like:  G  C  D  G   or   [G]Lyrics [C]here"></textarea></div>
     <div class="field"><label>Timing window</label><select id="sTiming"><option value="1">Normal</option><option value="1.5">Relaxed</option><option value="2">Very relaxed</option></select><span class="small">How early or late a note can be and still count.</span></div>
     <div class="field"><label>Chord matching</label><select id="sChordM"><option value="strict">Strict</option><option value="standard">Standard</option><option value="beginner">Beginner</option></select><span class="small">How complete a strummed chord must sound to count. Strict: every string. Standard: most strings, but a wrong extra note counts against you. Beginner: most strings, and a brushed extra string is fine. A different chord never counts, and single notes aren't affected.</span></div>
     <div class="field inline"><label>Show what I'm playing in the strike zone</label><input type="checkbox" id="sPlayed"></div>
+    <div class="field inline"><label>Left-handed (mirror the fretboard and hand)</label><input type="checkbox" id="sLefty"></div>
     <div class="field inline"><label>Standard chord shapes in songs (F at fret 1, not 5-6-5)</label><input type="checkbox" id="sStd"></div>
     <div class="field inline"><label>Show the timing window as a shaded band</label><input type="checkbox" id="sBand"></div>
     <div class="small" style="margin-top:-6px">Off: just aim for the rings on the hit line. The window still works the same.</div>
@@ -2274,12 +2290,13 @@ function renderList(){
     h+=`<div class="seg" id="courseSeg" style="display:flex;margin-bottom:10px">${[['core','Core'],['b','Beginner'],['i','Intermediate'],['a','Advanced']].map(([k,n])=>`<button data-c="${k}" class="${k===ck?'on':''}" style="flex:1;padding:8px 2px;font-size:13px">${n}</button>`).join('')}</div>`;
     const nx=firstOpenLesson(ck);const done=C.flat.filter(l=>(bests[l.id]||0)>=80).length;
     h+=`<div class="note-txt">${ck==='core'?'A step-by-step guitar course.':esc(C.title)+': '+esc(C.blurb)} Every lesson is generated fresh, so tap “New exercise” any time for a different version. Score 80% to complete a lesson. ${done}/${C.flat.length} done.</div>`;
+    h+=`<div style="height:8px;border-radius:4px;background:#2a2e37;margin:0 0 10px;overflow:hidden"><div style="height:100%;width:${Math.round(100*done/Math.max(1,C.flat.length))}%;background:#5ce1a6"></div></div>`;
     h+=`<div class="row" style="margin:0 0 12px"><button class="primary" id="cContinue" style="flex:1">${nx?(done?'Continue: ':'Start: ')+esc(nx.title):'Course complete! 🎉'}</button><button id="cRandom">🎲 Random lesson</button></div>`;
     C.units.forEach((u,ui)=>{
       const n=u.lessons.filter(l=>(bests[l.id]||0)>=80).length;
-      h+=`<div class="note-txt" style="color:var(--text);font-weight:700;padding-top:6px">${ui+1}. ${esc(u.title)} <span style="color:var(--muted);font-weight:400">· ${n}/${u.lessons.length}</span></div>`;
+      h+=`<div class="note-txt" style="color:var(--text);font-weight:700;padding-top:6px">${ui+1}. ${esc(u.title)} <span style="color:var(--muted);font-weight:400">· ${n}/${u.lessons.length}${n===u.lessons.length?' ✓':''}</span><div style="height:4px;border-radius:2px;background:#2a2e37;margin-top:4px;overflow:hidden"><div style="height:100%;width:${Math.round(100*n/u.lessons.length)}%;background:${n===u.lessons.length?'#5ce1a6':'#ffd43b'}"></div></div></div>`;
       u.lessons.forEach((l,li)=>{const b=bests[l.id];const okk=(b||0)>=80;
-        h+=`<div class="item" data-lesson="${l.id}"><div class="ic" style="background:${okk?'#5ce1a6':nx&&nx.id===l.id?'#ffd43b':'#3a3f4b'};color:${okk||nx&&nx.id===l.id?'#0b0d12':'#cfd3dc'}">${okk?'✓':(ui+1)+'.'+(li+1)}</div><div class="tx"><div class="t">${esc(l.title)}</div><div class="s">${esc(l.sub||'')}</div></div><div class="best">${b!=null?b+'%':''}</div></div>`;});
+        h+=`<div class="item" data-lesson="${l.id}"${nx&&nx.id===l.id?' id="nextLesson"':''}><div class="ic" style="background:${okk?'#5ce1a6':nx&&nx.id===l.id?'#ffd43b':'#3a3f4b'};color:${okk||nx&&nx.id===l.id?'#0b0d12':'#cfd3dc'}">${okk?'✓':(ui+1)+'.'+(li+1)}</div><div class="tx"><div class="t">${esc(l.title)}</div><div class="s">${esc(l.sub||'')}</div></div><div class="best">${b!=null?b+'%':''}</div></div>`;});
     });
   }else if(curCat==='strum'){
     h+=`<div class="note-txt">Strum along to the arrows: <b style="color:#4dabf7">D</b> = down, <b style="color:#ffa94d">U</b> = up, <b style="color:#ff6b81">✕</b> = muted strum. The app scores your timing (it can't hear whether you strummed up or down). Each drill uses a fresh chord progression.</div>`;
@@ -2339,6 +2356,7 @@ function renderList(){
   L.querySelectorAll('#courseSeg button').forEach(b=>b.onclick=()=>{courseTier=b.dataset.c;store.set('courseTier',courseTier);renderList();});
   L.querySelectorAll('.item[data-strum]').forEach(el=>el.onclick=()=>{const id=el.dataset.strum;const sp=id==='random'?STRUM_PATTERNS[Math.floor(Math.random()*STRUM_PATTERNS.length)]:STRUM_PATTERNS.find(x=>x.id===id);openSong(strumDef(sp));});
   const ql=$('#quickLen');if(ql)ql.onchange=()=>{genOpt.quickLen=ql.value;store.set('gen',genOpt);};
+  {const nl=$('#nextLesson');if(nl&&window.__lastScrollTier!==courseTier){window.__lastScrollTier=courseTier;setTimeout(()=>nl.scrollIntoView({block:'center'}),50);}} /* v1.132 */
   const cc=$('#cContinue');if(cc)cc.onclick=()=>{const nx=firstOpenLesson(courseTier);if(nx)openLesson(nx);};
   const cr=$('#cRandom');if(cr)cr.onclick=()=>openLesson(randomLesson(courseTier));
   L.querySelectorAll('.del').forEach(b=>b.onclick=ev=>{
@@ -2457,11 +2475,12 @@ function openSong(def){if(def&&def.cat==='mine'&&def.id)markPlayed(def.id);
   if(def.tuning&&def.tuning!==TUNING_ID&&!def.tip){const t=tuningById(def.tuning);
     showMsg('This song is in '+t.name.split(' (')[0],'<p>It was written for <b>'+esc(t.name)+'</b>; your guitar is set to '+esc(tuningById(TUNING_ID).name)+'.</p><p>Switch to its tuning to see the frets as written (then retune in the Tuner), or keep yours: the notes stay the same pitches, on the frets of your tuning.</p><div class="row end"><button id="msgKeepT">Keep mine</button><button class="primary" id="msgSwitchT">Switch</button></div>');
     $('#msgKeepT').onclick=()=>$('#msg').classList.remove('show');$('#msgSwitchT').onclick=()=>{$('#msg').classList.remove('show');applyTuning(def.tuning);showHint('Tuning: '+t.name.split(' (')[0]+'. Tune your guitar in the Tuner.',5000);};}
-  if(def.tip){$('#iUnit').textContent=def.unit||'';$('#iTitle').textContent=def.title;$('#iTip').textContent=def.tip;
+  if(def.tip){$('#iUnit').textContent=def.unit||'';$('#iTitle').textContent=def.title;$('#iTip').textContent=def.tip;$('#iTip').classList.remove('open');
     $('#iGoal').textContent=def.cat==='course'?'Goal: score 80% or more in Play mode to complete this lesson. Use Wait mode or lower the speed to practise first.':'Your score counts in Play mode at 100% speed or faster.';
     $('#intro').classList.add('show');}
   else $('#intro').classList.remove('show');
 }
+$('#iTip').onclick=()=>$('#iTip').classList.toggle('open');
 $('#iStart').onclick=()=>{$('#intro').classList.remove('show');$('#btnPlay').onclick();};
 $('#iListen').onclick=()=>{$('#intro').classList.remove('show');$('#btnListen').onclick();};
 function resetRun(){
@@ -2486,6 +2505,7 @@ function updateButtons(){
   $('#lsTune').style.display=G.listen&&G.playing&&(!settings.listenTuned||G.tuneAsked)?'inline-flex':'none';syncLsVal();
   document.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.mode===G.mode));
   $('#spVal').textContent=Math.round(G.speed*100)+'%';
+  {const o=$('#optBtn');if(o)o.classList.toggle('set',($('#capoSel').selectedIndex>0)||($('#tuneSel').selectedIndex>0)||($('#simpSel').selectedIndex>0&&$('#simpSel').style.display!=='none')||($('#strumSel').selectedIndex>0&&$('#strumSel').style.display!=='none'));}
   syncFocus();
 }
 // while a track plays or listens, hide the controls at the top so the highway gets the whole screen
@@ -2532,6 +2552,8 @@ $('#lsDone').onclick=()=>{settings.listenTuned=true;saveSettings();G.tuneAsked=f
 $('#btnRestart').onclick=()=>{const was=G.playing&&!G.listen;resetRun();if(was){G.playing=true;updateButtons();}};
 $('#btnBack').onclick=()=>{resetRun();keepAwake(false);show('home');renderList();};
 document.querySelectorAll('#modeSeg button').forEach(b=>b.onclick=()=>{G.mode=b.dataset.mode;updateButtons();});
+['capoSel','tuneSel','simpSel','strumSel'].forEach(id=>$('#'+id).addEventListener('change',()=>setTimeout(updateButtons,0)));
+$('#optBtn').onclick=()=>{$('#optPanel').classList.toggle('open');};
 $('#spDown').onclick=()=>{G.speed=Math.max(0.3,Math.round((G.speed-0.1)*10)/10);updateButtons();};
 $('#spUp').onclick=()=>{G.speed=Math.min(1.5,Math.round((G.speed+0.1)*10)/10);updateButtons();};
 $('#rRetry').onclick=()=>{resetRun();$('#btnPlay').onclick();};
@@ -2923,7 +2945,7 @@ function update(dt,now){
       st[i]=1;G.hits++;G.streak++;G.missRun=0;G.best=Math.max(G.best,G.streak);G.lastHitAt=now;G.lastHitKey=evKey(e);
       if(G.hitOff==null)addPop(G.streak>=10&&G.streak%10===0?G.streak+' streak!':'Good','#5ce1a6');
       else{const g=timingGrade(G.hitOff);(G.grades=G.grades||{perfect:0,good:0,okay:0})[g.k]++;if(G.diag&&G.diag[i])G.diag[i].grade=g.k+' '+(G.hitOff>=0?'+':'')+Math.round(G.hitOff)+' ms';
-        addPop(G.streak>=10&&G.streak%10===0?G.streak+' streak!':g.text,g.color);}
+        addPop(G.streak>=10&&G.streak%10===0?G.streak+' streak!':g.text+(Math.abs(G.hitOff)>=60?(G.hitOff>0?' · late':' · early'):''),g.color);} /* v1.132: early/late shown when 60 ms or more off */
     }
     break;
   }
@@ -3092,7 +3114,9 @@ function rr(x,y,w,h,r){cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r)
 /* a fretting hand seen from the back: thumb on the left, then fingers 1-4. Fingers the next note or chord needs are
    lit in their colour with the string and fret at the tip; the others stay faint. */
 function drawHand(x,y,w,h,use){
-  cx.save();const lw=Math.max(1.5,h*0.03);cx.lineWidth=lw;cx.lineJoin='round';
+  cx.save();const LH=settings.lefty===true;if(LH){cx.translate(2*x+w,0);cx.scale(-1,1);} /* v1.132: left-handed mode mirrors the hand; its numbers are drawn the right way round */
+  const txt=(t,px,py)=>{if(LH){cx.save();cx.translate(px,py);cx.scale(-1,1);cx.fillText(t,0,0);cx.restore();}else cx.fillText(t,px,py);};
+  const lw=Math.max(1.5,h*0.03);cx.lineWidth=lw;cx.lineJoin='round';
   const cap=(bx,by,len,ang,wid,fill,stroke)=>{cx.save();cx.translate(bx,by);cx.rotate(ang);cx.beginPath();
     cx.moveTo(-wid/2,wid*0.2);cx.lineTo(-wid/2,-len+wid/2);cx.arc(0,-len+wid/2,wid/2,Math.PI,0);cx.lineTo(wid/2,wid*0.2);cx.closePath();
     cx.fillStyle=fill;cx.fill();cx.strokeStyle=stroke;cx.stroke();cx.restore();
@@ -3102,14 +3126,14 @@ function drawHand(x,y,w,h,use){
   const tt=cap(x+w*0.27,y+h*0.9,h*0.46,-0.95,fw*1.08,'rgba(255,255,255,.10)','rgba(255,255,255,.5)');
   // palm
   cx.fillStyle='rgba(30,33,42,.95)';cx.strokeStyle='rgba(255,255,255,.55)';rr(x+w*0.2,y+h*0.55,w*0.76,h*0.45-lw,w*0.14);cx.fill();cx.stroke();
-  cx.fillStyle='rgba(255,255,255,.55)';cx.font='bold '+Math.round(fw*0.62)+'px -apple-system,sans-serif';cx.textAlign='center';cx.textBaseline='middle';cx.fillText('T',tt[0],tt[1]);
+  cx.fillStyle='rgba(255,255,255,.55)';cx.font='bold '+Math.round(fw*0.62)+'px -apple-system,sans-serif';cx.textAlign='center';cx.textBaseline='middle';txt('T',tt[0],tt[1]);
   // fingers 1 (index) to 4 (pinky): [x of base, length, lean]
   const F=[[0.33,0.5,-0.10],[0.52,0.56,-0.02],[0.71,0.52,0.06],[0.88,0.4,0.16]];
   F.forEach(([fx,len,ang],k0)=>{const f=k0+1;const on=!!use[f];const bx=x+w*fx,by=y+h*0.64;
     if(on){cx.save();cx.shadowColor=FCOL[f];cx.shadowBlur=h*0.18;}
     const tip=cap(bx,by,h*len,ang,fw,on?FCOL[f]:hexA(FCOL[f],0.2),on?'#ffffff':hexA(FCOL[f],0.55));
     if(on)cx.restore();
-    cx.fillStyle=on?ink(FCOL[f]):hexA('#ffffff',0.6);cx.font='800 '+Math.round(fw*0.78)+'px -apple-system,sans-serif';cx.fillText(String(f),tip[0],tip[1]+1);});
+    cx.fillStyle=on?ink(FCOL[f]):hexA('#ffffff',0.6);cx.font='800 '+Math.round(fw*0.78)+'px -apple-system,sans-serif';txt(String(f),tip[0],tip[1]+1);});
   cx.restore();
 }
 // which strings each finger presses for an event: {finger: ['E3', ...]}
@@ -3401,24 +3425,24 @@ function drawFretboard(y0,h,W){
   const cp=(G.capo||0);let maxF=12;if(tgt)for(const n of tgt.notes)maxF=Math.max(maxF,n.f+cp+1);if(tgt&&tgt.shape)for(const f of tgt.shape)maxF=Math.max(maxF,f+cp+1);maxF=Math.min(maxF,24);
   const x0=34,x1=W-10,fw=(x1-x0)/(maxF+0.5);const sh=h/6;const Ys=s=>y0+(5-s+0.5)*sh;
   const FB=COL.fb;cx.fillStyle=FB.wood;rr(x0-6,y0,x1-x0+12,h,8);cx.fill();
-  const fx=f=>x0+fw*0.5+f*fw; // fret wire position for fret f (f=0 is nut)
+  const LF=settings.lefty===true,fx0=f=>x0+fw*0.5+f*fw;const fx=f=>LF?(x0+x1)-fx0(f):fx0(f);const cn=f=>LF?fx(f)+fw/2:fx(f)-fw/2,dir=LF?1:-1; // fret wire position for fret f (f=0 is nut); mirrored for left-handed players
   cx.fillStyle=FB.nut;cx.fillRect(fx(0)-2,y0+2,4,h-4);
   for(let f=1;f<=maxF;f++){cx.fillStyle=FB.wire;cx.fillRect(fx(f)-1,y0+3,2,h-6);}
   cx.fillStyle=FB.inlay;
-  for(const f of [3,5,7,9,15,17,19,21])if(f<=maxF){cx.beginPath();cx.arc(fx(f)-fw/2,y0+h/2,4,0,7);cx.fill();}
-  if(12<=maxF){cx.beginPath();cx.arc(fx(12)-fw/2,y0+h*0.3,4,0,7);cx.arc(fx(12)-fw/2,y0+h*0.7,4,0,7);cx.fill();}
+  for(const f of [3,5,7,9,15,17,19,21])if(f<=maxF){cx.beginPath();cx.arc(cn(f),y0+h/2,4,0,7);cx.fill();}
+  if(12<=maxF){cx.beginPath();cx.arc(cn(12),y0+h*0.3,4,0,7);cx.arc(cn(12),y0+h*0.7,4,0,7);cx.fill();}
   for(let s=0;s<6;s++){cx.fillStyle=FB.str;cx.fillRect(x0-4,Ys(s)-(s<3?0.9:0.5),x1-x0+8,s<3?1.8:1);}
   cx.font='bold 11px -apple-system,sans-serif';cx.fillStyle='#666';
-  for(const f of [3,5,7,9,12,15])if(f<=maxF)cx.fillText(String(f),fx(f)-fw/2,y0-7);
-  const pos0=f=>f===0?fx(0)-fw*0.38:fx(f)-fw/2;const pos=f=>pos0(f+cp);
-  if(cp){const cxp=fx(cp)-fw*0.55;cx.fillStyle='#c9a227';rr(cxp-5,y0+1,10,h-2,4);cx.fill();cx.fillStyle='#0b0d12';cx.font='bold 10px -apple-system,sans-serif';cx.save();cx.translate(cxp,y0+h/2);cx.rotate(-Math.PI/2);cx.fillText('CAPO '+cp,0,1);cx.restore();cx.font='bold 11px -apple-system,sans-serif';}
+  for(const f of [3,5,7,9,12,15])if(f<=maxF)cx.fillText(String(f),cn(f),y0-7);
+  const pos0=f=>f===0?fx(0)+dir*fw*0.38:cn(f);const pos=f=>pos0(f+cp);
+  if(cp){const cxp=fx(cp)+dir*fw*0.55;cx.fillStyle='#c9a227';rr(cxp-5,y0+1,10,h-2,4);cx.fill();cx.fillStyle='#0b0d12';cx.font='bold 10px -apple-system,sans-serif';cx.save();cx.translate(cxp,y0+h/2);cx.rotate(-Math.PI/2);cx.fillText('CAPO '+cp,0,1);cx.restore();cx.font='bold 11px -apple-system,sans-serif';}
   // detected
   if(det.stableMidi!=null&&G.playing&&!G.listen){const want=tgt&&!tgt.strum&&!tgt.chord&&tgt.notes.length?tgt.notes[0]:null;const pp=playedPos(det.stableMidi,want);
     if(pp&&pp.f+cp<=maxF){const ok=tgt&&tgt.notes.some(n=>noteOk(n,det.stableMidi,cp));cx.strokeStyle=ok?'#5ce1a6':'#ff5d73';cx.lineWidth=3;cx.beginPath();cx.arc(pos(pp.f),Ys(pp.s),Math.min(sh*0.5,12),0,7);cx.stroke();}}
   if(tgt){
     const rad=Math.min(sh*0.46,11);
     const BF=byFinger();
-    if((tgt.chord||tgt.strum)&&tgt.shape){tgt.shape.forEach((f,s)=>{if(f<0){cx.fillStyle='#ff6b81';cx.fillText('×',x0-18,Ys(s)+1);return;}const fg=tgt.fgs?tgt.fgs[s]:null;const c=noteCol(s,fg);cx.fillStyle=c;cx.beginPath();cx.arc(pos(f),Ys(s),rad,0,7);cx.fill();cx.fillStyle=ink(c);cx.fillText(f===0?'o':String(BF&&fg>0?fg:f),pos(f),Ys(s)+1);});}
+    if((tgt.chord||tgt.strum)&&tgt.shape){tgt.shape.forEach((f,s)=>{if(f<0){cx.fillStyle='#ff6b81';cx.fillText('×',LF?x1+6:x0-18,Ys(s)+1);return;}const fg=tgt.fgs?tgt.fgs[s]:null;const c=noteCol(s,fg);cx.fillStyle=c;cx.beginPath();cx.arc(pos(f),Ys(s),rad,0,7);cx.fill();cx.fillStyle=ink(c);cx.fillText(f===0?'o':String(BF&&fg>0?fg:f),pos(f),Ys(s)+1);});}
     else for(const n of tgt.notes){const c=noteCol(n.s,n.fg);cx.fillStyle=c;cx.beginPath();cx.arc(pos(n.f),Ys(n.s),rad,0,7);cx.fill();cx.fillStyle=ink(c);cx.fillText(n.f===0?'o':String(BF&&n.fg>0?n.fg:n.f),pos(n.f),Ys(n.s)+1);}
   }
 }
@@ -3506,7 +3530,7 @@ function tunerUpdate(){
 let settingsOpen=false;
 function syncSettingsUI(){{const P=IS_APP&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;
   $('#appBuild').innerHTML=!IS_APP?'':P&&P.outputRoute?'Android app: latest build (full screen, sound delay per output'+(outRoute?' · sound now on '+ROUTE_NAMES[outRoute]:'')+')':'Android app: an older build. <a href="https://github.com/RobDeVora/Fretline/releases/download/android-latest/Fretline.apk" style="color:var(--accent2)">Install the latest Fretline.apk</a> for full screen and a sound delay for each output.';}$('#sFingerGuide').checked=settings.fingerGuide!==false;$('#cNoteBy').value=settings.noteBy==='string'?'string':'finger';$('#sLyn').value=settings.lyrNudge||0;$('#sLynV').textContent=((settings.lyrNudge||0)>0?'+':'')+(+settings.lyrNudge||0).toFixed(1)+' s';$('#sVoxLib').checked=settings.vocalLibrary!==false;$('#sVoxFile').checked=settings.vocalFiles!==false;$('#sVoxMade').checked=settings.vocalMadeUp!==false;
-  $('#sPlayed').checked=settings.played!==false;$('#sStd').checked=settings.stdShapes!==false;$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sChordM').value=settings.chordMatch||'strict';$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
+  $('#sPlayed').checked=settings.played!==false;$('#sStd').checked=settings.stdShapes!==false;$('#sLefty').checked=settings.lefty===true;$('#sBig').value=String(settings.big);$('#sSens').value=settings.sens;$('#sSensV').textContent=settings.sens;$('#sLat').value=settings.latency;$('#sLatV').textContent=settings.latency;$('#sOct').checked=settings.anyOctave;$('#sNames').checked=settings.names;$('#sFretboard').checked=settings.fretboard;$('#sStrumView').value=settings.strumView||'fingers';$('#sTiming').value=String(settings.timing||1);$('#sChordM').value=settings.chordMatch||'strict';$('#sBand').checked=!!settings.band;$('#sPhones').checked=!!settings.headphones;$('#sDel').value=settings.soundDelay<0?-10:settings.soundDelay;$('#sDelV').textContent=settings.soundDelay<0?'Auto ('+Math.round(soundDelay()*1000)+' ms)':settings.soundDelay+' ms';$('#sDead').checked=settings.deadStrings!==false;$('#sBandVol').value=settings.bandVol==null?0.6:settings.bandVol;$('#sBandV').textContent=Math.round((settings.bandVol==null?0.6:settings.bandVol)*100)+'%';$('#sMetro').checked=settings.metronome;$('#sSound').value=settings.sound;$('#sFx').value=settings.fx;soundStatus(settings.sound==='basic'?'':sampler.id===settings.sound?'Loaded and ready.':'Downloads when you next press Listen or Test.');
   // only speak up when Listen had to fall back to the basic synth for some notes
   $('#sDiag').textContent=diag.where&&diag.basic>0&&settings.sound!=='basic'?('Heads up: during the last Listen, '+diag.basic+' note'+(diag.basic>1?'s':'')+' played with the basic sound because the guitar recording wasn\'t loaded yet. Tap Test to finish loading it.'):'';}
 $('#btnSettings').onclick=async()=>{syncSettingsUI();settingsOpen=true;$('#settings').classList.add('show');await enableMic();fillMicList();};
@@ -3541,6 +3565,7 @@ $('#sStrumView').onchange=e=>{settings.strumView=e.target.value;saveSettings();}
 $('#sTiming').onchange=e=>{settings.timing=+e.target.value;saveSettings();};
 $('#sChordM').onchange=e=>{settings.chordMatch=e.target.value;saveSettings();};
 $('#sPlayed').onchange=e=>{settings.played=e.target.checked;saveSettings();};
+$('#sLefty').onchange=e=>{settings.lefty=e.target.checked;saveSettings();};
 $('#sStd').onchange=e=>{settings.stdShapes=e.target.checked;saveSettings();G.def&&delete G.def._built;showHint('Applies the next time you open a song',3000);};
 $('#sBand').onchange=e=>{settings.band=e.target.checked;saveSettings();};
 $('#sPhones').onchange=e=>{settings.headphones=e.target.checked;saveSettings();};
@@ -4431,7 +4456,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.131';
+const APP_VERSION='1.132';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
