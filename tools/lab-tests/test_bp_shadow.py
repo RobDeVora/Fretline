@@ -17,4 +17,8 @@ with sync_playwright() as p:
     pg.wait_for_timeout(1500)
   print('state',pg.evaluate("[G.bpState,G.bpInfo,G.bpErr]"))
   rep=pg.evaluate("diagReport()").split('\n');print('\n'.join(rep[:6])[:900])
+  w=pg.evaluate("(async()=>{const b=bpWavBlob();const a=new Uint8Array(await b.arrayBuffer());return [b.size,String.fromCharCode(...a.slice(0,4)),String.fromCharCode(...a.slice(8,12)),bpRec.n*2+44]})()")
+  print('wav',w,'ok' if w[0]==w[3] and w[1]=='RIFF' and w[2]=='WAVE' else 'BAD')
+  print('btn',pg.evaluate("[...document.querySelectorAll('#rReport button')].map(b=>b.textContent)"))
+  print('rows',[r for r in rep if r.startswith('#0 ') or r.startswith('Audio')][:2])
   print('errors',errs[:3]);b.close()

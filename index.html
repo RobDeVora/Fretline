@@ -2894,9 +2894,10 @@ function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.
 function diagReport(){
   const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+(TUNING_ID!=='std'?' · tuning '+TUNING_ID:'')+(settings.chordMatch&&settings.chordMatch!=='strict'?' · chords '+settings.chordMatch:'')+(G.def&&G.def.recAudio?' · recording: backing '+(RECB.buf?(RECB.buf.duration).toFixed(0)+' s':'not loaded')+', real guitar '+(RECB.gbuf?'yes':G.def.recGuitar?'FAILED '+(RECB.gErr||''):'none (older song)')+', '+(G.def.recEvT?'from a sheet':'AI notes')+', offset '+(G.def.recOffset||0).toFixed(3)+' s':'')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+')'+(tuneOff?' · tuning '+(tuneOff>0?'+':'')+tuneOff+' cents':'')+' · '+G.hits+'/'+S.events.length];
   if(settings.bpShadow)L.push('Basic Pitch second opinion (shadow, does not change hits): '+(G.bpState==='done'?G.bpInfo:G.bpState==='failed'?'failed: '+G.bpErr:G.bpState==='running'?'still listening ('+Math.round(100*(G.bpProg||0))+'%), copy again in a moment':G.bpErr||G.bpState||'no run recorded yet')+(G.bpState==='done'?' · bp = its onset score for each target note (0-1; 0.5+ means it heard a new note start); bp also = a loud note it heard that was not a target':''));
+  if(settings.bpShadow&&bpRec.n>=22050)L.push('Audio of this run: '+(bpRec.n/22050).toFixed(0)+' s, 22.05 kHz mono (run '+(G.runId||'?')+'); @N s on each step = seconds into that audio where the step was expected');
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
-    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:'')+(d.bpo!=null?' · bp@'+(d.bpo>=0?'+':'')+d.bpo+'ms':'')+(d.doubt?' · BP DOUBTS THIS HIT':''):(G.bpState==='running'?' · bp pending':''))+(d.notes.length?' · '+d.notes.join(','):''));});
+    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:'')+(d.bpo!=null?' · bp@'+(d.bpo>=0?'+':'')+d.bpo+'ms':'')+(d.doubt?' · BP DOUBTS THIS HIT':''):(G.bpState==='running'?' · bp pending':''))+(d.tw!=null&&bpRec.t0&&bpRec.n?' · @'+((d.tw-bpRec.t0)/1000).toFixed(2)+'s':'')+(d.notes.length?' · '+d.notes.join(','):''));});
   return L.join('\n');}
 function techWords(n){return n.pm?' – palm mute: rest the edge of your picking hand on the strings by the bridge':n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
 // "any octave" means one octave either way: two octaves off is almost always the pitch tracker locking onto a
@@ -3018,6 +3019,15 @@ function shareReportFile(txt){const name='fretline-report-'+(G.def&&G.def.id||'s
   try{const f=new File([txt],name,{type:'text/plain'});if(navigator.canShare&&navigator.canShare({files:[f]})){return navigator.share({files:[f],title:'Fretline detection report'}).then(()=>'shared').catch(()=>'none');}}catch(e){}
   if(IS_APP){const P=sfPlug();if(P&&P.shareText)return P.shareText({name,text:txt}).then(()=>'shared').catch(()=>'none');return Promise.resolve('none');} /* v1.135: native share sheet */
   try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);return Promise.resolve('downloaded');}catch(e){return Promise.resolve('none');}}
+/* v1.143: share the lesson audio (the same in-memory recording Basic Pitch listens to) as a 16-bit mono 22.05 kHz .wav, so detection can be replayed offline against the report. Only on the person's tap. */
+function bpWavBlob(){if(bpRec.on)bpRecStop();const n=bpRec.n;if(!n)return null;const buf=new ArrayBuffer(44+n*2),v=new DataView(buf);
+  const W=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};W(0,'RIFF');v.setUint32(4,36+n*2,true);W(8,'WAVE');W(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,22050,true);v.setUint32(28,44100,true);v.setUint16(32,2,true);v.setUint16(34,16,true);W(36,'data');v.setUint32(40,n*2,true);
+  let o=44;for(const c of bpRec.chunks)for(let i=0;i<c.length;i++){const x=Math.max(-1,Math.min(1,c[i]));v.setInt16(o,x<0?x*32768:x*32767,true);o+=2;}
+  return new Blob([buf],{type:'audio/wav'});}
+function shareAudioFile(){const blob=bpWavBlob();if(!blob)return Promise.resolve('none');const name='fretline-audio-'+(G.def&&G.def.id||'song').replace(/[^\w-]+/g,'_')+'-'+(G.runId||'')+'.wav';
+  try{const f=new File([blob],name,{type:'audio/wav'});if(navigator.canShare&&navigator.canShare({files:[f]}))return navigator.share({files:[f],title:'Fretline lesson audio'}).then(()=>'shared').catch(()=>'none');}catch(e){}
+  if(IS_APP){const P=sfPlug();if(P&&P.shareFile)return new Promise(res=>{const r=new FileReader();r.onload=()=>{const b64=String(r.result).split(',')[1]||'';P.shareFile({name,b64,mime:'audio/wav'}).then(()=>res('shared')).catch(()=>res('none'));};r.onerror=()=>res('none');r.readAsDataURL(blob);});return Promise.resolve('none');}
+  try{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);return Promise.resolve('downloaded');}catch(e){return Promise.resolve('none');}}
 /* v1.133: Basic Pitch second opinion, SHADOW MODE (Settings > Basic Pitch second opinion). While you play, the mic is also
    recorded (22.05 kHz mono, in memory only); when the run ends Spotify's Basic Pitch model (the same one the Lab uses)
    listens to the recording and, for every step, the detection report gets 'bp 0.81/0.77' (its onset score for each
@@ -3027,6 +3037,7 @@ const bpRec={on:false,done:false,chunks:[],n:0,t0:0,phase:0,acc:0,cnt:0,sp:null,
 function bpRecStart(){
   if(bpRec.on||bpRec.done||!settings.bpShadow||!micSrc||!actx)return;
   try{const sp=actx.createScriptProcessor(4096,1,1),g=actx.createGain();g.gain.value=0;
+    G.runId=(()=>{const d=new Date();return String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0');})();
     bpRec.chunks=[];bpRec.n=0;bpRec.t0=0;bpRec.phase=0;bpRec.acc=0;bpRec.cnt=0;bpRec.ratio=actx.sampleRate/22050;let cur=new Float32Array(4096),ci=0;
     bpRec.gap=0;bpRec.lastPT=null;
     const feed=v=>{bpRec.acc+=v;bpRec.cnt++;bpRec.phase+=1;if(bpRec.phase>=bpRec.ratio){bpRec.phase-=bpRec.ratio;cur[ci++]=bpRec.acc/bpRec.cnt;bpRec.acc=0;bpRec.cnt=0;
@@ -3107,7 +3118,8 @@ function finish(){
     const b2=document.createElement('button');b2.textContent='↗ Share report';b2.className='small';b2.style.marginLeft='6px';b2.onclick=async()=>{const txt=diagReport();const how=await shareReportFile(txt);
       if(how==='shared'){b2.textContent='✓ Shared';return;}if(how==='downloaded'){b2.textContent='✓ Downloaded as a .txt file';return;}
       let ok=false;try{await navigator.clipboard.writeText(txt);ok=true;}catch(e){}
-      if(ok)b2.textContent='✓ Copied to the clipboard (file sharing is not available here). Paste it in a message';else showMsg('Detection report','<textarea readonly style="min-height:220px">'+esc(txt)+'</textarea><p class="small">Select all and copy.</p>');};box.appendChild(b2);}}}
+      if(ok)b2.textContent='✓ Copied to the clipboard (file sharing is not available here). Paste it in a message';else showMsg('Detection report','<textarea readonly style="min-height:220px">'+esc(txt)+'</textarea><p class="small">Select all and copy.</p>');};box.appendChild(b2);
+    if(settings.bpShadow&&bpRec.n>=22050){const b3=document.createElement('button');b3.textContent='🎧 Share lesson audio';b3.className='small';b3.style.marginLeft='6px';b3.onclick=async()=>{b3.textContent='Preparing the audio…';const how=await shareAudioFile();b3.textContent=how==='shared'?'✓ Audio shared':how==='downloaded'?'✓ Audio downloaded as a .wav file':'Audio sharing is not available here (needs the newest app)';};box.appendChild(b3);}}}}
   showMissed();bpStatusUI();
   {const ds=G.deadStats;const box=$('#rStrings');if(box){box.textContent='';if(ds&&G.mode==='play'){const fmt=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([s,n])=>SNAME[s]+' ×'+n).join(', ');
     const parts=[];if(Object.keys(ds.dead).length)parts.push('Dead strings: '+fmt(ds.dead));if(Object.keys(ds.ring).length)parts.push('Muted strings that rang: '+fmt(ds.ring));
@@ -4540,7 +4552,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.142';
+const APP_VERSION='1.143';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

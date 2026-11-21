@@ -50,6 +50,35 @@ public class SongFilesPlugin extends Plugin {
         return new File(new File(base, ROOT), seg(dir, "Song"));
     }
 
+    /** shareFile({name, b64, mime}) → {}. v1.143: same as shareText but for a binary file (the lesson audio .wav), sent as base64. */
+    @PluginMethod
+    public void shareFile(PluginCall call) {
+        final String name = seg(call.getString("name"), "fretline-audio.wav");
+        final String b64 = call.getString("b64");
+        final String mime = call.getString("mime") != null ? call.getString("mime") : "application/octet-stream";
+        if (b64 == null) { call.reject("no data"); return; }
+        worker.execute(() -> {
+            try {
+                File dir = new File(getContext().getCacheDir(), "shared");
+                if (!dir.exists()) dir.mkdirs();
+                File f = new File(dir, name);
+                try (OutputStream os = new FileOutputStream(f)) { os.write(android.util.Base64.decode(b64, android.util.Base64.DEFAULT)); }
+                Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", f);
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType(mime);
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.putExtra(Intent.EXTRA_SUBJECT, "Fretline lesson audio");
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                Intent chooser = Intent.createChooser(send, "Share audio");
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(chooser);
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("share failed: " + e.getMessage());
+            }
+        });
+    }
+
     /** shareText({name, text}) → {}. v1.135: writes the text to a file in the app's cache and opens Android's share sheet with it
      *  as a .txt attachment (Messages, Gmail, Drive...). Used for the detection report. */
     @PluginMethod
