@@ -3066,9 +3066,9 @@ async function bpAnalyse(){
     const shift=new Array(S.events.length).fill(0);let sMin=0,sMax=0;
     for(let i=0;i<S.events.length;i++){const w=[];for(let j=Math.max(0,i-8);j<=Math.min(S.events.length-1,i+8);j++)if(off[j]!=null)w.push(off[j]);
       if(w.length>=3){w.sort((p,q)=>p-q);shift[i]=w[w.length>>1];sMin=Math.min(sMin,shift[i]);sMax=Math.max(sMax,shift[i]);}}
-    S.events.forEach((e,i)=>{const d=D&&D[i];if(!d||d.tw==null||!e.notes||!e.notes.length)return;const t=(d.tw-bpRec.t0)/1000+shift[i];
+    S.events.forEach((e,i)=>{const d=D&&D[i];const ns=e.notes&&e.notes.length?e.notes:(e.strum&&e.strum!=='x'&&e.snotes&&e.snotes.length?e.snotes:null);if(!d||d.tw==null||!ns)return;const t=(d.tw-bpRec.t0)/1000+shift[i];
       const a=Math.max(0,Math.floor((t-0.2)*FR)),b=Math.min(on.length-1,Math.ceil((t+0.3)*FR));if(b<a)return;
-      const tg=e.notes.map(x=>x.midi+cp),best=new Array(88).fill(0);for(let f=a;f<=b;f++){const r=on[f];for(let k=0;k<88;k++)if(r[k]>best[k])best[k]=r[k];}
+      const tg=ns.map(x=>x.midi+cp),best=new Array(88).fill(0);for(let f=a;f<=b;f++){const r=on[f];for(let k=0;k<88;k++)if(r[k]>best[k])best[k]=r[k];}
       d.bp=tg.map(m=>m>=21&&m<=108?best[m-21]:0);let ex=-1,ev=0;for(let k=0;k<88;k++){if(tg.some(m=>Math.abs(m-(k+21))===0))continue;if(best[k]>ev){ev=best[k];ex=k+21;}}
       d.bpx=ev>=0.5?midiToName(ex)+' '+ev.toFixed(2):null;n++;});
     /* v1.138: a single-note step credited as a HIT where Basic Pitch heard no new note of that pitch (onset < 0.5) is flagged, not re-scored */
@@ -4538,7 +4538,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.140';
+const APP_VERSION='1.141';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
