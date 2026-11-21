@@ -3000,8 +3000,11 @@ function showMissed(){const box=$('#rMissed');if(!box)return;box.innerHTML='';co
   for(const [bar,n] of t){const b=document.createElement('button');b.className='small';b.style.margin='3px';b.textContent='Bar '+(bar+1)+' ×'+n+' · practise';
     b.onclick=()=>{const bpb=G.song.bpb||4;resetRun();setLoop(bar*bpb,(bar+2)*bpb);seekTo(bar*bpb);G.speed=Math.min(G.speed,0.8);updateButtons();$('#btnPlay').onclick();};box.appendChild(b);}}
 function shareReportFile(txt){const name='fretline-report-'+(G.def&&G.def.id||'song').replace(/[^\w-]+/g,'_')+'.txt';
-  try{const f=new File([txt],name,{type:'text/plain'});if(navigator.canShare&&navigator.canShare({files:[f]})){return navigator.share({files:[f],title:'Fretline detection report'}).then(()=>true).catch(()=>false);}}catch(e){}
-  try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);return Promise.resolve(true);}catch(e){return Promise.resolve(false);}}
+  /* v1.134: says what really happened: 'shared' (the share sheet took the file), 'downloaded' (browser only), or 'none'. The Android app's web view
+     can't share files or download, so there the report is copied to the clipboard instead (see the button). */
+  try{const f=new File([txt],name,{type:'text/plain'});if(navigator.canShare&&navigator.canShare({files:[f]})){return navigator.share({files:[f],title:'Fretline detection report'}).then(()=>'shared').catch(()=>'none');}}catch(e){}
+  if(IS_APP)return Promise.resolve('none');
+  try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);return Promise.resolve('downloaded');}catch(e){return Promise.resolve('none');}}
 /* v1.133: Basic Pitch second opinion, SHADOW MODE (Settings > Basic Pitch second opinion). While you play, the mic is also
    recorded (22.05 kHz mono, in memory only); when the run ends Spotify's Basic Pitch model (the same one the Lab uses)
    listens to the recording and, for every step, the detection report gets 'bp 0.81/0.77' (its onset score for each
@@ -3065,7 +3068,10 @@ function finish(){
       if(!ok)try{if(navigator.share){await navigator.share({title:'Fretline detection report',text:txt});ok=true;}}catch(e){}
       if(!ok){showMsg('Detection report','<textarea readonly style="min-height:220px">'+esc(txt)+'</textarea><p class="small">Select all and copy.</p>');}};
     box.appendChild(b);
-    const b2=document.createElement('button');b2.textContent='↗ Share as .txt file';b2.className='small';b2.style.marginLeft='6px';b2.onclick=async()=>{const ok=await shareReportFile(diagReport());b2.textContent=ok?'✓ Shared / saved':'Could not share, use Copy';};box.appendChild(b2);}}}
+    const b2=document.createElement('button');b2.textContent='↗ Share report';b2.className='small';b2.style.marginLeft='6px';b2.onclick=async()=>{const txt=diagReport();const how=await shareReportFile(txt);
+      if(how==='shared'){b2.textContent='✓ Shared';return;}if(how==='downloaded'){b2.textContent='✓ Downloaded as a .txt file';return;}
+      let ok=false;try{await navigator.clipboard.writeText(txt);ok=true;}catch(e){}
+      if(ok)b2.textContent='✓ Copied to the clipboard (file sharing is not available here). Paste it in a message';else showMsg('Detection report','<textarea readonly style="min-height:220px">'+esc(txt)+'</textarea><p class="small">Select all and copy.</p>');};box.appendChild(b2);}}}
   showMissed();
   {const ds=G.deadStats;const box=$('#rStrings');if(box){box.textContent='';if(ds&&G.mode==='play'){const fmt=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([s,n])=>SNAME[s]+' ×'+n).join(', ');
     const parts=[];if(Object.keys(ds.dead).length)parts.push('Dead strings: '+fmt(ds.dead));if(Object.keys(ds.ring).length)parts.push('Muted strings that rang: '+fmt(ds.ring));
@@ -4498,7 +4504,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.133';
+const APP_VERSION='1.134';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
