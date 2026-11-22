@@ -1684,6 +1684,7 @@ function detectFrame(now){
   if(f<=0||f>1400){det.midi=null;det.stableMidi=null;det.count=0;return;}
   const mf0=freqToMidiFloat(f);followTuning(mf0,rms,g);const mf=mf0-tuneCents(Math.round(mf0))/100;const m=Math.round(mf);
   det.freq=f;det.cents=Math.round((mf-m)*100);
+  if(G.vibC&&G.vibC.length<30000)G.vibC.push(now,mf*100); /* v1.147: pitch contour in cents, only kept for lessons with vibrato steps */
   if(m===det.midi)det.count++;else{det.midi=m;det.count=1;}
   det.stableMidi=det.count>=2?m:null;
   // a change to a new steady pitch is a pick too, even when the volume barely rises (the last note still ringing)
@@ -2501,7 +2502,7 @@ function resetRun(){
   if(!G.song)return;
   G.state=new Uint8Array(G.song.events.length);
   G.clock=-G.song.bpb;G.hits=0;G.misses=0;G.streak=0;G.best=0;G.scan=0;G.playedIdx=0;G.fxIdx=0;G.fxOn=true;G.fxSched={};G.lastClickBeat=Math.floor(G.clock)-1;
-  G.missRun=0;G.playing=false;G.listen=false;G.finished=false;G.pops=[];G.lastHitKey=null;G.lastHitAt=-1;G.cf=0;G.cfIdx=-1;G.usedOnset=performance.now();G.wrongOnset=performance.now();G.wrongAt=0;G.wp=null;G.frames=null;G.grades={perfect:0,good:0,okay:0};G.ignoreOnsetUntil=0;G.offs=[];G.diag={};G.cc=null;G.strFb=null;G.deadStats=null;
+  G.missRun=0;G.playing=false;G.listen=false;G.finished=false;G.pops=[];G.lastHitKey=null;G.lastHitAt=-1;G.cf=0;G.cfIdx=-1;G.usedOnset=performance.now();G.wrongOnset=performance.now();G.wrongAt=0;G.wp=null;G.frames=null;G.grades={perfect:0,good:0,okay:0};G.ignoreOnsetUntil=0;G.offs=[];G.diag={};G.vibPend=[];G.vibC=G.song.events.some(e=>e.notes&&e.notes.length===1&&e.notes[0].vib)?[]:null;G.cc=null;G.strFb=null;G.deadStats=null;
   $('#results').classList.remove('show');G.bandIdx=0;updateButtons();
 }
 /* v1.120: jump to a beat (drag the highway) and carry on from there; also used to resume a paused Listen */
@@ -2915,14 +2916,33 @@ function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]
   if(det.onsetAt!==d.lastOn){d.picks++;d.lastOn=det.onsetAt;}if(det.pitchOnsetAt!==d.lastPo){d.pp=(d.pp||0)+1;d.lastPo=det.pitchOnsetAt;}
   if(analyser&&!e.strum&&!e.chord&&e.notes.length){const x=targetScore(e.notes[0],G.capo||0);if(x>d.ts)d.ts=x;}}
 function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.notes.push(txt);}
-function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);if(G.song&&G.song.events[i])d.tw=now-((G.clock-G.song.events[i].t)/bps())*1000;}}
+function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);if(G.song&&G.song.events[i])d.tw=now-((G.clock-G.song.events[i].t)/bps())*1000;
+  const e=G.song&&G.song.events[i];if(how==='hit'&&G.vibC&&e&&e.notes&&e.notes.length===1&&e.notes[0].vib&&d.tw!=null){const st=d.tw+settings.latency,dur=e.d/bps()*1000;G.vibPend.push({i,a:st+(e.notes[0].bend?650:350),b:st+dur-50});}}}
+/* v1.147: vibrato is only REPORTED, never scored. Depth = peak-to-peak wobble of the pitch (cents) in the 3.5-9 Hz band over the held part of the note.
+   Tuned on IDMT-SMT-Guitar (labelled vibrato notes: 15-40 cents in the natural licks; plain notes <= 3 cents) and the owner's phone-mic steady notes (1-6 cents). */
+function vibMeasure(t0,t1){const A=G.vibC;if(!A||t1-t0<550)return null;
+  const xs=[],ys=[];for(let k=0;k<A.length;k+=2)if(A[k]>=t0&&A[k]<=t1){xs.push(A[k]);ys.push(A[k+1]);}
+  if(xs.length<(t1-t0)/16.7*0.6)return null;
+  const so=ys.slice().sort((a,b)=>a-b),med=so[so.length>>1];const kx=[],ky=[];for(let k=0;k<xs.length;k++)if(Math.abs(ys[k]-med)<=150){kx.push(xs[k]);ky.push(ys[k]);} /* the next note starting, or an octave slip, is not vibrato */
+  if(kx.length<(t1-t0)/16.7*0.55)return null;
+  const N=Math.floor((t1-t0)/20),g=new Float64Array(N);let j=0;
+  for(let n=0;n<N;n++){const t=t0+n*20;while(j<kx.length-2&&kx[j+1]<t)j++;const x0=kx[j],x1=kx[j+1],f=x1>x0?Math.max(0,Math.min(1,(t-x0)/(x1-x0))):0;g[n]=ky[j]+(ky[j+1]-ky[j])*f;}
+  let sx=0,sy=0,sxx=0,sxy=0;for(let n=0;n<N;n++){sx+=n;sy+=g[n];sxx+=n*n;sxy+=n*g[n];}const bsl=(N*sxy-sx*sy)/(N*sxx-sx*sx),b0=(sy-bsl*sx)/N;
+  const w=new Float64Array(N);let sw=0;for(let n=0;n<N;n++){w[n]=0.5-0.5*Math.cos(2*Math.PI*(n+0.5)/N);sw+=w[n];g[n]=(g[n]-b0-bsl*n)*w[n];}
+  let best=0,bf=0;for(let f=3.5;f<=9.01;f+=0.25){let re=0,im=0;for(let n=0;n<N;n++){const ph=2*Math.PI*f*n*0.02;re+=g[n]*Math.cos(ph);im-=g[n]*Math.sin(ph);}const a=2*Math.hypot(re,im)/sw;if(a>best){best=a;bf=f;}}
+  return {d:2*best,f:bf};}
+function vibTick(now,flush){const P=G.vibPend;while(P&&P.length&&(flush||now>=P[0].b+120)){const q=P.shift(),r=vibMeasure(q.a,q.b),d=G.diag&&G.diag[q.i];
+  const txt=!r?'vibrato not judged (note too short or too quiet)':r.d>=12?'vibrato '+Math.round(r.d)+' cents @'+r.f.toFixed(1)+' Hz':r.d>=9?'slight vibrato ('+Math.round(r.d)+' cents)':'no vibrato heard ('+Math.round(r.d)+' cents)';
+  if(d)d.vb={txt,ok:r?r.d>=12?2:r.d>=9?1:0:-1};
+  if(r)addPop(r.d>=12?'Vibrato':r.d>=9?'Slight vibrato':'No vibrato',r.d>=12?'#5ce1a6':'#f5c451');}}
 function diagReport(){
   const S=G.song,cp=G.capo||0;const L=['Fretline '+APP_VERSION+' report · '+(G.def&&G.def.title||'')+' · '+Math.round(S.bpm*G.speed)+' BPM · latency '+settings.latency+' ms · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay)+' · headphones '+(settings.headphones?'on':'off')+(outRoute?' · output '+outRoute+(outName?' ('+outName+')':''):'')+' · band '+(settings.backing?'on':'off')+(TUNING_ID!=='std'?' · tuning '+TUNING_ID:'')+(settings.chordMatch&&settings.chordMatch!=='strict'?' · chords '+settings.chordMatch:'')+(G.def&&G.def.recAudio?' · recording: backing '+(RECB.buf?(RECB.buf.duration).toFixed(0)+' s':'not loaded')+', real guitar '+(RECB.gbuf?'yes':G.def.recGuitar?'FAILED '+(RECB.gErr||''):'none (older song)')+', '+(G.def.recEvT?'from a sheet':'AI notes')+', offset '+(G.def.recOffset||0).toFixed(3)+' s':'')+' · '+micInfo()+' · '+(G.frames&&G.frames.n?'frames '+Math.round(1000*G.frames.n/G.frames.sum)+'/s, slow '+Math.round(100*G.frames.slow/G.frames.n)+'%, worst '+Math.round(G.frames.worst)+' ms':'frames ?')+' · sensitivity '+settings.sens+' (cutoff '+(gateMax()*1000).toFixed(1)+', room '+((det.noise||0)*1000).toFixed(1)+')'+(tuneOff?' · tuning '+(tuneOff>0?'+':'')+tuneOff+' cents':'')+' · '+G.hits+'/'+S.events.length];
   if(settings.bpShadow)L.push('Basic Pitch second opinion (shadow, does not change hits): '+(G.bpState==='done'?G.bpInfo:G.bpState==='failed'?'failed: '+G.bpErr:G.bpState==='running'?'still listening ('+Math.round(100*(G.bpProg||0))+'%), copy again in a moment':G.bpErr||G.bpState||'no run recorded yet')+(G.bpState==='done'&&G.bpStrict?' · strict count '+(G.bpStrict.hits-(G.bpStrict.h1-G.bpStrict.c1))+'/'+G.bpStrict.total+' (normal '+G.bpStrict.hits+'), '+(G.bpStrict.ok?'alignment trusted':'alignment NOT trusted: ignore doubts'):'')+(G.bpState==='done'?' · bp = its onset score for each target note (0-1; 0.5+ means it heard a new note start); bp also = a loud note it heard that was not a target':''));
   if(settings.bpShadow&&bpRec.n>=22050)L.push('Audio of this run: '+(bpRec.n/22050).toFixed(0)+' s, 22.05 kHz mono (run '+(G.runId||'?')+'); @N s on each step = seconds into that audio where the step was expected');
+  {const V=Object.values(G.diag||{}).filter(d=>d.vb);if(V.length)L.push('Vibrato (report only, does not change hits): '+V.filter(d=>d.vb.ok===2).length+' of '+V.length+' vibrato steps showed vibrato, '+V.filter(d=>d.vb.ok===1).length+' slight, '+V.filter(d=>d.vb.ok===0).length+' none, '+V.filter(d=>d.vb.ok<0).length+' not judged (a step counts at 12+ cents of 3.5-9 Hz pitch wobble)');}
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
-    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:'')+(d.bpo!=null?' · bp@'+(d.bpo>=0?'+':'')+d.bpo+'ms':'')+(d.doubt?' · BP DOUBTS THIS HIT':''):(G.bpState==='running'?' · bp pending':''))+(d.tw!=null&&bpRec.t0&&bpRec.n?' · @'+((d.tw-bpRec.t0)/1000).toFixed(2)+'s':'')+(d.notes.length?' · '+d.notes.join(','):''));});
+    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:'')+(d.bpo!=null?' · bp@'+(d.bpo>=0?'+':'')+d.bpo+'ms':'')+(d.doubt?' · BP DOUBTS THIS HIT':''):(G.bpState==='running'?' · bp pending':''))+(d.tw!=null&&bpRec.t0&&bpRec.n?' · @'+((d.tw-bpRec.t0)/1000).toFixed(2)+'s':'')+(d.notes.length?' · '+d.notes.join(','):'')+(d.vb?' · '+d.vb.txt:''));});
   return L.join('\n');}
 function techWords(n){return n.pm?' – palm mute: rest the edge of your picking hand on the strings by the bridge':n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
 // "any octave" means one octave either way: two octaves off is almost always the pitch tracker locking onto a
@@ -2994,6 +3014,7 @@ function update(dt,now){
   }
   while(G.scan<ev.length&&st[G.scan])G.scan++;
   wrongSettle(now);
+  vibTick(now);
   chordCheck(now);
   if(G.scan>=ev.length&&G.clock>S.length+0.25)finish();
 }
@@ -3123,7 +3144,7 @@ async function bpAnalyse(){
     G.bpState='done';bpStatusUI();G.bpInfo='Basic Pitch ('+be+(G.bpTried?' after '+G.bpTried:'')+', '+((performance.now()-T0)/1000).toFixed(1)+' s for '+(bpRec.n/22050).toFixed(0)+' s of audio, '+n+' steps'+(bpRec.gap>0.2?', filled '+bpRec.gap.toFixed(1)+' s of dropped audio':'')+', aligned '+Math.round(sMin*1000)+'..'+Math.round(sMax*1000)+' ms'+(G.bpFit&&G.bpFit.n>=6?', clock drift '+(G.bpFit.slope*60*1000).toFixed(0)+' ms/min from '+G.bpFit.n+' matches':'')+')';
   }catch(e){G.bpState='failed';G.bpErr=String(e&&e.message||e);bpStatusUI();}
 }
-function finish(){
+function finish(){vibTick(0,true);
   if(settings.bpShadow&&bpRec.on)bpAnalyse();
   $('#rNext').style.display='none';
   G.playing=false;G.finished=true;recStop();keepAwake(false);updateButtons();
@@ -4586,7 +4607,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.146';
+const APP_VERSION='1.147';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});

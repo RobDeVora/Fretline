@@ -48,3 +48,4 @@ no false flags. Two strings at a time is about the limit on a 2-core workspace (
 Known test-harness gotcha: `G.pops` keeps only the last 6 pop-ups, so counting pops by length misses some;
 use the detection report (`G.diag`) instead.
 | `test_bends.py` | v1.146: bend steps must really be bent. Synthetic recording from a real 'Bends and vibrato' report (step times): unbent must credit 0 bend steps, bent 8/8 | `cd tools/lab-tests; /tmp/withsrv.sh python3 ../detection-tests/test_bends.py REPORT.txt` (needs basic-pitch + `replay_run.py`) |
+| `test_vibrato.py` | v1.147: report-only vibrato line. Synthetic bends with 30 cents vibrato must read 'vibrato N cents', steady ones 'no vibrato heard' | `cd tools/lab-tests; /tmp/withsrv.sh python3 ../detection-tests/test_vibrato.py REPORT.txt` |
