@@ -2786,6 +2786,14 @@ function matchEvent(e,i,now){
   const legNew=legato&&(det.pitchOnsetAt||-1e9)>=(G._winAt!=null?G._winAt-legM:-1e9)&&det.pitchOnsetAt>G.lastHitAt;
   if(window.__legLog&&legato&&m!=null)window.__legLog.push([i,Math.round(now),m,Math.round(det.pitchOnsetAt||0),Math.round(G._winAt||0),Math.round(G.lastHitAt||0)]);
   const fresh=legNew||(pick>G.lastHitAt&&now-pick<700&&(G._winAt==null||pick>=G._winAt-30));
+  /* v1.146: a bend step counts only once the string was really bent up: the pitch tracker must hear the TOP of the bend (held 100 ms) after this
+     step's pick. Before, playing the plain fretted note passed (owner: 'I didn't actually have to bend the string'). */
+  {const bn=e.notes.length===1&&e.notes[0].bend?e.notes[0]:null;
+   if(bn){const top=bn.midi+cp+bn.bend;
+    if(G.bdI!==i||G.bdSong!==G.song){G.bdI=i;G.bdSong=G.song;G.bdSince=null;G.bdOK=false;G.bdNoted=false;}
+    if(!G.bdOK){
+      if(det.midi===top&&det.rms>=gate()&&det.onsetAt>=(G._winAt!=null?G._winAt-30:-1e9)){if(G.bdSince==null)G.bdSince=now;if(now-G.bdSince>=100)G.bdOK=true;}else G.bdSince=null;
+      if(!G.bdOK){if(!G.bdNoted&&m===bn.midi+cp&&now-det.onsetAt>250){G.bdNoted=true;diagNote(i,'not bent up to '+midiToName(top));}return false;}}}}
   // 1) the pitch tracker heard exactly this note, freshly played (not one that was already ringing)
   //    A reading is confirmed by the targeted check (the tracker can report a note that isn't there when two
   //    notes ring together). An octave reading only counts if it's confirmed more strongly: the expected note itself is clearly there, or the octave
@@ -2957,6 +2965,7 @@ function update(dt,now){
     /* v1.72: a two-note step picked inside its window gets up to 300 ms after that pick to be confirmed (the second
        note's check needs a moment; a slightly late first step after a fret change used to run out of window) */
     let waX=wa;if(!ch&&!e.strum&&e.notes.length>=2&&G.mode==='play'){const pk=Math.max(det.onsetAt,det.pitchOnsetAt||-1);if(pk>G.lastHitAt){const pc=eff-(now-pk)/1000*b;const gp=ev[i+1]?ev[i+1].t-e.t:9;if(pc>=e.t-wb&&pc<=e.t+Math.min(wa+0.12*b,gp*0.9))waX=Math.max(wa,pc-e.t+0.3*b);}} /* picks are detected up to ~110 ms late on a fret change over a ringing string */
+    if(!ch&&!e.strum&&e.notes.length===1&&e.notes[0].bend&&G.mode==='play')waX=wa+0.6*b; /* v1.146: bending up to the note takes time (players take 0.3-0.5 s to push it up): judged 0.6 s later than a plain note */
     if(G.mode==='play'&&e.t+Math.max(waX,ch?Math.min(e.d*0.6,1.5):0)<eff){fxCut(e,i);diagEnd(i,'miss',now);st[i]=2;G.misses++;G.streak=0;slowCheck();const w=G.wp&&G.wp.i===i?G.wp:null;if(w){G.wp=null;diagNote(i,w.txt);}addPop(w?w.pop:'Miss','#ff5d73');if(!(G.wrongAt>now-400))fxMiss(e,now);continue;}
     if(!ch&&!e.strum&&analyser&&det.onsetAt>G.lastHitAt&&det.onsetAt>(G.wrongOnset||0)&&now-det.onsetAt<700){
       if(G.wnPick!==det.onsetAt){G.wnPick=det.onsetAt;G.wnMax=0;}
@@ -4577,7 +4586,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.145';
+const APP_VERSION='1.146';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
