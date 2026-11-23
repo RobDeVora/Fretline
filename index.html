@@ -2917,6 +2917,12 @@ function diagFrame(e,i,now){const D=G.diag||(G.diag={});let d=D[i];if(!d){d=D[i]
   if(analyser&&!e.strum&&!e.chord&&e.notes.length){const x=targetScore(e.notes[0],G.capo||0);if(x>d.ts)d.ts=x;}}
 function diagNote(i,txt){const d=G.diag&&G.diag[i];if(d&&d.notes.length<3)d.notes.push(txt);}
 function diagEnd(i,how,now){const d=G.diag&&G.diag[i];if(d){d.how=how;d.dt=Math.round(now-d.t0);if(G.song&&G.song.events[i])d.tw=now-((G.clock-G.song.events[i].t)/bps())*1000;
+  {const e=G.song&&G.song.events[i],n0=e&&e.notes&&e.notes.length===1&&e.notes[0];
+   if(how!=='hit'&&n0&&n0.bend&&G.vibC&&d.tw!=null){ /* v1.148: how far the string actually went up, so a miss says 'bent +0.3 of +2' instead of just 'not bent up' */
+     const st=d.tw+settings.latency,A=G.vibC,xs=[];for(let k=0;k<A.length;k+=2)if(A[k]>=st+120&&A[k]<=Math.min(now,st+e.d/bps()*1000))xs.push([A[k],A[k+1]]);
+     const early=xs.filter(q=>q[0]<=st+480).map(q=>q[1]).sort((x,y)=>x-y);
+     if(early.length>=4){const base=early[early.length>>1];let mx=0;for(let k=1;k<xs.length-1;k++){const v=[xs[k-1][1],xs[k][1],xs[k+1][1]].sort((x,y)=>x-y)[1]-base;if(v>mx&&v<(n0.bend+1)*100)mx=v;}
+       d.bt='bent up '+(mx/100).toFixed(1)+' of '+n0.bend+' semitone'+(n0.bend===1?'':'s')+' needed';}}}
   const e=G.song&&G.song.events[i];if(how==='hit'&&G.vibC&&e&&e.notes&&e.notes.length===1&&e.notes[0].vib&&d.tw!=null){const st=d.tw+settings.latency,dur=e.d/bps()*1000;G.vibPend.push({i,a:st+(e.notes[0].bend?650:350),b:st+dur-50});}}}
 /* v1.147: vibrato is only REPORTED, never scored. Depth = peak-to-peak wobble of the pitch (cents) in the 3.5-9 Hz band over the held part of the note.
    Tuned on IDMT-SMT-Guitar (labelled vibrato notes: 15-40 cents in the natural licks; plain notes <= 3 cents) and the owner's phone-mic steady notes (1-6 cents). */
@@ -2942,7 +2948,7 @@ function diagReport(){
   {const V=Object.values(G.diag||{}).filter(d=>d.vb);if(V.length)L.push('Vibrato (report only, does not change hits): '+V.filter(d=>d.vb.ok===2).length+' of '+V.length+' vibrato steps showed vibrato, '+V.filter(d=>d.vb.ok===1).length+' slight, '+V.filter(d=>d.vb.ok===0).length+' none, '+V.filter(d=>d.vb.ok<0).length+' not judged (a step counts at 12+ cents of 3.5-9 Hz pitch wobble)');}
   S.events.forEach((e,i)=>{const d=G.diag&&G.diag[i];const what=e.strum?'strum '+(e.label||''):e.chord?'chord '+e.chord:e.notes.map(n=>midiToName(n.midi+cp)+' '+STRING_LABELS[n.s]+n.f).join('+');
     if(!d){L.push('#'+i+' '+what+' · not reached');return;}
-    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:'')+(d.bpo!=null?' · bp@'+(d.bpo>=0?'+':'')+d.bpo+'ms':'')+(d.doubt?' · BP DOUBTS THIS HIT':''):(G.bpState==='running'?' · bp pending':''))+(d.tw!=null&&bpRec.t0&&bpRec.n?' · @'+((d.tw-bpRec.t0)/1000).toFixed(2)+'s':'')+(d.notes.length?' · '+d.notes.join(','):'')+(d.vb?' · '+d.vb.txt:''));});
+    L.push('#'+i+' '+what+' · '+(G.state[i]===1?'HIT':'MISS')+' · heard '+(d.heard.length?d.heard.map(midiToName).join('>'):'nothing')+' · picks '+d.picks+'/'+(d.pp||0)+' · note '+d.ts.toFixed(2)+' · level '+(d.lv*1000).toFixed(1)+'/'+(d.gt*1000).toFixed(1)+(d.lp!=null?' · 2nd '+d.lp.toFixed(2):'')+(d.grade?' · '+d.grade:'')+(d.bp?' · bp '+d.bp.map(x=>x.toFixed(2)).join('/')+(d.bpx?' · bp also '+d.bpx:'')+(d.bpo!=null?' · bp@'+(d.bpo>=0?'+':'')+d.bpo+'ms':'')+(d.doubt?' · BP DOUBTS THIS HIT':''):(G.bpState==='running'?' · bp pending':''))+(d.tw!=null&&bpRec.t0&&bpRec.n?' · @'+((d.tw-bpRec.t0)/1000).toFixed(2)+'s':'')+(d.notes.length?' · '+d.notes.join(','):'')+(d.vb?' · '+d.vb.txt:'')+(d.bt?' · '+d.bt:''));});
   return L.join('\n');}
 function techWords(n){return n.pm?' – palm mute: rest the edge of your picking hand on the strings by the bridge':n.tech==='h'?' – hammer on, don\'t pick':n.tech==='p'?' – pull off, don\'t pick':n.tech==='s'?' – slide into it':n.bend?(' – bend it up '+(n.bend===1?'a half step':n.bend===2?'a whole step':n.bend/2+' steps')):n.vib?' – add vibrato':'';}
 // "any octave" means one octave either way: two octaves off is almost always the pitch tracker locking onto a
@@ -4607,7 +4613,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.147';
+const APP_VERSION='1.148';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
