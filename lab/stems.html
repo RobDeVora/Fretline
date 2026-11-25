@@ -133,6 +133,15 @@ function setSheetFile(sf){SHEETFILE=sf;$('sheetFileBox').style.display=sf?'':'no
 $('sheetPart').onchange=()=>{const p=SHEETFILE&&SHEETFILE.info.parts[+$('sheetPart').value];$('sheetAsBox').style.display=p&&!p.chords?'':'none';};
 $('sheetFileClear').onclick=()=>{setSheetFile(null);status('File removed.');};
 let SHEETFILE2=null;
+/* v1.150: the first sheet is the TAB (the notes you play), the second is the CHORDS. A chord-chart MIDI (Chordify style: no guitar track, nearly every beat is a 3-note chord)
+   added before the tab file made both sheets act as chords ("it only generated all chords"). If the first sheet looks like chords and the second like a tab, they are swapped. */
+function sheetChordy(sf){const ps=sf&&sf.info&&sf.info.parts||[];if(!ps.length)return false;if(ps.some(p=>p.chords))return true;if(ps.some(p=>p.isGuitar))return false;
+  let best=ps[0];for(const p of ps)if(p.count>best.count)best=p;const by={};for(const n of best.notes||[]){const k=Math.round(n.beat*8);by[k]=(by[k]||0)+1;}const v=Object.values(by);
+  return v.length>=8&&v.filter(x=>x>=3).length/v.length>=0.6;}
+let ORDERING=false;
+async function autoOrderSheets(){if(ORDERING||!SHEETFILE||!SHEETFILE2)return;if(!(sheetChordy(SHEETFILE)&&!sheetChordy(SHEETFILE2)))return;
+  const f1=$('sheetFile').files[0],f2=$('sheet2File').files[0];if(!f1||!f2)return;ORDERING=true;
+  try{await putFile($('sheetFile'),f2);await putFile($('sheet2File'),f1);status('The tab file came second, so the two sheets were swapped: tab first, chords second.');log('sheets: swapped (first looked like chords, second like a tab)');}finally{ORDERING=false;}}
 async function readSheetFileInfo(f,core,toText){const buf=new Uint8Array(await f.arrayBuffer());let ext=/\.[a-z0-9]{1,8}$/i.test(f.name)?f.name.split('.').pop().toLowerCase():'';ext=core.sniffExt(buf,ext);
   if(ext==='mid'||ext==='midi'||ext==='kar')return {info:core.parseMidi(buf),fmt:'MIDI'};
   if(ext==='mxl')return {info:core.parseMusicXML(await core.readMxl(buf)),fmt:'MusicXML'};
@@ -151,6 +160,7 @@ $('sheet2File').onchange=async()=>{const f=$('sheet2File').files[0];if(!f)return
   try{status('Reading '+f.name+'…');const core=await loadCore();const r=await readSheetFileInfo(f,core,t=>{setSheetFile2(null);$('sheet2').value=t;});
     if(r){if(!r.info.parts||!r.info.parts.length)throw new Error('no playable tracks in this file');setSheetFile2({...r,name:f.name});}
     $('mk').checked=true;status(r?'Loaded '+f.name+' as the second sheet.':'Second sheet loaded ('+f.name+').');
+    await autoOrderSheets();
   }catch(e){setSheetFile2(null);status('Could not read that file: '+(e.message||e));}};
 $('sheetFile').onchange=async()=>{const f=$('sheetFile').files[0];if(!f)return;if(f.size>20e6){status('That file is too big for a tab or chord sheet.');return;}
   try{status('Reading '+f.name+'…');const core=await loadCore();const buf=new Uint8Array(await f.arrayBuffer());let ext=/\.[a-z0-9]{1,8}$/i.test(f.name)?f.name.split('.').pop().toLowerCase():'';ext=core.sniffExt(buf,ext);
@@ -163,6 +173,7 @@ $('sheetFile').onchange=async()=>{const f=$('sheetFile').files[0];if(!f)return;i
     else{setSheetFile(null);$('sheet').value=new TextDecoder().decode(buf);}
     if(info){if(!info.parts||!info.parts.length)throw new Error('no playable tracks in this file');setSheetFile({info,fmt,name:f.name});if(!$('ttl').value&&info.title)$('ttl').value=info.title;}
     $('mk').checked=true;status(info?'Loaded '+f.name+': pick the track to use.':'Sheet loaded ('+f.name+')'+(ext==='pdf'?': check the text pulled from the PDF.':'.'));
+    await autoOrderSheets();
   }catch(e){setSheetFile(null);status('Could not read that file: '+(e.message||e));}};
 $('tHalf').onclick=()=>retime(0.5);$('tDouble').onclick=()=>retime(2);
 $('tSet').onclick=()=>{const v=+$('tBpm').value;if(!(v>=30&&v<=300)){status('Enter a tempo between 30 and 300 BPM.');return;}retime(1,v);};
