@@ -751,6 +751,7 @@ async function saveRecSong(extra,gL,gR,rL,rR,notes){
   const gkey=location.origin+'/__fretline/rec/'+id+'-gtr.wav';await c.put(gkey,new Response(wav(gL,gR),{headers:{'content-type':'audio/wav'}}));
   const title=($('ttl').value||'Recording').trim()+(+$('secs').value?' (first '+$('secs').value+' s)':'');
   const def={id,cat:'mine',kind:'rec',title,bpb:4,recAudio:key,recGuitar:gkey,credit:'Made from a recording in Fretline Lab',...extra};
+  if(window.__spLink){def.link=window.__spLink;try{localStorage.removeItem('fretline:labSpotify');}catch(e){}} /* v1.149: kept so My Songs can show a Listen button */
   {const lt=$('lyr').value.trim();if(lt){let done=false;
     try{const mL=new Float32Array(gL.length),mR=new Float32Array(gL.length);for(let i=0;i<mL.length;i++){mL[i]=(gL[i]||0)+(rL[i]||0);mR[i]=(gR[i]||0)+(rR[i]||0);}
       const r=await ctcLyrics(lt,mL,mR,def.bpm,def.recOffset,VOC16);if(r){def.recLyr=r.sec;def.lyrics=r.beats;done=true;log('lyrics: '+r.n+' lines timed word by word with the speech model');
@@ -904,6 +905,12 @@ Object.keys(KEEP_SLOTS).forEach(slot=>$(KEEP_SLOTS[slot]).addEventListener('chan
 $('sheetFileClear').addEventListener('click',()=>keepFile('sheet1',null));if($('sheet2FileClear'))$('sheet2FileClear').addEventListener('click',()=>keepFile('sheet2',null));
 (async function(){
   await restoreKept();
+  /* a Spotify link handed over from the main screen: fill in the name, keep the link, ask for the person's own audio (Spotify's audio can't be used) */
+  try{const sp=JSON.parse(localStorage.getItem('fretline:labSpotify')||'null'); /* kept (not removed) so a page reload keeps it; it expires after 10 min or when the song is saved */
+    if(sp&&sp.url&&Date.now()-sp.at<600000){window.__spLink=sp.url;const nm=[sp.title,sp.artist].filter(Boolean).join(' – ');if(nm&&!$('ttl').value)$('ttl').value=nm;
+      const b=document.createElement('div');b.className='small';b.style.cssText='margin:6px 0;padding:8px;border-radius:10px;border:1px solid var(--line)';
+      b.innerHTML='🎧 From Spotify'+(nm?': <b></b>':'')+'. Spotify does not let apps use its audio, so pick <b>your own copy</b> of the song (a file you own, or a recording) in the box above. The link is kept so the song gets a 🎧 Listen button. <a target="_blank" rel="noopener" style="color:var(--accent,#7cc4ff)">Open in Spotify</a>';
+      if(nm)b.querySelector('b').textContent=nm;b.querySelector('a').href=sp.url;$('ttl').insertAdjacentElement('beforebegin',b);}}catch(e){}
   /* files the main screen set aside before opening the Lab */
   try{const list=JSON.parse(localStorage.getItem('fretline:labIncoming')||'[]');localStorage.removeItem('fretline:labIncoming');
     if(list.length){const c=await caches.open('fretline-incoming');for(const x of list){const r=await c.match(x.key);if(r){const f=new File([await r.arrayBuffer()],x.name);await c.delete(x.key);try{await labReceive(f);}catch(e){status('Could not open '+x.name+': '+(e.message||e));}}}}}catch(e){}

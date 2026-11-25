@@ -44,7 +44,7 @@ header h1 span{color:var(--accent)}
 .item .s{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .item .best{font-size:12px;color:var(--accent);text-align:right;flex:none}
 .item .del{padding:6px 9px;font-size:13px;background:transparent}
-.item .pin{padding:6px 8px;font-size:15px;background:transparent;border:0;opacity:.45}.item .pin.on{opacity:1;color:#ffd43b}
+.item .pin,.item .lstn{padding:6px 8px;font-size:15px;background:transparent;border:0;opacity:.45}.item .pin.on{opacity:1;color:#ffd43b}
 .myTools{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;align-items:center}.myTools button{padding:6px 12px;border-radius:16px;font-size:13px}.myTools button.on{background:var(--accent);color:#0b0d12}.myTools select,.myTools input{padding:6px 8px;font-size:14px}
 .item .pk{width:22px;height:22px;flex:none}
 details.moreMusic{margin:0 0 10px;border:1px solid var(--line);border-radius:14px;padding:4px 12px;background:var(--panel)}details.moreMusic summary{cursor:pointer;padding:8px 0;font-weight:600}
@@ -2352,7 +2352,7 @@ function renderList(){
       if(!list.length)h+=`<div class="note-txt">No songs match. Try another filter or search.</div>`;
       for(const d of list){const base=d.kind==='rec'?'From a recording':d.kind==='tab'?'Tab':d.kind==='gen'?'Generated':d.kind==='file'?(d.fmt||'File'):'Chords';
         const sub=base+(d.kind==='rec'?' · ♩ '+Math.round(d.bpm):'')+(pl[d.id]?' · played '+agoText(pl[d.id]):'');
-        const extra=(myView.sel?`<input type="checkbox" class="pk" data-pk="${esc(d.id)}"${myView.picked.has(d.id)?' checked':''}>`:`<button class="pin${pins.includes(d.id)?' on':''}" data-pin="${esc(d.id)}" aria-label="Pin to top">${pins.includes(d.id)?'★':'☆'}</button><button class="del" data-del="${esc(d.id)}">✕</button>`);
+        const extra=(myView.sel?`<input type="checkbox" class="pk" data-pk="${esc(d.id)}"${myView.picked.has(d.id)?' checked':''}>`:`<button class="pin${pins.includes(d.id)?' on':''}" data-pin="${esc(d.id)}" aria-label="Pin to top">${pins.includes(d.id)?'★':'☆'}</button><button class="del" data-del="${esc(d.id)}">✕</button>`)+(d.link&&!myView.sel?`<button class="lstn" data-spot="${esc(d.id)}" aria-label="Listen on Spotify" title="Listen on Spotify">🎧</button>`:'');
         h+=itemHTML({...d,cat:'mine',sub},d.kind==='rec'?'🎙':d.kind==='tab'?'T':d.kind==='gen'?'G':d.kind==='file'?'F':'♪',extra);}
     }
   }else{
@@ -2361,10 +2361,11 @@ function renderList(){
   }
   L.innerHTML=h;
   L.querySelectorAll('.item[data-id]').forEach(el=>el.onclick=ev=>{
-    if(ev.target.closest('.del')||ev.target.closest('.tmp')||ev.target.closest('.pin'))return;
+    if(ev.target.closest('.del')||ev.target.closest('.tmp')||ev.target.closest('.pin')||ev.target.closest('.lstn'))return;
     if(myView.sel&&curCat==='mine'){const c=el.querySelector('.pk');if(c){c.checked=!c.checked;c.onchange();}return;}
     const id=el.dataset.id;const def=LIB.find(x=>x.id===id)||mySongs.find(x=>x.id===id);if(def){if(def.parts&&def.parts.length>1&&def.kind!=='rec')pickPart(def,()=>openSong(def));else openSong(def);}
   });
+  L.querySelectorAll('[data-spot]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();const d=mySongs.find(x=>x.id===b.dataset.spot);if(d&&d.link)window.open(d.link,'_blank');});
   L.querySelectorAll('.item[data-gen]').forEach(el=>el.onclick=()=>{quickGen(el.dataset.gen);});
   L.querySelectorAll('.item[data-lesson]').forEach(el=>el.onclick=()=>openLesson(findLesson(el.dataset.lesson)));
   L.querySelectorAll('#courseSeg button').forEach(b=>b.onclick=()=>{courseTier=b.dataset.c;store.set('courseTier',courseTier);renderList();});
@@ -4613,7 +4614,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.148';
+const APP_VERSION='1.149';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
@@ -4633,7 +4634,18 @@ async function receiveShare(){
     await applyShared(d,file);
   }catch(err){}
 }
+/* v1.149: a Spotify link (shared from the Spotify app or pasted) hands off to the Lab with the song name filled in. Spotify's audio is never used:
+   the Lab asks for the person's own copy of the song. Title comes from Spotify's open oEmbed endpoint, or from the share text. */
+function spotifyLinkOf(t){const m=/https?:\/\/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(track|album|playlist|episode)\/[A-Za-z0-9]+[^\s]*/i.exec(t||'');return m?m[0].replace(/[?#].*$/,''):null;}
+async function spotifyHandoff(link,sharedTitle){
+  let title='',artist='';
+  const m=/^(.*?)\s+[-–]\s+(?:song|single|album|EP)(?: and lyrics)? by (.*?)\s*\|\s*Spotify/i.exec(sharedTitle||'');if(m){title=m[1].trim();artist=m[2].trim();}
+  if(!title){try{const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),5000);const r=await fetch('https://open.spotify.com/oembed?url='+encodeURIComponent(link),{signal:ctl.signal});clearTimeout(to);if(r.ok){const j=await r.json();title=(j.title||'').trim();}}catch(e){}}
+  try{localStorage.setItem('fretline:labSpotify',JSON.stringify({url:link,title,artist,at:Date.now()}));}catch(e){}
+  location.href='lab/stems.html';
+}
 async function applyShared(d,file){
+  {const sl=!file&&spotifyLinkOf((d.url||'')+' '+(d.text||'')+' '+(d.title||''));if(sl){await spotifyHandoff(sl,d.title||d.text);return;}}
   openImport();
   const isUrl=t=>/^\s*https?:\/\/\S+\s*$/.test(t||'');
   if(d.title&&!isUrl(d.title))$('#impTitle').value=d.title.replace(/\s*[|\-–—]\s*(Ultimate[- ]Guitar|Songsterr|Chordify).*$/i,'').trim();
@@ -4648,6 +4660,7 @@ async function applyShared(d,file){
 receiveShare();
 /* ---- download a song file from a link (works fully in the Android app; in a browser only if the site allows it) ---- */
 $('#impUrlGo').onclick=async()=>{
+  {const sl=spotifyLinkOf($('#impUrl').value);if(sl){await spotifyHandoff(sl,'');return;}}
   const url=$('#impUrl').value.trim();const note=$('#impUrlNote');if(!/^https?:\/\//i.test(url)){note.textContent='Paste a full link starting with https://';return;}
   note.textContent='Downloading…';
   try{const r=await fetch(url);if(!r.ok)throw new Error('HTTP '+r.status);const buf=await r.arrayBuffer();
