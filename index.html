@@ -2869,8 +2869,10 @@ function matchEvent(e,i,now){
      (owner's Pull-offs run: 9 steps credited 'okay -180 ms, picks 0/0, heard nothing' at the moment the window opened, level ~1 of 2, Basic Pitch heard nothing) */
   /* v1.145: a note that jumped 8x in strength right after a fresh pick counts even when its share of the sound is only 0.45 (a louder open string
      still ringing from the step before takes the rest: owner's D major arpeggios, B3 picked over a ringing open D3, Basic Pitch heard it clearly) */
+  /* v1.151: a clean note (score 0.85+) that rose 1.8x right after a fresh pick in this window also counts as risen (a string already ringing sympathetically ate most of the 2.5x) */
+  const rose2=!legato&&pickedHere&&now-pick<=150&&ti.score>=0.85&&beforeOK.length>=3&&ti.T>=1.8*Math.min(...beforeOK)+1e-9;
   const bigRise=!legato&&now-pick<=150&&beforeOK.length>=3&&ti.score>=0.45&&ti.T>=8&&ti.T>=8*Math.min(...beforeOK)+1e-9;
-  if(((ti.score>=0.63&&rose)||bigRise)&&pickedHere&&(!tn||e.notes.length<2||partnerOk(e,tn,cp))){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){if(window.__hitLog)window.__hitLog.push({i,p:2,now:Math.round(now),m:mh,sc:+ti.score.toFixed(2),T:+ti.T.toFixed(4),bOK:beforeOK.length?+Math.min(...beforeOK).toFixed(4):null,b:before.length?+Math.min(...before).toFixed(4):null,repick,pick:Math.round(pick),win:Math.round(G._winAt||0)});G.tHist=[];G.tHistOK=[];return true;}return false;}
+  if(((ti.score>=0.63&&(rose||rose2))||bigRise)&&pickedHere&&(!tn||e.notes.length<2||partnerOk(e,tn,cp))){if(!G.tcf)G.tRiseAt=hist.length>=2?hist[hist.length-2].at:now;G.tcf++;if(G.tcf>=2){if(window.__hitLog)window.__hitLog.push({i,p:2,now:Math.round(now),m:mh,sc:+ti.score.toFixed(2),T:+ti.T.toFixed(4),bOK:beforeOK.length?+Math.min(...beforeOK).toFixed(4):null,b:before.length?+Math.min(...before).toFixed(4):null,repick,pick:Math.round(pick),win:Math.round(G._winAt||0)});G.tHist=[];G.tHistOK=[];return true;}return false;}
   G.tcf=0;G.tRiseAt=null;return false;
 }
 // the right pitch (any octave if allowed); a bent note counts anywhere from the fretted pitch up to its target
@@ -4614,7 +4616,7 @@ function applyRoute(r,quiet){if(!r||!r.route)return;const changed=outRoute&&r.ro
   if(changed&&!quiet)showHint((outRoute==='speaker'?'🔈':'🎧')+' Sound now on '+ROUTE_NAMES[outRoute]+(outName?' ('+outName+')':'')+' · sound delay '+(settings.soundDelay<0?'auto':settings.soundDelay+' ms'),4500);}
 (async()=>{try{const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NativeMic;if(!IS_APP||!P||!P.outputRoute)return;
   applyRoute(await P.outputRoute(),true);await P.addListener('route',r=>applyRoute(r));}catch(e){}})();
-const APP_VERSION='1.150';
+const APP_VERSION='1.151';
 if('serviceWorker' in navigator&&window.isSecureContext&&location.protocol!=='file:'){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('#btnInstall').style.display='';});
