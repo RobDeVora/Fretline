@@ -41,6 +41,15 @@ v1.51–v1.68 log). **Start with "Where things stand" and "Picking up the conver
 6. The owner updates with **Settings › App › Check for updates** (compares the live `APP_VERSION`). A new APK has
    to be installed by hand. Tell them clearly when a change needs the APK.
 
+## 27 Nov: octave-below check on fingerpicking run 1237 (NO app change)
+
+Question: are the 5 false misses (#5 A3, #13 G3, #14 B3, #37 A3, #46 B3) killed by octave-below energy (the `block` rule, >3.3x)?
+Check: `tools/detection-tests/octave_check.py` (FFT level at target and target-12, before vs after the pick).
+- Target / octave-below level: false misses 13.8x to 168x (median hit 54x). The `block` rule needs under 0.3x, so it is NOT what kills them.
+  The unplayed steps (#8, #9, #40, #58, #60) sit at 0.3x to 1.0x, so a "real octave-below" signal does separate those, and the rule is doing its job.
+- Target energy rise after the pick: false misses 0.6x to 2.7x, confirmed hits median 0.9x (10th to 90th: 0.3x to 2.0x). It does not separate played from unplayed (unplayed #9 reads 4.6x), so no "new energy" test would help.
+- Verdict: separate note-name/octave judging would not rescue these steps. The cause is elsewhere (previous note still ringing in the heard list, pick timing). Not worth a change. Replay bench is still unfaithful on this run, so no tuning against it.
+
 ## Where things stand (18 Nov 2026, evening)
 
 **Versions:** web **v1.106** (sw cache `fretline-v94`). The APK was last rebuilt for v1.80, **v1.94 adds `SongFilesPlugin` and v1.95 `KeepAlivePlugin` + `KeepAliveService`, so it needs the NEW APK** (Capacitor plugins:
