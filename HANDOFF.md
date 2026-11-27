@@ -50,6 +50,14 @@ Check: `tools/detection-tests/octave_check.py` (FFT level at target and target-1
 - Target energy rise after the pick: false misses 0.6x to 2.7x, confirmed hits median 0.9x (10th to 90th: 0.3x to 2.0x). It does not separate played from unplayed (unplayed #9 reads 4.6x), so no "new energy" test would help.
 - Verdict: separate note-name/octave judging would not rescue these steps. The cause is elsewhere (previous note still ringing in the heard list, pick timing). Not worth a change. Replay bench is still unfaithful on this run, so no tuning against it.
 
+## 27 Nov: replay bench now faithful (tools only, no app change)
+
+Two causes of the 37/64 disagreement on run 1237, both in `tools/detection-tests/replay_run.py`:
+1. **Wrong lesson.** Course lessons (not generated ones) need `LESSON=<id>` (here `LESSON=b-fp-arp2`); without it the script rebuilt a 160-step generated lesson.
+2. **Start-time shift.** The app's own recording starts at a different moment in the replay (0.80 s here), so the step clock and the injected audio sat 0.8 s apart. The script now compares where step 0 lands (`@` in the replay report) with the phone's report, and reruns once with `LEAD=<difference>` (skips that much of the file). Set `LEAD=0` to switch it off.
+Result on 1237: agreement **56/64** (was 35). Replay hits 55 vs real 53; the 4 real false misses #5, #14, #37, #46 are hits in the replay, so a replay that is a bit looser than the phone (phone mic is 'voice recognition' processed, the replay's input is clean file audio, plus 1.148 vs now). Use it for before/after comparisons of a change, not for absolute counts.
+Run: `LESSON=b-fp-arp2 /tmp/withsrv.sh python3 tools/detection-tests/replay_run.py AUDIO.wav REPORT.txt /tmp/rp`
+
 ## Where things stand (18 Nov 2026, evening)
 
 **Versions:** web **v1.106** (sw cache `fretline-v94`). The APK was last rebuilt for v1.80, **v1.94 adds `SongFilesPlugin` and v1.95 `KeepAlivePlugin` + `KeepAliveService`, so it needs the NEW APK** (Capacitor plugins:

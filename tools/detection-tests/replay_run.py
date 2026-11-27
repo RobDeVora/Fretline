@@ -36,7 +36,8 @@ print('drift %.0f ms/min, offset %.0f ms, %d matches'%(s*60000,ic*1000,len(pts))
 d,sr=sf.read(wav,dtype='float32');T=len(d)/sr;n=int(T*sr);tw=np.arange(n)/sr
 SW=float(__import__('os').environ.get('WARP','0'))  # 1 = undo the fitted drift, 0 = play the file as recorded
 PAD=float(__import__('os').environ.get('PAD','0.093'))  # the phone's mic delay is already inside the recording; the injected stream has none, so delay the audio by what the app subtracts (setting latency) plus the start lag
-warped=np.interp((tw-PAD)*(1+s*SW)+ic,np.arange(len(d))/sr,d,left=0,right=0).astype('float32')
+LEAD=float(__import__('os').environ.get('LEAD','0'))  # seconds of the file to skip: the app's own recording starts at a different moment in the replay than on the phone, so the step clock and the audio drift apart by a fixed amount (found automatically below)
+warped=np.interp((tw-PAD)*(1+s*SW)+ic+LEAD,np.arange(len(d))/sr,d,left=0,right=0).astype('float32')
 sf.write('/tmp/replay_warped.wav',warped,sr)
 b64=base64.b64encode(open('/tmp/replay_warped.wav','rb').read()).decode()
 title=re.search(r'report · (.*?) · \d+ BPM',head).group(1);bpm=int(re.search(r'· (\d+) BPM',head).group(1))
@@ -80,6 +81,10 @@ with sync_playwright() as p:
     import collections;LL=pg.evaluate('window.__legLog');json.dump(LL,open(outp+'_leg.json','w'));json.dump(pg.evaluate('window.__hitLog'),open(outp+'_hits.json','w'))
     if tr:json.dump(pg.evaluate('window.__trace.log'),open(outp+'_trace.json','w'))
     rp=pg.evaluate("diagReport()");open(outp+'.txt','w').write(rp);print('errors',errs[:3]);br.close()
+_a=re.search(r'@([\d.]+)s',[l for l in rp.split('\n') if l.startswith('#%d '%S[0][0])][0])
+if _a and not os.environ.get('LEAD') and abs(S[0][3]-float(_a.group(1)))>0.05:  # first pass: measure the shift, then rerun once with it
+    _d=S[0][3]-float(_a.group(1));print('replay step 0 sits at %.2f s, the phone had %.2f s: rerunning with LEAD=%.3f'%(float(_a.group(1)),S[0][3],_d),flush=True)
+    os.execve(sys.executable,[sys.executable]+sys.argv,dict(os.environ,LEAD='%.4f'%_d))
 mine={int(re.match(r'#(\d+)',l).group(1)):('HIT' in l.split('·')[1]) for l in rp.split('\n') if re.match(r'#\d+ ',l) and ('HIT' in l.split('·')[1] or 'MISS' in l.split('·')[1])}
 ids=sorted(set(real)&set(mine));agree=sum(real[i]==mine[i] for i in ids)
 print('steps',len(ids),'agree',agree,'real hits',sum(real[i] for i in ids),'replay hits',sum(mine[i] for i in ids))
